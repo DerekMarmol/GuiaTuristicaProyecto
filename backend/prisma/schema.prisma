@@ -1,0 +1,59 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Viaje {
+  id          String   @id @default(uuid())
+  destino     String
+  tipoViaje   String   // "solo" | "pareja" | "familia" | "amigos"
+  lat         Float
+  lng         Float
+  presupuesto Float
+  transporte  String   // "A pie" | "Transporte Publico" | "Automovil" | "Moto" | "Transporte Aereo"
+  intereses   String[]
+  fechaInicio DateTime
+  fechaFin    DateTime
+  hospedaje   Boolean
+  nombreHotel String?
+
+  itinerarios Itinerario[]
+}
+
+model Itinerario {
+  id        String   @id @default(uuid())
+  viajeId   String
+  numeroDia Int
+  fecha     DateTime
+
+  viaje     Viaje    @relation(fields: [viajeId], references: [id])
+  paradas   Parada[]
+}
+
+model Parada {
+  id                    String   @id @default(uuid())
+  itinerarioId          String
+  nombre                String
+  lat                   Float
+  lng                   Float
+  horaApertura          String
+  horaCierre            String
+  tiempoEstanciaMinutos Int
+
+  itinerario            Itinerario   @relation(fields: [itinerarioId], references: [id])
+  restriccion           Restriccion?
+}
+
+model Restriccion {
+  id                String @id @default(uuid())
+  paradaId          String @unique
+  tipoEntorno       String // "Bajo Techo" | "Al aire libre"
+  sensibilidadClima String // "baja" | "media" | "alta"
+
+  parada            Parada @relation(fields: [paradaId], references: [id])
+}
