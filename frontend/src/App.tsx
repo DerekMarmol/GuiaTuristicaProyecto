@@ -1,3 +1,5 @@
+import OfflineBanner from "./components/OfflineBanner";
+
 export default function App() {
   return (
     <>
@@ -5,6 +7,7 @@ export default function App() {
         <div className="sol" />
         <div className="rejilla" />
       </div>
+      <OfflineBanner />
       <header className="app-header">
         <span className="logo">GUÍA TURÍSTICA</span>
       </header>
