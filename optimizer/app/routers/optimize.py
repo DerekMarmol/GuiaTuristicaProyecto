@@ -10,9 +10,9 @@ class Parada(BaseModel):
     id: str
     lat: float
     lng: float
-    horaAperturaMin: int
-    horaCierreMin: int
-    tiempoEstanciaMinutos: int
+    hora_apertura: str
+    hora_cierre: str
+    tiempo_estancia_minutos: int
 
 
 class OptimizeRequest(BaseModel):
@@ -20,20 +20,36 @@ class OptimizeRequest(BaseModel):
 
 
 class OptimizeResponse(BaseModel):
-    orden: list[str]
+    orden_optimo: list[str]
+    distancia_total_km: float
+
+
+def hora_a_minutos(hora: str) -> int:
+    horas, minutos = hora.split(":")
+    return int(horas) * 60 + int(minutos)
+
+
+def distancia_km(lat1, lng1, lat2, lng2) -> float:
+    radio_tierra_km = 6371
+    lat1_rad, lng1_rad = math.radians(lat1), math.radians(lng1)
+    lat2_rad, lng2_rad = math.radians(lat2), math.radians(lng2)
+    dlat = lat2_rad - lat1_rad
+    dlng = lng2_rad - lng1_rad
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlng / 2) ** 2
+    c = 2 * math.asin(math.sqrt(a))
+    return radio_tierra_km * c
 
 
 def calcular_matriz_tiempos(paradas: list[Parada]) -> list[list[int]]:
     n = len(paradas)
+    velocidad_promedio_kmh = 40
     matriz = [[0] * n for _ in range(n)]
     for i in range(n):
         for j in range(n):
             if i != j:
-                dx = paradas[i].lat - paradas[j].lat
-                dy = paradas[i].lng - paradas[j].lng
-                distancia = math.sqrt(dx ** 2 + dy ** 2)
-                tiempo_viaje = int(distancia * 1000)
-                matriz[i][j] = tiempo_viaje + paradas[i].tiempoEstanciaMinutos
+                km = distancia_km(paradas[i].lat, paradas[i].lng, paradas[j].lat, paradas[j].lng)
+                minutos_viaje = int((km / velocidad_promedio_kmh) * 60)
+                matriz[i][j] = minutos_viaje + paradas[i].tiempo_estancia_minutos
     return matriz
 
 
@@ -65,7 +81,8 @@ def optimize(request: OptimizeRequest):
     for i, parada in enumerate(paradas):
         index = manager.NodeToIndex(i)
         time_dimension.CumulVar(index).SetRange(
-            parada.horaAperturaMin, parada.horaCierreMin
+            hora_a_minutos(parada.hora_apertura),
+            hora_a_minutos(parada.hora_cierre),
         )
 
     search_parameters = pywrapcp.DefaultRoutingSearchParameters()
@@ -82,4 +99,16 @@ def optimize(request: OptimizeRequest):
         orden.append(paradas[node].id)
         index = solution.Value(routing.NextVar(index))
 
-    return OptimizeResponse(orden=orden)
+    distancia_total = 0.0
+    for k in range(len(orden) - 1):
+        parada_actual = next(p for p in paradas if p.id == orden[k])
+        parada_siguiente = next(p for p in paradas if p.id == orden[k + 1])
+        distancia_total += distancia_km(
+            parada_actual.lat, parada_actual.lng,
+            parada_siguiente.lat, parada_siguiente.lng,
+        )
+
+    return OptimizeResponse(
+        orden_optimo=orden,
+        distancia_total_km=round(distancia_total, 2),
+    )
