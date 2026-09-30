@@ -1,6 +1,7 @@
 import { useViaje } from "./context/ViajeContext";
 import OfflineBanner from "./components/OfflineBanner";
 import Paso1Destino from "./pages/Paso1Destino";
+import Paso2Hospedaje from "./pages/Paso2Hospedaje";
 import PasoPendiente from "./pages/PasoPendiente";
 
 export default function App() {
@@ -16,7 +17,9 @@ export default function App() {
         <span className="logo">GUÍA TURÍSTICA</span>
       </header>
       <main className="contenedor">
-        {paso === 1 ? <Paso1Destino /> : <PasoPendiente />}
+        {paso === 1 && <Paso1Destino />}
+        {paso === 2 && <Paso2Hospedaje />}
+        {paso >= 3 && <PasoPendiente />}
       </main>
     </>
   );
