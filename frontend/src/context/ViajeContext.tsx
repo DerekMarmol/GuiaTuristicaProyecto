@@ -1,7 +1,10 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import type { Viaje } from "../../../shared/types";
 
-export type ViajeBorrador = Partial<Viaje>;
+export type ViajeBorrador = Partial<Viaje> & {
+  presupuestoDiario?: number;
+  modulos?: string[];
+};
 
 interface ViajeContextValue {
   viaje: ViajeBorrador;
