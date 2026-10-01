@@ -3,11 +3,12 @@ import { useViaje } from "../context/ViajeContext";
 import Stepper from "../components/Stepper";
 import "./pasos.css";
 
-type Opcion = "tengo" | "necesito";
+type Opcion = "tengo" | "necesito" | "no";
 
 export default function Paso2Hospedaje() {
   const { viaje, actualizarViaje, irAPaso } = useViaje();
-  const inicial: Opcion | null = viaje.hospedaje === true ? "tengo" : viaje.hospedaje === false ? "necesito" : null;
+  const inicial: Opcion | null =
+    viaje.hospedaje === true ? "tengo" : viaje.hospedaje === false ? (viaje.sinHotel ? "no" : "necesito") : null;
   const [opcion, setOpcion] = useState<Opcion | null>(inicial);
   const [hotel, setHotel] = useState(viaje.nombreHotel ?? "");
   const [errorOpcion, setErrorOpcion] = useState("");
@@ -27,9 +28,11 @@ export default function Paso2Hospedaje() {
         setErrorHotel("Escribe el nombre de tu hotel.");
         return;
       }
-      actualizarViaje({ hospedaje: true, nombreHotel: hotel.trim() });
+      actualizarViaje({ hospedaje: true, nombreHotel: hotel.trim(), sinHotel: false });
+    } else if (opcion === "necesito") {
+      actualizarViaje({ hospedaje: false, nombreHotel: undefined, sinHotel: false });
     } else {
-      actualizarViaje({ hospedaje: false, nombreHotel: undefined });
+      actualizarViaje({ hospedaje: false, nombreHotel: undefined, sinHotel: true });
     }
     irAPaso(3);
   }
@@ -61,6 +64,17 @@ export default function Paso2Hospedaje() {
           />
           Necesito recomendaciones de hospedaje
           <small>Te sugeriremos hoteles cerca de tu itinerario y dentro de tu presupuesto.</small>
+        </label>
+        <label className="opcion">
+          <input
+            type="radio"
+            name="hospedaje"
+            value="no"
+            checked={opcion === "no"}
+            onChange={() => { setOpcion("no"); setErrorOpcion(""); setErrorHotel(""); }}
+          />
+          No necesito hotel
+          <small>Por ejemplo, si te quedas con familiares o amigos, o si es un viaje de un solo día.</small>
         </label>
       </div>
       {errorOpcion && <p className="error" role="alert">{errorOpcion}</p>}
