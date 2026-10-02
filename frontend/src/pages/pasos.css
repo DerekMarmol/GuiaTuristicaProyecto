@@ -80,3 +80,19 @@
 .nota { margin: .8rem 0 0; font-size: .88rem; color: var(--suave); }
 .enlace { display: block; margin: 1.1rem auto 0; padding: 0; border: 0; background: none; color: var(--agua-osc); font: 700 .9rem/1 var(--font-ui); letter-spacing: .1em; text-transform: uppercase; text-decoration: underline; cursor: pointer; }
 .aviso-error { margin: 1rem 0 0; padding: .8rem .9rem; border: 1.5px solid var(--error); border-radius: 12px; background: #fde8e2; color: var(--error); font-weight: 600; }
+
+/* Recomendaciones de hoteles y restaurantes */
+.recomendaciones { margin-top: 1.8rem; padding-top: 1.2rem; border-top: 2px dashed var(--linea-fuerte); }
+.recomendaciones h3 { margin: 0; font: 700 1.3rem/1.1 var(--font-ui); text-transform: uppercase; letter-spacing: .06em; }
+.recomendaciones .dias { margin-top: 1rem; }
+.lugares { list-style: none; margin: .8rem 0 0; padding: 0; display: grid; gap: .7rem; }
+.lugar { padding: .9rem; border: 1px solid var(--linea); border-left: 6px solid var(--agua); border-radius: 14px; background: #fff; }
+.lugar-cab { display: flex; justify-content: space-between; align-items: baseline; gap: .8rem; }
+.lugar h4 { margin: 0; font: 700 1.1rem/1.25 var(--font-ui); letter-spacing: .02em; }
+.precio { flex: none; font: 700 1.1rem/1 var(--font-ui); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.precio small { font: 500 .85rem var(--font-body); color: var(--suave); }
+.lugar p { margin: .3rem 0 0; font-size: .85rem; color: var(--suave); }
+.lugar-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; margin: .6rem 0 0; padding: 0; list-style: none; font: 600 .85rem/1 var(--font-ui); letter-spacing: .04em; text-transform: uppercase; }
+.lugar-meta .estrella { color: var(--coral-osc); }
+.lugar-meta .etiqueta-presupuesto { padding: .25rem .6rem; border: 1px solid var(--coral-osc); border-radius: 99px; background: #fbd5c8; }
+.aviso-vacio { margin: .8rem 0 0; padding: .8rem .9rem; border: 1px dashed var(--linea-fuerte); border-radius: 12px; background: var(--arena); }

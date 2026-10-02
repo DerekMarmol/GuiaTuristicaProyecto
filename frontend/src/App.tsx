@@ -1,7 +1,7 @@
 import { useViaje } from "./context/ViajeContext";
 import FondoMapa from "./components/FondoMapa";
 import OfflineBanner from "./components/OfflineBanner";
-import { Mapa } from "./components/Mapa";
+import { MapaSeguro } from "./components/MapaSeguro";
 import Paso1Destino from "./pages/Paso1Destino";
 import Paso2Hospedaje from "./pages/Paso2Hospedaje";
 import Paso3Contexto from "./pages/Paso3Contexto";
@@ -17,7 +17,7 @@ export default function App() {
         <span className="logo">Guía Turística</span>
       </header>
       <div className="mapa-marco">
-        <Mapa />
+        <MapaSeguro />
       </div>
       <main className="contenedor">
         {paso === 1 && <Paso1Destino />}
