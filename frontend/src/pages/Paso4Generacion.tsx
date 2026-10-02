@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useViaje } from "../context/ViajeContext";
 import Stepper from "../components/Stepper";
 import Recomendaciones from "../components/Recomendaciones";
+import { MapaSeguro } from "../components/MapaSeguro";
 import { generarItinerario, PASOS_GENERACION } from "../services/itinerario";
 import { construirRecomendaciones } from "../services/recomendaciones";
 import { calcularHorarios } from "../utils/horarios";
@@ -164,6 +165,10 @@ export default function Paso4Generacion() {
                 Día {it.numeroDia} · {fechaCorta(it.fecha)}
               </button>
             ))}
+          </div>
+
+          <div className="mapa-dia" role="region" aria-label={`Mapa de las paradas del día ${dia.numeroDia}`}>
+            <MapaSeguro paradas={dia.paradas} />
           </div>
 
           <ol className="paradas" id="panel-dia" role="tabpanel" aria-labelledby={`tab-${dia.id}`}>
