@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useViaje } from "../context/ViajeContext";
 import Stepper from "../components/Stepper";
+import Recomendaciones from "../components/Recomendaciones";
 import { generarItinerario, PASOS_GENERACION } from "../services/itinerario";
+import { construirRecomendaciones } from "../services/recomendaciones";
 import { calcularHorarios } from "../utils/horarios";
 import { diasDeViaje, fechaCorta } from "../utils/fechas";
 import "./pasos.css";
 
-const MONEDA = "Q"; 
+const MONEDA = "Q";
 
 const TIPOS = { solo: "Solo", pareja: "En pareja", familia: "En familia", amigos: "Con amigos" } as const;
 
@@ -26,6 +28,7 @@ export default function Paso4Generacion() {
   const [codigo] = useState(() => Math.random().toString(36).slice(2, 8).toUpperCase());
   const enlaceRef = useRef<HTMLInputElement>(null);
 
+  // La votación solo aplica a viajes "Con amigos" (no pareja, familia ni solo).
   const esGrupo = viaje.tipoViaje === "amigos";
   const dias = diasDeViaje(viaje.fechaInicio, viaje.fechaFin);
   const enlace = `https://guiaturistica.example/votar/${codigo}`;
@@ -85,6 +88,9 @@ export default function Paso4Generacion() {
   }
 
   const dia = itinerarios?.[diaActivo];
+  const lugares = useMemo(() => (itinerarios ? construirRecomendaciones(viaje, itinerarios) : []), [itinerarios]);
+  // Los hoteles solo se recomiendan si el usuario lo pidió en el Paso 2.
+  const mostrarHoteles = viaje.hospedaje === false && !viaje.sinHotel;
   const horarios = dia ? calcularHorarios(dia.paradas) : [];
 
   return (
@@ -135,12 +141,12 @@ export default function Paso4Generacion() {
             )}
             {viaje.transporte && <li className="dato">{viaje.transporte}</li>}
           </ul>
-          {!viaje.hospedaje && (
-          <p className="nota">
-            {viaje.hospedaje
-              ? `Cada día sale desde: ${viaje.nombreHotel}.`
-              : "Hospedaje: te sugeriremos opciones cerca de este itinerario."}
-          </p>
+          {!viaje.sinHotel && (
+            <p className="nota">
+              {viaje.hospedaje
+                ? `Cada día sale desde: ${viaje.nombreHotel}.`
+                : "Hospedaje: te sugeriremos opciones cerca de este itinerario."}
+            </p>
           )}
 
           <div className="dias" role="tablist" aria-label="Días del viaje">
@@ -187,6 +193,13 @@ export default function Paso4Generacion() {
               );
             })}
           </ol>
+
+          <Recomendaciones
+            lugares={lugares}
+            presupuestoDiario={viaje.presupuestoDiario}
+            mostrarHoteles={mostrarHoteles}
+            dia={dia.numeroDia}
+          />
 
           {esGrupo && (
             <section className="votacion" aria-labelledby="t-votacion">
