@@ -1,14 +1,16 @@
-import { Component, type ReactNode } from "react";
+import { Component, useEffect, useState, type ReactNode } from "react";
 import type { Parada } from "../../../shared/types";
 import { Mapa } from "./Mapa";
 
 // Sin token de Mapbox el mapa no puede cargar: se muestra un aviso en lugar de romper toda la app.
 const hayToken = Boolean(import.meta.env.VITE_MAPBOX_TOKEN);
 
-function Aviso() {
+function Aviso({ sinConexion = false }: { sinConexion?: boolean }) {
   return (
     <p className="mapa-aviso" role="status">
-      No pudimos cargar el mapa. Puedes seguir planeando tu viaje.
+      {sinConexion
+        ? "Sin conexión: el mapa necesita internet. Tu lista de paradas sigue disponible."
+        : "No pudimos cargar el mapa. Puedes seguir planeando tu viaje."}
       {import.meta.env.DEV && (
         <small>
           Para desarrolladores: revisa que exista <code>frontend/.env</code> con <code>VITE_MAPBOX_TOKEN</code> y{" "}
@@ -19,7 +21,7 @@ function Aviso() {
   );
 }
 
-// Si el mapa falla al iniciar (token inválido, sin WebGL, etc.) solo cae el mapa, no la página.
+// Si el mapa falla al iniciar solo cae el mapa, no la página.
 class LimiteDeError extends Component<{ children: ReactNode }, { fallo: boolean }> {
   state = { fallo: false };
 
@@ -36,8 +38,25 @@ class LimiteDeError extends Component<{ children: ReactNode }, { fallo: boolean 
   }
 }
 
+function useEnLinea() {
+  const [enLinea, setEnLinea] = useState(navigator.onLine);
+  useEffect(() => {
+    const alConectar = () => setEnLinea(true);
+    const alDesconectar = () => setEnLinea(false);
+    window.addEventListener("online", alConectar);
+    window.addEventListener("offline", alDesconectar);
+    return () => {
+      window.removeEventListener("online", alConectar);
+      window.removeEventListener("offline", alDesconectar);
+    };
+  }, []);
+  return enLinea;
+}
+
 export function MapaSeguro({ paradas }: { paradas?: Parada[] }) {
+  const enLinea = useEnLinea();
   if (!hayToken) return <Aviso />;
+  if (!enLinea) return <Aviso sinConexion />;
   return (
     <LimiteDeError>
       <Mapa paradas={paradas} />

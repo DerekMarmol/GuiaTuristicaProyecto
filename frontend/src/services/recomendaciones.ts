@@ -3,8 +3,6 @@ import type { ViajeBorrador } from "../context/ViajeContext";
 import type { Lugar } from "../types/recomendacion";
 import { centroide, distanciaKm } from "../utils/distancia";
 
-// Regla de presupuesto (se aplica sobre el presupuesto diario del Paso 3):
-// el hotel puede costar hasta el 40% por noche y una comida hasta el 15% por persona.
 export const PORCENTAJE_HOTEL = 0.4;
 export const PORCENTAJE_COMIDA = 0.15;
 

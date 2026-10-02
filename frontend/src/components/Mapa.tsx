@@ -56,5 +56,5 @@ export function Mapa({ paradas = [] }: MapaProps) {
     mapa.fitBounds(bounds, { padding: 60, maxZoom: 15 });
   }, [paradas]);
 
-  return <div ref={contenedorRef} style={{ width: "100%", height: "500px" }} />;
+  return <div ref={contenedorRef} className="mapa" />;
 }
