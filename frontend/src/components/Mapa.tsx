@@ -44,7 +44,7 @@ export function Mapa({ paradas = [] }: MapaProps) {
         `<strong>${parada.nombre}</strong><br/>Abre ${parada.horaApertura} · Cierra ${parada.horaCierre}`
       );
 
-      const marcador = new mapboxgl.Marker({ color: "#ff4fd8" })
+      const marcador = new mapboxgl.Marker({ color: "#c04a2a" })
         .setLngLat([parada.lng, parada.lat])
         .setPopup(popup)
         .addTo(mapa);
