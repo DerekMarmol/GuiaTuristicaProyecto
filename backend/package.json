@@ -5,16 +5,25 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "postinstall": "prisma skills sync || exit 0"
+    "postinstall": "prisma skills sync || exit 0",
+    "ai:test": "tsx src/ai/validator.test.ts",
+    "ai:probar": "tsx src/ai/scripts/probar.ts",
+    "ai:tipos": "tsc --noEmit --strict --module nodenext --moduleResolution nodenext --target es2022 --skipLibCheck src/ai/index.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
-    "prisma": "^6.19.3"
+    "@types/node": "^26.6.4",
+    "prisma": "^6.19.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@prisma/client": "^6.19.3"
+    "@google/genai": "^2.27.0",
+    "@prisma/client": "^6.19.3",
+    "dotenv": "^18.0.5",
+    "zod": "^3.25.76"
   }
 }
