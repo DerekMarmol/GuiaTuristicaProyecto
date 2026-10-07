@@ -7,10 +7,7 @@ export const MIN_ESTANCIA = 15;
 export const MAX_ESTANCIA = 360;
 export const MAX_PARADAS_POR_DIA = 5;
 
-/**
- * Lo que la IA devuelve. A propósito NO incluye nombre, coordenadas ni horarios:
- * solo referencia lugares por placeId, y el resto se toma de los datos reales.
- */
+
 export const ParadaIASchema = z.object({
   placeId: z.string().min(1),
   tiempoEstanciaMinutos: z.number().int().min(MIN_ESTANCIA).max(MAX_ESTANCIA),
@@ -28,7 +25,6 @@ export const SalidaIASchema = z.object({
 
 export type SalidaIA = z.infer<typeof SalidaIASchema>;
 
-/** Declaración de la función que Gemini está obligado a llamar (function calling). */
 export const declaracionCrearItinerario: FunctionDeclaration = {
   name: NOMBRE_FUNCION,
   description:

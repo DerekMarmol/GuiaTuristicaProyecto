@@ -3,22 +3,12 @@ import { aMinutos, diasEntre, sumarDias } from "./fechas";
 import type { ItinerarioIA, LugarReal, ParadaIA, ViajeIA } from "./tipos";
 
 export interface ResultadoValidacion {
-  /** Vacío = la respuesta de la IA es 100% válida. */
   errores: string[];
-  /** Itinerarios reconstruidos SOLO con paradas válidas y datos reales. */
   itinerarios: ItinerarioIA[];
-  /** true si cada día del viaje conserva al menos una parada válida. */
   viable: boolean;
 }
 
-/**
- * Validación anti-alucinaciones (RNF).
- * 1) La forma de la respuesta es correcta (Zod).
- * 2) Cada placeId existe en los lugares reales.
- * 3) No se repiten lugares y los días coinciden con el viaje.
- * 4) La estancia cabe en el horario real del lugar.
- * 5) Nombre, coordenadas y horarios se toman de los datos reales, nunca de la IA.
- */
+
 export function validarSalida(raw: unknown, candidatos: LugarReal[], viaje: ViajeIA): ResultadoValidacion {
   const errores: string[] = [];
   const parsed = SalidaIASchema.safeParse(raw);
