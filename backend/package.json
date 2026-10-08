@@ -2,9 +2,11 @@
   "name": "backend",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "src/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test \"test/**/*.test.js\"",
     "postinstall": "prisma skills sync || exit 0",
     "ai:test": "tsx src/ai/validator.test.ts",
     "ai:probar": "tsx src/ai/scripts/probar.ts",
@@ -14,6 +16,9 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "devDependencies": {
     "@types/node": "^26.6.4",
     "prisma": "^6.19.3",
@@ -24,6 +29,7 @@
     "@google/genai": "^2.27.0",
     "@prisma/client": "^6.19.3",
     "dotenv": "^18.0.5",
+    "express": "^5.2.1",
     "zod": "^3.25.76"
   }
 }
