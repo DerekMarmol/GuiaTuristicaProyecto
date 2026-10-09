@@ -4,9 +4,11 @@ const { once } = require("node:events");
 const { crearApp } = require("../src/app");
 
 const CLAVE = "clave-de-prueba-no-real-123";
+const SIN_HORARIO = { estado: "no_publicado", valorOriginal: null, fuente: "geoapify" };
 
 let simulador;
 let llamadas;
+let llamadasDetalles;
 let servidor;
 let baseUrl;
 
@@ -47,8 +49,15 @@ before(async () => {
   const app = crearApp({
     apiKey: CLAVE,
     tiempoEsperaMs: 50,
+    detalles: { tiempoEsperaMs: 50, intervaloMs: 0, presupuestoMs: 1000 },
     fetch: async (url, opciones) => {
-      llamadas.push({ url: new URL(url), opciones });
+      const direccion = new URL(url);
+      if (direccion.pathname === "/v2/place-details") {
+        const id = direccion.searchParams.get("id");
+        llamadasDetalles.push(id);
+        return respuestaJson(coleccion([{ type: "Feature", properties: { feature_type: "details", place_id: id } }]));
+      }
+      llamadas.push({ url: direccion, opciones });
       return simulador(url, opciones);
     },
   });
@@ -64,6 +73,7 @@ after(() => {
 
 beforeEach(() => {
   llamadas = [];
+  llamadasDetalles = [];
   simular(() => respuestaJson(coleccion([])));
 });
 
@@ -98,6 +108,7 @@ describe("GET /api/lugares - consulta exitosa", () => {
           lat: 14.5907,
           lng: -90.5242,
           categorias: ["entertainment", "entertainment.museum"],
+          horario: SIN_HORARIO,
         },
       ],
     });
@@ -337,6 +348,7 @@ describe("GET /api/lugares - búsqueda por intereses", () => {
         lat: 14.6045,
         lng: -90.4895,
         categorias: ["entertainment", "entertainment.museum"],
+        horario: SIN_HORARIO,
       },
     ]);
   });
