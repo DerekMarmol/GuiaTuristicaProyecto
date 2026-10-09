@@ -1,6 +1,6 @@
 # Backend
 
-API HTTP con Node.js y Express (CommonJS). Por ahora expone la consulta de lugares de interés mediante [Geoapify Places API](https://apidocs.geoapify.com/docs/places/). La configuración de Prisma se mantiene sin cambios.
+API HTTP con Node.js y Express (CommonJS). Por ahora expone la consulta de lugares de interés mediante [Geoapify Places API](https://apidocs.geoapify.com/docs/places/), enriquecida con los horarios publicados que devuelve [Geoapify Place Details API](https://apidocs.geoapify.com/docs/place-details/). La configuración de Prisma se mantiene sin cambios.
 
 ## Requisitos
 
@@ -94,13 +94,78 @@ Definidas en `src/config/categorias.js`:
       "direccion": "Zona 13, Ciudad de Guatemala, Guatemala",
       "lat": 14.5907,
       "lng": -90.5242,
-      "categorias": ["entertainment", "entertainment.museum"]
+      "categorias": ["entertainment", "entertainment.museum"],
+      "horario": {
+        "estado": "disponible",
+        "valorOriginal": "Tu-Fr 09:00-16:00; Sa,Su 09:00-12:00,13:30-16:00; Mo off",
+        "fuente": "geoapify"
+      }
     }
   ]
 }
 ```
 
-Cada lugar entregado tiene `idExterno` y `nombre` no vacíos, coordenadas válidas y al menos una categoría del proveedor. `categorias` contiene todas las categorías que informa Geoapify, aunque no se hayan pedido (por ejemplo `building`). `direccion` es `null` cuando el proveedor no la informa. Los registros sin identificador, nombre, coordenadas o categorías válidas se descartan sin completar datos. Si no hay coincidencias, o si todos los registros se descartan, la respuesta es `200` con `lugares` vacío; una respuesta del proveedor con estructura inválida produce `502`. El contrato TypeScript está en `shared/types/lugarInteres.ts` (`LugarInteres` y `RespuestaLugares`).
+Este ejemplo y los de la sección de horarios ilustran el formato; no son datos obtenidos de Geoapify.
+
+Cada lugar entregado tiene `idExterno` y `nombre` no vacíos, coordenadas válidas y al menos una categoría del proveedor. `categorias` contiene todas las categorías que informa Geoapify, aunque no se hayan pedido (por ejemplo `building`). `direccion` es `null` cuando el proveedor no la informa. Los registros sin identificador, nombre, coordenadas o categorías válidas se descartan sin completar datos. Si no hay coincidencias, o si todos los registros se descartan, la respuesta es `200` con `lugares` vacío; una respuesta del proveedor con estructura inválida produce `502`. Cada lugar incluye siempre el objeto `horario` descrito a continuación. El contrato TypeScript está en `shared/types/lugarInteres.ts` (`LugarInteres`, `HorarioLugar`, `EstadoHorario` y `RespuestaLugares`).
+
+### Horarios de apertura (`horario`)
+
+Después de obtener, validar, deduplicar y limitar los lugares de la búsqueda, el backend consulta `GET https://api.geoapify.com/v2/place-details` para cada lugar con `id` igual a su `idExterno` y `features=details`. Del resultado toma únicamente `opening_hours` del registro con `feature_type: "details"`. Se ignoran edificios, lugares cercanos y cualquier otra entidad. El `place_id` de ese registro puede no ser idéntico al de la búsqueda: Geoapify incluye coordenadas en el identificador y, en una prueba real, el registro de detalles traía un `place_id` con otra codificación aunque correspondía al mismo objeto de OpenStreetMap. Por eso, si hay un único registro `details`, se acepta como el del lugar consultado. Si hay varios, solo se acepta el que tenga exactamente el mismo `place_id`; si no hay ninguno o la coincidencia es ambigua, el resultado es `error_consulta`. El resto de los datos del lugar (identificador, nombre, coordenadas, dirección, proveedor y categorías) se conserva tal como llegó en la búsqueda; los detalles solo aportan el horario.
+
+| Campo | Tipo | Significado |
+| --- | --- | --- |
+| `estado` | `"disponible"`, `"no_publicado"`, `"no_interpretable"` o `"error_consulta"` | Resultado de la obtención y validación |
+| `valorOriginal` | `string` o `null` | Texto publicado por el proveedor, sin modificar |
+| `fuente` | `"geoapify"` | Proveedor del dato |
+
+| Estado | Cuándo | `valorOriginal` |
+| --- | --- | --- |
+| `disponible` | El proveedor publicó un horario y la sintaxis `opening_hours` de OpenStreetMap se validó sin advertencias | El texto publicado |
+| `no_publicado` | Se recibieron detalles válidos del lugar, pero `opening_hours` está ausente, es `null` o es un texto vacío | `null` |
+| `no_interpretable` | Hay un valor de horario, pero es de un tipo inesperado, tiene una sintaxis inválida o ambigua, o depende de un contexto que no se conoce | El texto publicado, o `null` si no es texto |
+| `error_consulta` | No se obtuvieron detalles válidos: error HTTP, fallo de red, tiempo agotado, JSON inválido, estructura inesperada, sin el registro del lugar o presupuesto agotado | `null` |
+
+Nunca se asigna un horario por defecto ni se descartan lugares por no tener horario. El orden, la cantidad y los identificadores de los lugares no cambian por el enriquecimiento.
+
+**No publicado frente a consulta fallida.** `no_publicado` significa que Geoapify respondió correctamente con los detalles del lugar y estos no incluyen horario. `error_consulta` significa que no se sabe: la consulta de detalles no se completó o su respuesta no permitía identificar el registro del lugar, así que el lugar podría tener un horario publicado. Volver a consultar más tarde puede producir otro resultado.
+
+#### Validación
+
+El texto se valida con la biblioteca [`opening_hours`](https://github.com/opening-hours/opening_hours.js), el intérprete de referencia de la sintaxis `opening_hours` de OpenStreetMap. Admite horarios distintos por día (`Mo-Fr 09:00-17:00; Sa 10:00-14:00`), varios intervalos en un día (`Mo-Fr 08:00-12:00,14:00-18:00`), turnos que cruzan la medianoche (`Fr-Sa 22:00-03:00`), `24/7`, días cerrados (`Su off`), temporadas, comentarios y horas solares (`sunrise-sunset`). Un día marcado como cerrado (`off`) es un horario publicado y se devuelve como `disponible`; no equivale a un horario ausente.
+
+- La validación comprueba la estructura del texto publicado; no certifica que el establecimiento mantenga actualizado su horario.
+- No se calcula si un lugar está abierto en un momento dado ni para una fecha de visita. `valorOriginal` conserva todas las reglas y excepciones; no se reduce a una pareja de apertura y cierre ni a una tabla semanal.
+- No se inventan ubicación administrativa, festivos ni zona horaria. Las reglas de festivos (`PH`) o vacaciones escolares (`SH`) requieren el país y la región, que no se conocen, por lo que se marcan `no_interpretable` conservando el texto.
+- Si la biblioteca emite advertencias (por ejemplo, formato de 12 horas `9am-5pm`, nombres de días en otro idioma o un `;` final), la biblioteca tuvo que suponer la intención, así que el valor se marca `no_interpretable`.
+
+#### Ejemplos de `horario`
+
+```json
+{ "estado": "disponible", "valorOriginal": "Mo-Sa 09:00-18:00; Su off", "fuente": "geoapify" }
+{ "estado": "no_publicado", "valorOriginal": null, "fuente": "geoapify" }
+{ "estado": "no_interpretable", "valorOriginal": "Mo-Fr 09:00-17:00; PH off", "fuente": "geoapify" }
+{ "estado": "error_consulta", "valorOriginal": null, "fuente": "geoapify" }
+```
+
+#### Límites, tiempos de espera y consumo
+
+| Límite | Valor | Constante |
+| --- | --- | --- |
+| Consultas de detalles simultáneas | 4 | `CONCURRENCIA_DETALLES` en `src/geoapify/enriquecer.js` |
+| Separación mínima entre inicios de consultas | 250 ms (como máximo 4 por segundo) | `INTERVALO_DETALLES_MS` |
+| Tiempo de espera por consulta de detalles | 5 segundos | `TIEMPO_ESPERA_DETALLE_MS` en `src/geoapify/detalles.js` |
+| Presupuesto total del enriquecimiento | 10 segundos | `PRESUPUESTO_DETALLES_MS` |
+
+- La separación entre inicios mantiene el ritmo por debajo de las 5 solicitudes por segundo que garantiza el plan gratuito de Geoapify.
+- Al agotarse el presupuesto se cancelan las consultas en curso, no se inician las pendientes y esos lugares quedan con `error_consulta`. La respuesta tarda como máximo el tiempo de la búsqueda (10 s) más el presupuesto (10 s).
+- No hay reintentos automáticos ni caché. Cada identificador se consulta una sola vez por solicitud.
+- Si la búsqueda principal falla, se mantienen sus códigos de error y no se consultan detalles. Si no hay lugares, la respuesta es `200` con `lugares: []` sin consultas adicionales.
+- **Consumo:** cada lugar devuelto genera una consulta a Place Details con `features=details`, que cuesta 1 crédito. Una solicitud con `limite=20` puede consumir hasta 21 créditos (1 de búsqueda y 20 de detalles); con `limite=100`, hasta 101. Con el ritmo indicado, el presupuesto alcanza para unos 40 lugares, por lo que con límites altos varios lugares pueden quedar con `error_consulta`. Conviene usar límites pequeños.
+
+#### Limitaciones de los datos del proveedor
+
+Geoapify entrega los horarios de OpenStreetMap tal como los aportan sus colaboradores, después de una limpieza. Muchos lugares no tienen horario publicado y algunos pueden estar incorrectos o desactualizados. `opening_hours` describe la hora local del lugar, pero esta API no informa la zona horaria.
 
 ### Errores
 
@@ -116,6 +181,8 @@ Todos los errores tienen la forma `{ "error": { "codigo": "...", "mensaje": "...
 | 503 | `PROVEEDOR_LIMITE_SOLICITUDES` | Se alcanzó el límite de solicitudes de Geoapify |
 | 504 | `PROVEEDOR_TIEMPO_AGOTADO` | Geoapify no respondió en 10 segundos |
 | 500 | `SERVICIO_NO_CONFIGURADO` | La aplicación se creó sin clave |
+
+Estos errores corresponden a la búsqueda principal. Los fallos al consultar los detalles de un lugar no producen un error HTTP: el lugar se devuelve con `horario.estado` igual a `error_consulta`.
 
 ### Ejemplos en PowerShell
 
@@ -141,4 +208,11 @@ $parametros = [ordered]@{
 $consulta = ($parametros.GetEnumerator() | ForEach-Object { "$($_.Key)=$([uri]::EscapeDataString($_.Value))" }) -join "&"
 $respuesta = Invoke-RestMethod -Uri "http://localhost:3000/api/lugares?$consulta"
 $respuesta.lugares | Format-Table nombre, @{ n = "categorias"; e = { $_.categorias -join ", " } }, lat, lng
+```
+
+Comprobación manual de horarios con un límite pequeño (consume hasta 6 créditos: 1 de búsqueda y 5 de detalles). La clave no se solicita ni se imprime:
+
+```powershell
+$respuesta = Invoke-RestMethod -Uri "http://localhost:3000/api/lugares?lat=14.6349&lng=-90.5069&categoria=catering.restaurant&radio=2000&limite=5"
+$respuesta.lugares | Format-Table nombre, @{ n = "estado"; e = { $_.horario.estado } }, @{ n = "horario"; e = { $_.horario.valorOriginal } } -Wrap
 ```
