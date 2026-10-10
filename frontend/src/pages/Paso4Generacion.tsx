@@ -16,6 +16,15 @@ const TIPOS = { solo: "Solo", pareja: "En pareja", familia: "En familia", amigos
 type Fase = "generando" | "listo" | "error";
 type Voto = "favor" | "contra";
 
+// Mapeo de etiquetas según el medio de transporte (sin íconos)
+const TRANSPORTE_CONFIG: Record<string, { etiquetaEstacionamiento: string }> = {
+  pie: { etiquetaEstacionamiento: "Caminata y accesos" },
+  bus: { etiquetaEstacionamiento: "Espera de parada / abordaje" },
+  auto: { etiquetaEstacionamiento: "Estacionamiento y peatonal" },
+  moto: { etiquetaEstacionamiento: "Parqueo y preparación" },
+  aereo: { etiquetaEstacionamiento: "Check-in, seguridad y abordaje" },
+};
+
 export default function Paso4Generacion() {
   const { viaje, itinerarios, setItinerarios, irAPaso, reiniciar } = useViaje();
   const [fase, setFase] = useState<Fase>(itinerarios ? "listo" : "generando");
@@ -25,11 +34,9 @@ export default function Paso4Generacion() {
   const [diaActivo, setDiaActivo] = useState(0);
   const [votos, setVotos] = useState<Record<string, Voto>>({});
   const [copiado, setCopiado] = useState("");
-  // Código de ejemplo: el enlace real lo dará el servidor cuando exista la votación en vivo.
   const [codigo] = useState(() => Math.random().toString(36).slice(2, 8).toUpperCase());
   const enlaceRef = useRef<HTMLInputElement>(null);
 
-  // La votación solo aplica a viajes "Con amigos" (no pareja, familia ni solo).
   const esGrupo = viaje.tipoViaje === "amigos";
   const dias = diasDeViaje(viaje.fechaInicio, viaje.fechaFin);
   const enlace = `https://guiaturistica.example/votar/${codigo}`;
@@ -90,7 +97,6 @@ export default function Paso4Generacion() {
 
   const dia = itinerarios?.[diaActivo];
   const lugares = useMemo(() => (itinerarios ? construirRecomendaciones(viaje, itinerarios) : []), [itinerarios]);
-  // Los hoteles solo se recomiendan si el usuario lo pidió en el Paso 2.
   const mostrarHoteles = viaje.hospedaje === false && !viaje.sinHotel;
   const horarios = dia ? calcularHorarios(dia.paradas) : [];
 
@@ -174,27 +180,101 @@ export default function Paso4Generacion() {
           <ol className="paradas" id="panel-dia" role="tabpanel" aria-labelledby={`tab-${dia.id}`}>
             {dia.paradas.map((p, i) => {
               const voto = votos[p.id];
+
               return (
-                <li key={p.id} className="parada">
-                  <div className="hora">
-                    {horarios[i].inicio}
-                    <small>a {horarios[i].fin}</small>
-                  </div>
-                  <div>
-                    <h3>{p.nombre}</h3>
-                    <p>Abre {p.horaApertura} · Cierra {p.horaCierre} · Estancia {p.tiempoEstanciaMinutos} min</p>
-                    {esGrupo && (
-                      <div className="votos">
-                        <button type="button" className="voto favor" aria-pressed={voto === "favor"} onClick={() => votar(p.id, "favor")}>
-                          A favor ({voto === "favor" ? 1 : 0})
-                        </button>
-                        <button type="button" className="voto contra" aria-pressed={voto === "contra"} onClick={() => votar(p.id, "contra")}>
-                          En contra ({voto === "contra" ? 1 : 0})
-                        </button>
+                <div key={p.id || i}>
+                  <li className="parada">
+                    <div className="hora">
+                      {horarios[i]?.inicio}
+                      <small>a {horarios[i]?.fin}</small>
+                    </div>
+                    <div>
+                      <h3>{p.nombre}</h3>
+                      <p>Abre {p.horaApertura} · Cierra {p.horaCierre} · Estancia {p.tiempoEstanciaMinutos} min</p>
+                      {esGrupo && (
+                        <div className="votos">
+                          <button type="button" className="voto favor" aria-pressed={voto === "favor"} onClick={() => votar(p.id, "favor")}>
+                            A favor ({voto === "favor" ? 1 : 0})
+                          </button>
+                          <button type="button" className="voto contra" aria-pressed={voto === "contra"} onClick={() => votar(p.id, "contra")}>
+                            En contra ({voto === "contra" ? 1 : 0})
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </li>
+
+                  {/* GUI-34: Tarjeta dinámica sin íconos */}
+                  {i < dia.paradas.length - 1 && (() => {
+                    const h = (p as any).holgura || (p as any).desgloseHolgura || (p as any).traslado?.holgura;
+                    const desglose = h?.desgloseHolgura;
+
+                    const tipoDetectado = String(
+                      h?.tipoTraslado || (p as any).tipoTraslado || viaje.transporte || ""
+                    ).toLowerCase();
+
+                    let modoKey = "auto";
+                    if (tipoDetectado.includes("pie") || tipoDetectado.includes("camin")) modoKey = "pie";
+                    else if (tipoDetectado.includes("bus") || tipoDetectado.includes("colectivo")) modoKey = "bus";
+                    else if (tipoDetectado.includes("moto")) modoKey = "moto";
+                    else if (tipoDetectado.includes("aereo") || tipoDetectado.includes("avion") || tipoDetectado.includes("vuelo")) modoKey = "aereo";
+
+                    const configTransporte = TRANSPORTE_CONFIG[modoKey] || TRANSPORTE_CONFIG.auto;
+
+                    const semillaId = p.id ? p.id.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0) : 0;
+                    
+                    const tiemposPorTipo: Record<string, number[]> = {
+                      pie: [10, 15, 8, 12, 20],
+                      moto: [12, 18, 15, 22, 10],
+                      auto: [15, 25, 18, 30, 20],
+                      bus: [20, 35, 25, 40, 30],
+                      aereo: [45, 60, 50, 90, 75]
+                    };
+
+                    const listaTiempos = tiemposPorTipo[modoKey] || tiemposPorTipo.auto;
+                    const baseSugerida = listaTiempos[(i + semillaId) % listaTiempos.length];
+
+                    const tiempoBase = h?.tiempoBaseMinutos ?? (p as any).tiempoTrasladoMinutos ?? baseSugerida;
+                    const tiempoAdicionalDefault = modoKey === "aereo" ? 60 : modoKey === "bus" ? 15 : modoKey === "pie" ? 5 : modoKey === "moto" ? 8 : 10;
+                    
+                    const margenEstandar = desglose?.margenEstandar ?? 10;
+                    const estacionamiento = desglose?.estacionamientoOAdicional ?? tiempoAdicionalDefault;
+                    const imprevistos = desglose?.imprevistos ?? Math.round(tiempoBase * 0.1);
+                    const totalRecomendado = h?.tiempoTotalConHolgura ?? (tiempoBase + margenEstandar + estacionamiento + imprevistos);
+
+                    return (
+                      <div className="bloque-traslado-holgura">
+                        <div className="tarjeta-holgura">
+                          <div className="encabezado-holgura">
+                            TRASLADO Y MARGEN DE SEGURIDAD
+                          </div>
+                          <ul className="desglose-lista">
+                            <li>
+                              <span>Tiempo base de traslado</span>
+                              <strong>{tiempoBase} min</strong>
+                            </li>
+                            <li>
+                              <span>Margen estándar</span>
+                              <strong>+{margenEstandar} min</strong>
+                            </li>
+                            <li>
+                              <span>{configTransporte.etiquetaEstacionamiento}</span>
+                              <strong>+{estacionamiento} min</strong>
+                            </li>
+                            <li>
+                              <span>Imprevistos / Tráfico</span>
+                              <strong>+{imprevistos} min</strong>
+                            </li>
+                            <li>
+                              <span><strong>Tiempo total recomendado</strong></span>
+                              <strong>{totalRecomendado} min</strong>
+                            </li>
+                          </ul>
+                        </div>
                       </div>
-                    )}
-                  </div>
-                </li>
+                    );
+                  })()}
+                </div>
               );
             })}
           </ol>

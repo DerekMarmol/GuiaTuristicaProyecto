@@ -2,6 +2,7 @@ import type { ClienteLLM } from "./cliente";
 import { construirPrompt, SYSTEM_INSTRUCTION } from "./prompts";
 import { validarSalida, type ResultadoValidacion } from "./validator";
 import type { LugarReal, ResultadoGeneracion, ViajeIA } from "./tipos";
+import { enriquecerParadasConHolgura } from "./tiempoService";
 
 export class ErrorGeneracionIA extends Error {
   constructor(mensaje: string, public readonly detalles: string[]) {
@@ -17,6 +18,15 @@ interface Params {
   maxIntentos?: number;
 }
 
+// Mapea directamente el arreglo de itinerarios y enriquece las `paradas` de cada día
+function enriquecerItinerariosConHolgura(itinerarios: any[]) {
+  return itinerarios.map((itinerario) => ({
+    ...itinerario,
+    paradas: Array.isArray(itinerario.paradas)
+      ? enriquecerParadasConHolgura(itinerario.paradas)
+      : itinerario.paradas
+  }));
+}
 
 export async function generarItinerarios({ viaje, candidatos, cliente, maxIntentos = 3 }: Params): Promise<ResultadoGeneracion> {
   if (candidatos.length === 0) {
@@ -31,8 +41,15 @@ export async function generarItinerarios({ viaje, candidatos, cliente, maxIntent
     try {
       const raw = await cliente.generarPlan({ systemInstruction: SYSTEM_INSTRUCTION, prompt });
       ultimo = validarSalida(raw, candidatos, viaje);
+      
       if (ultimo.errores.length === 0) {
-        return { itinerarios: ultimo.itinerarios, intentos: intento, advertencias: [] };
+        const itinerariosConHolgura = enriquecerItinerariosConHolgura(ultimo.itinerarios);
+
+        return { 
+          itinerarios: itinerariosConHolgura, 
+          intentos: intento, 
+          advertencias: [] 
+        };
       }
       errores = ultimo.errores;
     } catch (e) {
@@ -41,7 +58,14 @@ export async function generarItinerarios({ viaje, candidatos, cliente, maxIntent
   }
 
   if (ultimo?.viable) {
-    return { itinerarios: ultimo.itinerarios, intentos: maxIntentos, advertencias: ultimo.errores };
+    const itinerariosConHolgura = enriquecerItinerariosConHolgura(ultimo.itinerarios);
+
+    return { 
+      itinerarios: itinerariosConHolgura, 
+      intentos: maxIntentos, 
+      advertencias: ultimo.errores 
+    };
   }
+  
   throw new ErrorGeneracionIA(`No se obtuvo un itinerario válido tras ${maxIntentos} intentos.`, errores);
 }
