@@ -122,3 +122,67 @@ pre { margin: 0 0 1rem; padding: .8rem; overflow: auto; font-size: .85rem; color
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Contenedor principal que une las tarjetas en la línea de tiempo */
+.bloque-traslado-holgura {
+  display: flex;
+  flex-direction: column;
+  margin: 1.2rem 0;
+  padding-left: 1.2rem;
+  border-left: 3px dashed var(--coral); 
+}
+
+/* Tarjeta del desglose visual de tiempos */
+.tarjeta-holgura {
+  background: var(--papel);
+  border: 1px solid var(--linea-fuerte);
+  border-radius: 16px;
+  padding: 1rem 1.2rem;
+  box-shadow: 0 4px 12px -4px rgba(74, 53, 96, 0.15);
+}
+
+/* Encabezado del bloque (ej. Traslado + Holgura) */
+.encabezado-holgura {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font: 700 1rem/1 var(--font-ui);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--ciruela); 
+  margin-bottom: .6rem;
+}
+
+/* Lista del desglose de los minutos */
+.desglose-lista {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+/* Cada fila con la descripción y la cantidad de minutos */
+.desglose-lista li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font: 400 .88rem/1.4 var(--font-body);
+  padding: .3rem 0;
+  border-bottom: 1px dashed var(--linea);
+}
+
+/* Quita la línea divisoria del último elemento */
+.desglose-lista li:last-child {
+  border-bottom: none;
+}
+
+/* Texto explicativo (ej. Búsqueda de estacionamiento) */
+.desglose-lista li span {
+  color: var(--suave);
+}
+
+/* Minutos calculados (ej. +15 min) */
+.desglose-lista li strong {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  color: var(--coral-osc);
+}

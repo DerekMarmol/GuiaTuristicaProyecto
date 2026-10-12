@@ -24,6 +24,7 @@ En caso de presentar un error relacionado con la virtualización al abrir Docker
 
 4. Reiniciar la computadora para que los cambios se apliquen
 
+lucia/backend-bd-caching
 Backend en **Node.js** con **PostgreSQL** y **Prisma**.
 
 ## Requisitos
@@ -54,3 +55,17 @@ Nunca edites una migración que ya se subió a `main`.
 | `contrasena` | String | hash bcrypt, nunca la contraseña en texto plano |
 | `nombre` | String | |
 | `creadoEn` | DateTime | fecha de registro |
+
+## Backend y consulta de lugares de interés
+
+El backend (Node.js 20 o superior) expone `GET /api/lugares`, que consulta lugares cercanos a unas coordenadas mediante Geoapify, por categoría, por los intereses que elige el usuario o por ambos. Requiere la variable `GEOAPIFY_API_KEY` en `backend/.env`.
+
+```powershell
+cd backend
+npm install
+npm test
+npm start
+```
+
+Consulta [backend/README.md](backend/README.md) para la configuración, los parámetros, las categorías admitidas y los códigos de error.
+main
