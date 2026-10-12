@@ -1,3 +1,4 @@
+
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
@@ -17,4 +18,14 @@ export default defineConfig({
       devOptions: { enabled: false },
     }),
   ],
+
+  //Redirigir consultas meteorológicas al backend
+  server: {
+    proxy: {
+      "/api/clima": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+      },
+    },
+  },
 });
