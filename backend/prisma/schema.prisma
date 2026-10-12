@@ -1,6 +1,5 @@
 generator client {
   provider = "prisma-client"
-  output   = "../generated/prisma"
 }
 
 datasource db {
@@ -56,4 +55,11 @@ model Restriccion {
   sensibilidadClima String // "baja" | "media" | "alta"
 
   parada            Parada @relation(fields: [paradaId], references: [id])
+}
+model Usuario {
+  id         String   @id @default(uuid())
+  correo     String   @unique // se guarda en minúsculas (la API lo normaliza)
+  contrasena String   // hash bcrypt, nunca la contraseña en texto plano
+  nombre     String
+  creadoEn   DateTime @default(now())
 }

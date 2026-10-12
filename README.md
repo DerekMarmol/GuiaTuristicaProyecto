@@ -23,3 +23,34 @@ En caso de presentar un error relacionado con la virtualización al abrir Docker
     ```
 
 4. Reiniciar la computadora para que los cambios se apliquen
+
+Backend en **Node.js** con **PostgreSQL** y **Prisma**.
+
+## Requisitos
+- Node.js 18+
+- PostgreSQL 14+
+
+## Puesta en marcha
+```bash
+cd backend
+npm install
+cp .env.example .env            # edita DATABASE_URL con tus datos
+createdb guia_turistica         # o créala desde pgAdmin
+npx prisma migrate dev          # aplica las migraciones y genera el cliente de Prisma
+```
+
+Cada vez que hagas `git pull` y haya migraciones nuevas, vuelve a correr `npx prisma migrate dev`.
+
+## Base de datos
+El esquema está en [`prisma/schema.prisma`](prisma/schema.prisma) y las migraciones en `prisma/migrations/`.
+Para cambiar el esquema: edita `schema.prisma` y corre `npx prisma migrate dev --name <descripcion>`.
+Nunca edites una migración que ya se subió a `main`.
+
+### `Usuario`
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | String (uuid) | PK |
+| `correo` | String | único; se guarda en minúsculas |
+| `contrasena` | String | hash bcrypt, nunca la contraseña en texto plano |
+| `nombre` | String | |
+| `creadoEn` | DateTime | fecha de registro |
