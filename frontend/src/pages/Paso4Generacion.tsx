@@ -7,6 +7,7 @@ import { generarItinerario, PASOS_GENERACION } from "../services/itinerario";
 import { construirRecomendaciones } from "../services/recomendaciones";
 import { calcularHorarios } from "../utils/horarios";
 import { diasDeViaje, fechaCorta } from "../utils/fechas";
+import IndicadorClima from "../components/IndicadorClima";
 import "./pasos.css";
 
 const MONEDA = "Q";
@@ -191,6 +192,7 @@ export default function Paso4Generacion() {
                     <div>
                       <h3>{p.nombre}</h3>
                       <p>Abre {p.horaApertura} · Cierra {p.horaCierre} · Estancia {p.tiempoEstanciaMinutos} min</p>
+                      <IndicadorClima lat={p.lat} lng={p.lng} fecha={dia.fecha} hora={horarios[i]?.inicio ?? p.horaApertura} />
                       {esGrupo && (
                         <div className="votos">
                           <button type="button" className="voto favor" aria-pressed={voto === "favor"} onClick={() => votar(p.id, "favor")}>

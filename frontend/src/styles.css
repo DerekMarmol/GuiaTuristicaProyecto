@@ -186,3 +186,47 @@ pre { margin: 0 0 1rem; padding: .8rem; overflow: auto; font-size: .85rem; color
   font-weight: 700;
   color: var(--coral-osc);
 }
+
+/* GUI-43: Indicadores meteorológicos del itinerario */
+
+.indicador-clima {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--linea);
+  background: var(--arena);
+  color: var(--ciruela);
+  font: 400 0.9rem/1.5 var(--font-body);
+}
+
+.clima-datos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.clima-datos strong {
+  color: var(--ciruela);
+  font-weight: 700;
+}
+
+.clima-normal {
+  background: rgba(168, 208, 140, 0.2);
+  border-color: var(--verde);
+}
+
+.clima-alerta {
+  background: rgba(246, 176, 74, 0.2);
+  border-color: var(--naranja);
+}
+
+.clima-advertencia {
+  margin: 8px 0 0;
+  color: var(--coral-osc);
+  font-weight: 700;
+}
+
+.sin-datos {
+  background: var(--arena);
+  color: var(--suave);
+}

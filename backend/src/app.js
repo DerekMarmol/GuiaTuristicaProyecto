@@ -3,6 +3,7 @@ const { crearClienteGeoapify } = require("./geoapify/cliente");
 const { crearClienteDetalles } = require("./geoapify/detalles");
 const { crearEnriquecedorHorarios } = require("./geoapify/enriquecer");
 const { crearRutaLugares } = require("./routes/lugares");
+const { crearRutaClima } = require("./routes/clima");
 const { manejarErrores } = require("./errores");
 
 function crearApp({ apiKey = process.env.GEOAPIFY_API_KEY, fetch, tiempoEsperaMs, detalles = {} } = {}) {
@@ -18,6 +19,7 @@ function crearApp({ apiKey = process.env.GEOAPIFY_API_KEY, fetch, tiempoEsperaMs
     presupuestoMs: detalles.presupuestoMs,
   });
   app.use("/api/lugares", crearRutaLugares(buscarLugares, enriquecerHorarios));
+  app.use("/api/clima", crearRutaClima());
 
   app.use((req, res) => {
     res.status(404).json({
