@@ -1,14 +1,23 @@
-const { ErrorApi } = require("../errores");
-const { interpretarPronostico } = require("./transformar");
+import { ErrorApi } from "../errores";
+import type { FuncionFetch } from "../tipos";
+import { interpretarPronostico, type Pronostico } from "./transformar";
 
-const URL_PRONOSTICO = "https://api.openweathermap.org/data/2.5/forecast";
-const TIEMPO_ESPERA_MS = 10000;
+export const URL_PRONOSTICO = "https://api.openweathermap.org/data/2.5/forecast";
+export const TIEMPO_ESPERA_MS = 10000;
 
-function formatearCoordenada(valor) {
+export type ObtenerPronostico = (ubicacion: { lat: number; lng: number }) => Promise<Pronostico>;
+
+interface OpcionesCliente {
+  apiKey?: string;
+  fetch?: FuncionFetch;
+  tiempoEsperaMs?: number;
+}
+
+function formatearCoordenada(valor: number): string {
   return valor.toFixed(7).replace(/\.?0+$/, "");
 }
 
-function errorPorEstado(estado) {
+function errorPorEstado(estado: number): ErrorApi {
   if (estado === 401 || estado === 403) {
     return new ErrorApi(
       502,
@@ -26,11 +35,15 @@ function errorPorEstado(estado) {
   return new ErrorApi(502, "PROVEEDOR_ERROR", "El proveedor de clima respondió con un error.");
 }
 
-function errorTiempoAgotado() {
+function errorTiempoAgotado(): ErrorApi {
   return new ErrorApi(504, "PROVEEDOR_TIEMPO_AGOTADO", "El proveedor de clima tardó demasiado en responder.");
 }
 
-function crearClienteOpenWeather({ apiKey, fetch: fetchImpl = globalThis.fetch, tiempoEsperaMs = TIEMPO_ESPERA_MS } = {}) {
+export function crearClienteOpenWeather({
+  apiKey,
+  fetch: fetchImpl = globalThis.fetch,
+  tiempoEsperaMs = TIEMPO_ESPERA_MS,
+}: OpcionesCliente = {}): ObtenerPronostico {
   const clave = typeof apiKey === "string" ? apiKey.trim() : "";
 
   return async function obtenerPronostico({ lat, lng }) {
@@ -51,7 +64,7 @@ function crearClienteOpenWeather({ apiKey, fetch: fetchImpl = globalThis.fetch, 
     const temporizador = setTimeout(() => controlador.abort(), tiempoEsperaMs);
 
     try {
-      let respuesta;
+      let respuesta: Response;
       try {
         respuesta = await fetchImpl(url, {
           headers: { Accept: "application/json" },
@@ -69,7 +82,7 @@ function crearClienteOpenWeather({ apiKey, fetch: fetchImpl = globalThis.fetch, 
         throw errorPorEstado(respuesta.status);
       }
 
-      let datos;
+      let datos: unknown;
       try {
         datos = await respuesta.json();
       } catch {
@@ -85,5 +98,3 @@ function crearClienteOpenWeather({ apiKey, fetch: fetchImpl = globalThis.fetch, 
     }
   };
 }
-
-module.exports = { crearClienteOpenWeather, URL_PRONOSTICO, TIEMPO_ESPERA_MS };

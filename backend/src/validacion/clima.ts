@@ -1,10 +1,18 @@
-const { ErrorApi } = require("../errores");
-const { interpretarFecha } = require("../clima/fechas");
+import { ErrorApi } from "../errores";
+import { interpretarFecha } from "../clima/fechas";
+import type { Consulta, ErrorParametro } from "../tipos";
 
-const MAX_DIAS_RANGO = 366;
+export const MAX_DIAS_RANGO = 366;
 const DECIMAL = /^-?\d+(\.\d+)?$/;
 
-function leerTexto(query, nombre, errores) {
+export interface ConsultaClima {
+  lat: number;
+  lng: number;
+  fechaInicio: string;
+  fechaFin: string;
+}
+
+function leerTexto(query: Consulta, nombre: string, errores: ErrorParametro[]): string | null {
   const valor = query[nombre];
 
   if (valor === undefined) {
@@ -25,7 +33,7 @@ function leerTexto(query, nombre, errores) {
   return valor;
 }
 
-function validarDecimal(query, nombre, minimo, maximo, errores) {
+function validarDecimal(query: Consulta, nombre: string, minimo: number, maximo: number, errores: ErrorParametro[]): number | null {
   const texto = leerTexto(query, nombre, errores);
   if (texto === null) {
     return null;
@@ -45,7 +53,7 @@ function validarDecimal(query, nombre, minimo, maximo, errores) {
   return numero;
 }
 
-function validarFecha(query, nombre, errores) {
+function validarFecha(query: Consulta, nombre: string, errores: ErrorParametro[]): { texto: string; numero: number } | null {
   const texto = leerTexto(query, nombre, errores);
   if (texto === null) {
     return null;
@@ -63,8 +71,8 @@ function validarFecha(query, nombre, errores) {
   return { texto, numero };
 }
 
-function validarConsultaClima(query) {
-  const errores = [];
+export function validarConsultaClima(query: Consulta): ConsultaClima {
+  const errores: ErrorParametro[] = [];
 
   const lat = validarDecimal(query, "lat", -90, 90, errores);
   const lng = validarDecimal(query, "lng", -180, 180, errores);
@@ -83,11 +91,9 @@ function validarConsultaClima(query) {
     }
   }
 
-  if (errores.length > 0) {
+  if (errores.length > 0 || lat === null || lng === null || !inicio || !fin) {
     throw new ErrorApi(400, "PARAMETRO_INVALIDO", "Los parámetros de la consulta no son válidos.", errores);
   }
 
   return { lat, lng, fechaInicio: inicio.texto, fechaFin: fin.texto };
 }
-
-module.exports = { validarConsultaClima, MAX_DIAS_RANGO };

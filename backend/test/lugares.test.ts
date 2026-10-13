@@ -1,43 +1,108 @@
-const { test, describe, before, after, beforeEach } = require("node:test");
-const assert = require("node:assert/strict");
-const { once } = require("node:events");
-const { crearApp } = require("../src/app");
+import { test, describe, before, after, beforeEach } from "node:test";
+import assert from "node:assert/strict";
+import { once } from "node:events";
+import type { Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { crearApp } from "../src/app";
+
+// ---------------------------------------------------------------------------
+// Tipos
+// ---------------------------------------------------------------------------
+
+type EstadoHorario = "disponible" | "no_publicado" | "no_interpretable" | "error_consulta";
+
+interface Horario {
+  estado: EstadoHorario;
+  valorOriginal: string | null;
+  fuente: "geoapify";
+}
+
+interface LugarRespuesta {
+  idExterno: string;
+  proveedor: string;
+  nombre: string;
+  direccion: string | null;
+  lat: number;
+  lng: number;
+  categorias: string[];
+  horario: Horario;
+}
+
+interface CuerpoLugares {
+  lugares: LugarRespuesta[];
+}
+
+interface DetalleError {
+  parametro: string;
+  mensaje: string;
+}
+
+interface CuerpoError {
+  error: {
+    codigo: string;
+    mensaje: string;
+    detalles?: DetalleError[];
+  };
+}
+
+interface Resultado<T> {
+  estado: number;
+  texto: string;
+  cuerpo: T;
+}
+
+interface Llamada {
+  url: URL;
+  opciones: RequestInit | undefined;
+}
+
+type Simulador = (url: string | URL, opciones: RequestInit | undefined) => Response | Promise<Response>;
+
+type ParametroLugares = "lat" | "lng" | "categoria" | "radio" | "limite" | "intereses";
+
+// ---------------------------------------------------------------------------
+// Constantes y estado compartido
+// ---------------------------------------------------------------------------
 
 const CLAVE = "clave-de-prueba-no-real-123";
-const SIN_HORARIO = { estado: "no_publicado", valorOriginal: null, fuente: "geoapify" };
+const SIN_HORARIO: Horario = { estado: "no_publicado", valorOriginal: null, fuente: "geoapify" };
 
-let simulador;
-let llamadas;
-let llamadasDetalles;
-let servidor;
-let baseUrl;
+let simulador: Simulador;
+let llamadas: Llamada[] = [];
+let llamadasDetalles: (string | null)[] = [];
+let servidor: Server;
+let baseUrl: string;
 
-function simular(responder) {
+// ---------------------------------------------------------------------------
+// Utilidades
+// ---------------------------------------------------------------------------
+
+function simular(responder: Simulador): void {
   simulador = responder;
 }
 
-function respuestaJson(cuerpo, estado = 200) {
+function respuestaJson(cuerpo: unknown, estado = 200): Response {
   return new Response(JSON.stringify(cuerpo), {
     status: estado,
     headers: { "Content-Type": "application/json" },
   });
 }
 
-function coleccion(features) {
+function coleccion(features: unknown[]) {
   return { type: "FeatureCollection", features };
 }
 
-function feature(propiedades) {
+function feature(propiedades: Record<string, unknown>) {
   return { type: "Feature", properties: propiedades, geometry: { type: "Point", coordinates: [propiedades.lon, propiedades.lat] } };
 }
 
-async function consultar(ruta) {
+async function consultar<T = CuerpoLugares>(ruta: string): Promise<Resultado<T>> {
   const respuesta = await fetch(`${baseUrl}${ruta}`);
   const texto = await respuesta.text();
-  return { estado: respuesta.status, texto, cuerpo: JSON.parse(texto) };
+  return { estado: respuesta.status, texto, cuerpo: JSON.parse(texto) as T };
 }
 
-function verificarError(resultado, estado, codigo) {
+function verificarError(resultado: Resultado<CuerpoError>, estado: number, codigo: string): void {
   assert.equal(resultado.estado, estado);
   assert.equal(resultado.cuerpo.error.codigo, codigo);
   assert.equal(typeof resultado.cuerpo.error.mensaje, "string");
@@ -45,12 +110,32 @@ function verificarError(resultado, estado, codigo) {
   assert.ok(!resultado.texto.includes("apiKey"));
 }
 
+function detallesDe(resultado: Resultado<CuerpoError>): DetalleError[] {
+  const { detalles } = resultado.cuerpo.error;
+  assert.ok(Array.isArray(detalles), "el error debe incluir detalles");
+  return detalles;
+}
+
+function senalDe(opciones: RequestInit | undefined): AbortSignal {
+  const senal = opciones?.signal;
+  assert.ok(senal instanceof AbortSignal, "la petición debe incluir un AbortSignal");
+  return senal;
+}
+
+function puertoDe(instancia: Server): number {
+  return (instancia.address() as AddressInfo).port;
+}
+
+// ---------------------------------------------------------------------------
+// Ciclo de vida
+// ---------------------------------------------------------------------------
+
 before(async () => {
   const app = crearApp({
     apiKey: CLAVE,
     tiempoEsperaMs: 50,
     detalles: { tiempoEsperaMs: 50, intervaloMs: 0, presupuestoMs: 1000 },
-    fetch: async (url, opciones) => {
+    fetch: async (url: string | URL, opciones?: RequestInit) => {
       const direccion = new URL(url);
       if (direccion.pathname === "/v2/place-details") {
         const id = direccion.searchParams.get("id");
@@ -63,7 +148,7 @@ before(async () => {
   });
   servidor = app.listen(0, "127.0.0.1");
   await once(servidor, "listening");
-  baseUrl = `http://127.0.0.1:${servidor.address().port}`;
+  baseUrl = `http://127.0.0.1:${puertoDe(servidor)}`;
 });
 
 after(() => {
@@ -76,6 +161,10 @@ beforeEach(() => {
   llamadasDetalles = [];
   simular(() => respuestaJson(coleccion([])));
 });
+
+// ---------------------------------------------------------------------------
+// Pruebas
+// ---------------------------------------------------------------------------
 
 describe("GET /api/lugares - consulta exitosa", () => {
   test("transforma los resultados de Geoapify al formato uniforme", async () => {
@@ -126,7 +215,7 @@ describe("GET /api/lugares - consulta exitosa", () => {
     assert.equal(url.searchParams.get("limit"), "7");
     assert.equal(url.searchParams.get("lang"), "es");
     assert.equal(url.searchParams.get("apiKey"), CLAVE);
-    assert.ok(opciones.signal instanceof AbortSignal);
+    assert.ok(opciones?.signal instanceof AbortSignal);
   });
 
   test("aplica radio 5000 y límite 20 por defecto", async () => {
@@ -230,9 +319,9 @@ describe("GET /api/lugares - consulta exitosa", () => {
 });
 
 describe("GET /api/lugares - validación de parámetros", () => {
-  const BASE = { lat: "14.6", lng: "-90.5", categoria: "entertainment.museum" };
+  const BASE: Partial<Record<ParametroLugares, string>> = { lat: "14.6", lng: "-90.5", categoria: "entertainment.museum" };
 
-  const casosInvalidos = [
+  const casosInvalidos: [descripcion: string, cambios: Partial<Record<ParametroLugares, string | undefined>>][] = [
     ["falta lat", { lat: undefined }],
     ["falta lng", { lng: undefined }],
     ["falta categoria", { categoria: undefined }],
@@ -284,7 +373,7 @@ describe("GET /api/lugares - validación de parámetros", () => {
         }
       }
 
-      const resultado = await consultar(`/api/lugares?${parametros}`);
+      const resultado = await consultar<CuerpoError>(`/api/lugares?${parametros}`);
 
       verificarError(resultado, 400, "PARAMETRO_INVALIDO");
       assert.ok(Array.isArray(resultado.cuerpo.error.detalles));
@@ -293,36 +382,42 @@ describe("GET /api/lugares - validación de parámetros", () => {
   }
 
   test("rechaza parámetros repetidos", async () => {
-    const resultado = await consultar("/api/lugares?lat=14.6&lat=15&lng=-90.5&categoria=entertainment.museum");
+    const resultado = await consultar<CuerpoError>("/api/lugares?lat=14.6&lat=15&lng=-90.5&categoria=entertainment.museum");
 
     verificarError(resultado, 400, "PARAMETRO_INVALIDO");
     assert.equal(llamadas.length, 0);
   });
 
   test("rechaza parámetros con estructura de objeto", async () => {
-    const resultado = await consultar("/api/lugares?lat[valor]=14.6&lng=-90.5&categoria=entertainment.museum");
+    const resultado = await consultar<CuerpoError>("/api/lugares?lat[valor]=14.6&lng=-90.5&categoria=entertainment.museum");
 
     verificarError(resultado, 400, "PARAMETRO_INVALIDO");
     assert.equal(llamadas.length, 0);
   });
 
   test("informa todos los parámetros inválidos y las categorías permitidas", async () => {
-    const resultado = await consultar("/api/lugares?lat=abc&categoria=otra");
+    const resultado = await consultar<CuerpoError>("/api/lugares?lat=abc&categoria=otra");
 
-    const parametros = resultado.cuerpo.error.detalles.map((detalle) => detalle.parametro);
-    assert.deepEqual(parametros, ["lat", "lng", "categoria"]);
-    const detalleCategoria = resultado.cuerpo.error.detalles.find((detalle) => detalle.parametro === "categoria");
+    const detalles = detallesDe(resultado);
+    assert.deepEqual(
+      detalles.map((detalle) => detalle.parametro),
+      ["lat", "lng", "categoria"],
+    );
+    const detalleCategoria = detalles.find((detalle) => detalle.parametro === "categoria");
+    assert.ok(detalleCategoria, "falta el detalle de categoria");
     assert.match(detalleCategoria.mensaje, /entertainment\.museum/);
   });
 });
 
 describe("GET /api/lugares - búsqueda por intereses", () => {
-  function rutaIntereses(parametros) {
+  function rutaIntereses(parametros: Partial<Record<ParametroLugares, string>>): string {
     return `/api/lugares?${new URLSearchParams({ lat: "14.6349", lng: "-90.5069", ...parametros })}`;
   }
 
-  function categoriasEnviadas() {
-    return llamadas[0].url.searchParams.get("categories").split(",");
+  function categoriasEnviadas(): string[] {
+    const categorias = llamadas[0].url.searchParams.get("categories");
+    assert.ok(categorias !== null, "la petición no incluye categories");
+    return categorias.split(",");
   }
 
   test("un interés se traduce a sus categorías de Geoapify", async () => {
@@ -509,17 +604,18 @@ describe("GET /api/lugares - búsqueda por intereses", () => {
   });
 
   test("rechaza el parámetro intereses repetido sin consultar al proveedor", async () => {
-    const resultado = await consultar("/api/lugares?lat=14.6&lng=-90.5&intereses=Cultura&intereses=Arte");
+    const resultado = await consultar<CuerpoError>("/api/lugares?lat=14.6&lng=-90.5&intereses=Cultura&intereses=Arte");
 
     verificarError(resultado, 400, "PARAMETRO_INVALIDO");
     assert.equal(llamadas.length, 0);
   });
 
   test("informa los intereses desconocidos y los valores permitidos", async () => {
-    const resultado = await consultar(rutaIntereses({ intereses: "Cultura,Deportes,Museos" }));
+    const resultado = await consultar<CuerpoError>(rutaIntereses({ intereses: "Cultura,Deportes,Museos" }));
 
     verificarError(resultado, 400, "PARAMETRO_INVALIDO");
-    const [detalle] = resultado.cuerpo.error.detalles;
+    const [detalle] = detallesDe(resultado);
+    assert.ok(detalle, "falta el detalle de intereses");
     assert.equal(detalle.parametro, "intereses");
     assert.match(detalle.mensaje, /Deportes, Museos/);
     assert.match(detalle.mensaje, /Vida nocturna/);
@@ -528,13 +624,13 @@ describe("GET /api/lugares - búsqueda por intereses", () => {
 
   test("mantiene los errores del proveedor al consultar por intereses", async () => {
     simular(() => respuestaJson({ message: `Too Many Requests ${CLAVE}` }, 429));
-    verificarError(await consultar(rutaIntereses({ intereses: "Cultura" })), 503, "PROVEEDOR_LIMITE_SOLICITUDES");
+    verificarError(await consultar<CuerpoError>(rutaIntereses({ intereses: "Cultura" })), 503, "PROVEEDOR_LIMITE_SOLICITUDES");
 
     simular(() => respuestaJson({ message: "Invalid apiKey" }, 401));
-    verificarError(await consultar(rutaIntereses({ intereses: "Cultura" })), 502, "PROVEEDOR_CREDENCIALES_INVALIDAS");
+    verificarError(await consultar<CuerpoError>(rutaIntereses({ intereses: "Cultura" })), 502, "PROVEEDOR_CREDENCIALES_INVALIDAS");
 
     simular(() => respuestaJson({ type: "FeatureCollection" }));
-    verificarError(await consultar(rutaIntereses({ intereses: "Cultura" })), 502, "PROVEEDOR_RESPUESTA_INVALIDA");
+    verificarError(await consultar<CuerpoError>(rutaIntereses({ intereses: "Cultura" })), 502, "PROVEEDOR_RESPUESTA_INVALIDA");
   });
 });
 
@@ -544,7 +640,7 @@ describe("GET /api/lugares - errores del proveedor", () => {
   test("credenciales rechazadas (401) producen un error de configuración controlado", async () => {
     simular(() => respuestaJson({ statusCode: 401, error: "Unauthorized", message: `Invalid apiKey ${CLAVE}` }, 401));
 
-    const resultado = await consultar(RUTA);
+    const resultado = await consultar<CuerpoError>(RUTA);
 
     verificarError(resultado, 502, "PROVEEDOR_CREDENCIALES_INVALIDAS");
     assert.ok(!resultado.texto.includes("Unauthorized"));
@@ -553,19 +649,19 @@ describe("GET /api/lugares - errores del proveedor", () => {
   test("credenciales rechazadas (403) producen un error de configuración controlado", async () => {
     simular(() => respuestaJson({ message: "Forbidden" }, 403));
 
-    verificarError(await consultar(RUTA), 502, "PROVEEDOR_CREDENCIALES_INVALIDAS");
+    verificarError(await consultar<CuerpoError>(RUTA), 502, "PROVEEDOR_CREDENCIALES_INVALIDAS");
   });
 
   test("límite de solicitudes (429) produce 503 con código específico", async () => {
     simular(() => respuestaJson({ message: "Too Many Requests" }, 429));
 
-    verificarError(await consultar(RUTA), 503, "PROVEEDOR_LIMITE_SOLICITUDES");
+    verificarError(await consultar<CuerpoError>(RUTA), 503, "PROVEEDOR_LIMITE_SOLICITUDES");
   });
 
   test("errores del servidor del proveedor producen 502 sin exponer su cuerpo", async () => {
     simular(() => new Response("Internal stack trace at geoapify.internal", { status: 500 }));
 
-    const resultado = await consultar(RUTA);
+    const resultado = await consultar<CuerpoError>(RUTA);
 
     verificarError(resultado, 502, "PROVEEDOR_ERROR");
     assert.ok(!resultado.texto.includes("stack trace"));
@@ -576,35 +672,36 @@ describe("GET /api/lugares - errores del proveedor", () => {
       throw new TypeError(`fetch failed https://api.geoapify.com/v2/places?apiKey=${CLAVE}`);
     });
 
-    verificarError(await consultar(RUTA), 502, "PROVEEDOR_NO_DISPONIBLE");
+    verificarError(await consultar<CuerpoError>(RUTA), 502, "PROVEEDOR_NO_DISPONIBLE");
   });
 
   test("tiempo de espera agotado cancela la petición y produce 504", async () => {
-    let senal;
-    simular(
-      (url, opciones) =>
-        new Promise((resolve, reject) => {
-          senal = opciones.signal;
-          opciones.signal.addEventListener("abort", () => reject(opciones.signal.reason));
-        }),
-    );
+    let senal: AbortSignal | undefined;
+    simular((_url, opciones) => {
+      const actual = senalDe(opciones);
+      senal = actual;
+      return new Promise<Response>((_resolve, reject) => {
+        actual.addEventListener("abort", () => reject(actual.reason));
+      });
+    });
 
-    const resultado = await consultar(RUTA);
+    const resultado = await consultar<CuerpoError>(RUTA);
 
     verificarError(resultado, 504, "PROVEEDOR_TIEMPO_AGOTADO");
-    assert.equal(senal.aborted, true);
+    assert.equal(senal?.aborted, true);
   });
 
   test("JSON inválido produce 502", async () => {
     simular(() => new Response("<html>no es json</html>", { status: 200 }));
 
-    verificarError(await consultar(RUTA), 502, "PROVEEDOR_RESPUESTA_INVALIDA");
+    verificarError(await consultar<CuerpoError>(RUTA), 502, "PROVEEDOR_RESPUESTA_INVALIDA");
   });
 
   test("estructura inesperada produce 502 y no se confunde con una colección vacía", async () => {
-    for (const cuerpo of [{ type: "FeatureCollection" }, { features: "no-es-arreglo" }, [], null, "texto"]) {
+    const cuerpos: unknown[] = [{ type: "FeatureCollection" }, { features: "no-es-arreglo" }, [], null, "texto"];
+    for (const cuerpo of cuerpos) {
       simular(() => respuestaJson(cuerpo));
-      verificarError(await consultar(RUTA), 502, "PROVEEDOR_RESPUESTA_INVALIDA");
+      verificarError(await consultar<CuerpoError>(RUTA), 502, "PROVEEDOR_RESPUESTA_INVALIDA");
     }
   });
 });
@@ -612,12 +709,11 @@ describe("GET /api/lugares - errores del proveedor", () => {
 describe("configuración y rutas", () => {
   test("sin clave configurada responde un error controlado sin consultar al proveedor", async () => {
     const app = crearApp({ apiKey: "  ", fetch: async () => assert.fail("no debe consultar al proveedor") });
-    const servidorSinClave = app.listen(0, "127.0.0.1");
+    const servidorSinClave: Server = app.listen(0, "127.0.0.1");
     await once(servidorSinClave, "listening");
     try {
-      const { port } = servidorSinClave.address();
-      const respuesta = await fetch(`http://127.0.0.1:${port}/api/lugares?lat=1&lng=1&categoria=catering.cafe`);
-      const cuerpo = await respuesta.json();
+      const respuesta = await fetch(`http://127.0.0.1:${puertoDe(servidorSinClave)}/api/lugares?lat=1&lng=1&categoria=catering.cafe`);
+      const cuerpo = (await respuesta.json()) as CuerpoError;
       assert.equal(respuesta.status, 500);
       assert.equal(cuerpo.error.codigo, "SERVICIO_NO_CONFIGURADO");
     } finally {
@@ -627,7 +723,7 @@ describe("configuración y rutas", () => {
   });
 
   test("rutas inexistentes devuelven 404 con el formato de error", async () => {
-    const resultado = await consultar("/api/no-existe");
+    const resultado = await consultar<CuerpoError>("/api/no-existe");
 
     verificarError(resultado, 404, "RUTA_NO_ENCONTRADA");
   });

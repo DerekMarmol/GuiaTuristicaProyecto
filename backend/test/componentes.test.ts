@@ -1,13 +1,19 @@
-const { test, describe } = require("node:test");
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const { validarConsultaLugares, normalizarInteres } = require("../src/validacion/lugares");
-const { transformarLugares } = require("../src/geoapify/transformar");
-const { CATEGORIAS_POR_INTERES, INTERESES_PERMITIDOS } = require("../src/config/intereses");
-const { ErrorApi } = require("../src/errores");
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { validarConsultaLugares, normalizarInteres } from "../src/validacion/lugares";
+import { transformarLugares } from "../src/geoapify/transformar";
+import { CATEGORIAS_POR_INTERES, INTERESES_PERMITIDOS } from "../src/config/intereses";
+import { ErrorApi } from "../src/errores";
 
 const CLAVE_CATEGORIA = /^[a-z0-9_]+(\.[a-z0-9_]+)*$/;
+
+type EntradaTransformar = Parameters<typeof transformarLugares>[0];
+
+function tieneCodigo(error: unknown, codigo: string): boolean {
+  return typeof error === "object" && error !== null && "codigo" in error && error.codigo === codigo;
+}
 
 describe("configuración de intereses", () => {
   test("coincide con los intereses que ofrece el frontend", () => {
@@ -53,7 +59,7 @@ describe("validarConsultaLugares", () => {
   test("exige categoria o intereses", () => {
     assert.throws(
       () => validarConsultaLugares({ lat: "14.6", lng: "-90.5" }),
-      (error) => error instanceof ErrorApi && error.estado === 400 && error.detalles[0].parametro === "categoria",
+      (error: unknown) => error instanceof ErrorApi && error.estado === 400 && error.detalles?.[0]?.parametro === "categoria",
     );
   });
 
@@ -103,14 +109,18 @@ describe("transformarLugares", () => {
         { properties: { place_id: "c", name: "C", lat: 1, lon: 181, categories: ["beach"] } },
         { properties: { place_id: "d", name: "D", lat: 1, lon: 1, categories: [] } },
       ],
-    });
+    } as EntradaTransformar);
 
     assert.deepEqual(lugares, []);
   });
 
   test("rechaza estructuras inválidas en lugar de devolver vacío", () => {
-    for (const datos of [null, {}, { features: {} }, []]) {
-      assert.throws(() => transformarLugares(datos), (error) => error.codigo === "PROVEEDOR_RESPUESTA_INVALIDA");
+    const invalidos: unknown[] = [null, {}, { features: {} }, []];
+    for (const datos of invalidos) {
+      assert.throws(
+        () => transformarLugares(datos as EntradaTransformar),
+        (error: unknown) => tieneCodigo(error, "PROVEEDOR_RESPUESTA_INVALIDA"),
+      );
     }
   });
 });

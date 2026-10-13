@@ -1,8 +1,8 @@
-const path = require("node:path");
+import path from "node:path";
+import dotenv from "dotenv";
+import { crearApp } from "./app";
 
-require("dotenv").config({ path: path.join(__dirname, "..", ".env"), quiet: true });
-
-const { crearApp } = require("./app");
+dotenv.config({ path: path.join(__dirname, "..", ".env"), quiet: true });
 
 const apiKey = process.env.GEOAPIFY_API_KEY?.trim();
 if (!apiKey) {

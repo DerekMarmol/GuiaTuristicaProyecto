@@ -1,6 +1,6 @@
 # Backend
 
-API HTTP con Node.js y Express (CommonJS). Expone la consulta de lugares de interés mediante [Geoapify Places API](https://apidocs.geoapify.com/docs/places/), enriquecida con los horarios publicados que devuelve [Geoapify Place Details API](https://apidocs.geoapify.com/docs/place-details/), y el pronóstico del clima para las fechas de un viaje mediante [OpenWeather 5 Day / 3 Hour Forecast](https://openweathermap.org/forecast5). La configuración de Prisma se mantiene sin cambios.
+API HTTP con Node.js, Express y TypeScript (CommonJS). Expone la consulta de lugares de interés mediante [Geoapify Places API](https://apidocs.geoapify.com/docs/places/), enriquecida con los horarios publicados que devuelve [Geoapify Place Details API](https://apidocs.geoapify.com/docs/place-details/), y el pronóstico del clima para las fechas de un viaje mediante [OpenWeather 5 Day / 3 Hour Forecast](https://openweathermap.org/forecast5). La configuración de Prisma se mantiene sin cambios.
 
 ## Requisitos
 
@@ -30,8 +30,10 @@ El servidor carga `backend/.env` sin sobrescribir variables que ya estén defini
 ## Comandos
 
 ```powershell
-npm start      # inicia el servidor
-npm run dev    # inicia el servidor y lo reinicia al detectar cambios
+npm run build  # compila TypeScript a dist/
+npm start      # inicia el servidor compilado (requiere npm run build)
+npm run dev    # inicia el servidor con tsx y lo reinicia al detectar cambios
+npm run typecheck  # verifica los tipos de src/ y test/
 npm test       # ejecuta las pruebas con Geoapify y OpenWeather simulados (no requiere claves)
 npm run ai:test   # pruebas del módulo de IA (validador, orquestador y validación de estancias)
 ```
@@ -68,7 +70,7 @@ Si se envían `categoria` e `intereses`, se consulta la unión de la categoría 
 
 ### Intereses admitidos
 
-Son los mismos que ofrece el frontend en el paso 3. Se aceptan sin distinguir mayúsculas, con espacios exteriores y con o sin tildes (`vida nocturna`, `GASTRONOMIA`, ` Fotografía `). Se rechazan intereses desconocidos, elementos vacíos (`Cultura,`) y el parámetro repetido. La correspondencia está en `src/config/intereses.js` y es una decisión del proyecto:
+Son los mismos que ofrece el frontend en el paso 3. Se aceptan sin distinguir mayúsculas, con espacios exteriores y con o sin tildes (`vida nocturna`, `GASTRONOMIA`, ` Fotografía `). Se rechazan intereses desconocidos, elementos vacíos (`Cultura,`) y el parámetro repetido. La correspondencia está en `src/config/intereses.ts` y es una decisión del proyecto:
 
 | Interés | Categorías de Geoapify | Qué representa |
 | --- | --- | --- |
@@ -85,7 +87,7 @@ Son los mismos que ofrece el frontend en el paso 3. Se aceptan sin distinguir ma
 
 ### Categorías admitidas en `categoria`
 
-Definidas en `src/config/categorias.js`:
+Definidas en `src/config/categorias.ts`:
 
 - `entertainment.museum`
 - `entertainment.culture`
@@ -166,9 +168,9 @@ El texto se valida con la biblioteca [`opening_hours`](https://github.com/openin
 
 | Límite | Valor | Constante |
 | --- | --- | --- |
-| Consultas de detalles simultáneas | 4 | `CONCURRENCIA_DETALLES` en `src/geoapify/enriquecer.js` |
+| Consultas de detalles simultáneas | 4 | `CONCURRENCIA_DETALLES` en `src/geoapify/enriquecer.ts` |
 | Separación mínima entre inicios de consultas | 250 ms (como máximo 4 por segundo) | `INTERVALO_DETALLES_MS` |
-| Tiempo de espera por consulta de detalles | 5 segundos | `TIEMPO_ESPERA_DETALLE_MS` en `src/geoapify/detalles.js` |
+| Tiempo de espera por consulta de detalles | 5 segundos | `TIEMPO_ESPERA_DETALLE_MS` en `src/geoapify/detalles.ts` |
 | Presupuesto total del enriquecimiento | 10 segundos | `PRESUPUESTO_DETALLES_MS` |
 
 - La separación entre inicios mantiene el ritmo por debajo de las 5 solicitudes por segundo que garantiza el plan gratuito de Geoapify.
@@ -266,7 +268,7 @@ Es el único endpoint de clima del backend y el que consume el frontend: el paso
 
 - Las coordenadas siguen las mismas reglas que en `/api/lugares`: notación decimal simple, se aceptan `0` y los valores límite, y se rechazan valores vacíos, repetidos, parciales, `NaN`, `Infinity` y notación exponencial.
 - Las fechas se validan sin depender de `Date`: se rechazan `2026-02-30`, `2026-04-31`, `2025-02-29`, `1900-02-29`, meses o días `00`, formatos como `2026-1-05`, `2026/10/12` o `12-10-2026`, horas añadidas y espacios. Se aceptan los 29 de febrero de años bisiestos (`2028-02-29`, `2000-02-29`).
-- El rango incluye ambas fechas. Su máximo técnico es de **366 días** (`MAX_DIAS_RANGO` en `src/validacion/clima.js`), para evitar respuestas desproporcionadas. Este límite no tiene relación con el horizonte meteorológico: un viaje de 14 o de 366 días es válido aunque el pronóstico solo cubra unos 5 días. Un rango mayor se rechaza con `400`; nunca se recorta en silencio.
+- El rango incluye ambas fechas. Su máximo técnico es de **366 días** (`MAX_DIAS_RANGO` en `src/validacion/clima.ts`), para evitar respuestas desproporcionadas. Este límite no tiene relación con el horizonte meteorológico: un viaje de 14 o de 366 días es válido aunque el pronóstico solo cubra unos 5 días. Un rango mayor se rechaza con `400`; nunca se recorta en silencio.
 - Las fechas pasadas son válidas y aparecen como `fuera_de_cobertura`: no se consultan datos históricos.
 - Cualquier parámetro inválido produce `400` antes de consultar a OpenWeather.
 
@@ -274,7 +276,7 @@ Es el único endpoint de clima del backend y el que consume el frontend: el paso
 
 Cada solicitud hace **una sola** petición a `GET https://api.openweathermap.org/data/2.5/forecast` con `lat`, `lon` (nuestro `lng`), `appid`, `units=metric` y `lang=es`. No se envía `cnt` ni ninguna fecha: el proveedor devuelve toda la serie disponible (normalmente 40 intervalos de tres horas, unos 5 días a partir del momento de la consulta) y el rango del viaje se aplica después. No se dan por supuestos 40 registros, 5 fechas completas ni que la serie empiece en `fechaInicio`: la cobertura se calcula con los registros recibidos.
 
-- Tiempo de espera de 10 segundos (`TIEMPO_ESPERA_MS` en `src/openweather/cliente.js`) que cubre también la lectura del cuerpo; al agotarse, la petición se cancela.
+- Tiempo de espera de 10 segundos (`TIEMPO_ESPERA_MS` en `src/openweather/cliente.ts`) que cubre también la lectura del cuerpo; al agotarse, la petición se cancela.
 - Sin reintentos automáticos ni caché.
 - No se registran la clave, la URL autenticada ni el cuerpo de los errores del proveedor.
 

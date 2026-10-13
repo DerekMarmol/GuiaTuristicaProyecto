@@ -1,27 +1,64 @@
-const { ErrorApi } = require("../errores");
-const { fechaLocal } = require("../clima/fechas");
+import { ErrorApi } from "../errores";
+import { fechaLocal } from "../clima/fechas";
+import { esObjeto } from "../tipos";
 
 const SEGUNDOS_POR_INTERVALO = 3 * 3600;
-const INTERVALOS_POR_DIA = 8;
+export const INTERVALOS_POR_DIA = 8;
 const DESPLAZAMIENTO_MINIMO_S = -12 * 3600;
 const DESPLAZAMIENTO_MAXIMO_S = 14 * 3600;
 
-function respuestaInvalida() {
+export interface RegistroPronostico {
+  dt: number;
+  temperaturaC: number;
+  lluviaMm: number;
+}
+
+export interface Pronostico {
+  desplazamientoUtcSegundos: number;
+  registros: RegistroPronostico[];
+}
+
+export type EstadoDia = "disponible" | "parcial" | "fuera_de_cobertura" | "sin_datos";
+
+export interface ResumenDia {
+  fecha: string;
+  estado: EstadoDia;
+  temperaturaPromedioC: number | null;
+  temperaturaMinimaC: number | null;
+  temperaturaMaximaC: number | null;
+  lluviaMm: number | null;
+  intervalosDisponibles: number;
+}
+
+export interface Cobertura {
+  desde: string;
+  hasta: string;
+  primerIntervalo: string;
+  ultimoIntervalo: string;
+}
+
+export interface Advertencia {
+  codigo: "SERIE_VACIA" | "FUERA_DE_COBERTURA" | "COBERTURA_PARCIAL" | "SIN_DATOS";
+  mensaje: string;
+  fechas: string[];
+}
+
+function respuestaInvalida(): ErrorApi {
   return new ErrorApi(502, "PROVEEDOR_RESPUESTA_INVALIDA", "El proveedor de clima devolvió una respuesta con formato inesperado.");
 }
 
-function esObjeto(valor) {
-  return valor !== null && typeof valor === "object" && !Array.isArray(valor);
-}
-
-function esNumeroFinito(valor) {
+function esNumeroFinito(valor: unknown): valor is number {
   return typeof valor === "number" && Number.isFinite(valor);
 }
 
-function leerDesplazamiento(ciudad) {
+function esEnteroSeguro(valor: unknown): valor is number {
+  return Number.isSafeInteger(valor);
+}
+
+function leerDesplazamiento(ciudad: unknown): number {
   const desplazamiento = esObjeto(ciudad) ? ciudad.timezone : undefined;
   if (
-    !Number.isSafeInteger(desplazamiento) ||
+    !esEnteroSeguro(desplazamiento) ||
     desplazamiento < DESPLAZAMIENTO_MINIMO_S ||
     desplazamiento > DESPLAZAMIENTO_MAXIMO_S
   ) {
@@ -30,7 +67,7 @@ function leerDesplazamiento(ciudad) {
   return desplazamiento;
 }
 
-function leerLluvia(registro) {
+function leerLluvia(registro: Record<string, unknown>): number {
   if (!("rain" in registro)) {
     return 0;
   }
@@ -41,8 +78,8 @@ function leerLluvia(registro) {
   return volumen;
 }
 
-function leerRegistro(registro) {
-  if (!esObjeto(registro) || !Number.isSafeInteger(registro.dt) || !esObjeto(registro.main)) {
+function leerRegistro(registro: unknown): RegistroPronostico {
+  if (!esObjeto(registro) || !esEnteroSeguro(registro.dt) || !esObjeto(registro.main)) {
     throw respuestaInvalida();
   }
   if (!esNumeroFinito(registro.main.temp)) {
@@ -51,7 +88,7 @@ function leerRegistro(registro) {
   return { dt: registro.dt, temperaturaC: registro.main.temp, lluviaMm: leerLluvia(registro) };
 }
 
-function interpretarPronostico(datos) {
+export function interpretarPronostico(datos: unknown): Pronostico {
   if (!esObjeto(datos) || !Array.isArray(datos.list)) {
     throw respuestaInvalida();
   }
@@ -59,7 +96,7 @@ function interpretarPronostico(datos) {
   const desplazamientoUtcSegundos = leerDesplazamiento(datos.city);
   const ordenados = datos.list.map(leerRegistro).sort((a, b) => a.dt - b.dt);
 
-  const registros = [];
+  const registros: RegistroPronostico[] = [];
   for (const registro of ordenados) {
     const anterior = registros[registros.length - 1];
     if (anterior && anterior.dt === registro.dt) {
@@ -74,12 +111,12 @@ function interpretarPronostico(datos) {
   return { desplazamientoUtcSegundos, registros };
 }
 
-function redondear(valor) {
+function redondear(valor: number): number {
   const redondeado = Math.round(valor * 100) / 100;
   return redondeado === 0 ? 0 : redondeado;
 }
 
-function resumir(fecha, registros) {
+function resumir(fecha: string, registros: RegistroPronostico[]): ResumenDia {
   const temperaturas = registros.map((registro) => registro.temperaturaC);
   const suma = temperaturas.reduce((total, temperatura) => total + temperatura, 0);
   const lluvia = registros.reduce((total, registro) => total + registro.lluviaMm, 0);
@@ -95,7 +132,7 @@ function resumir(fecha, registros) {
   };
 }
 
-function sinResumen(fecha, estado) {
+function sinResumen(fecha: string, estado: EstadoDia): ResumenDia {
   return {
     fecha,
     estado,
@@ -107,7 +144,7 @@ function sinResumen(fecha, estado) {
   };
 }
 
-function calcularCobertura(registros, desplazamientoUtcSegundos) {
+function calcularCobertura(registros: RegistroPronostico[], desplazamientoUtcSegundos: number): Cobertura | null {
   if (registros.length === 0) {
     return null;
   }
@@ -121,14 +158,20 @@ function calcularCobertura(registros, desplazamientoUtcSegundos) {
   };
 }
 
-function resumirPorDia({ registros, desplazamientoUtcSegundos, fechas }) {
-  const porFecha = new Map();
+export function resumirPorDia({
+  registros,
+  desplazamientoUtcSegundos,
+  fechas,
+}: Pronostico & { fechas: string[] }): { cobertura: Cobertura | null; dias: ResumenDia[] } {
+  const porFecha = new Map<string, RegistroPronostico[]>();
   for (const registro of registros) {
     const fecha = fechaLocal(registro.dt, desplazamientoUtcSegundos);
-    if (!porFecha.has(fecha)) {
-      porFecha.set(fecha, []);
+    const delDia = porFecha.get(fecha);
+    if (delDia) {
+      delDia.push(registro);
+    } else {
+      porFecha.set(fecha, [registro]);
     }
-    porFecha.get(fecha).push(registro);
   }
 
   const cobertura = calcularCobertura(registros, desplazamientoUtcSegundos);
@@ -147,11 +190,11 @@ function resumirPorDia({ registros, desplazamientoUtcSegundos, fechas }) {
   return { cobertura, dias };
 }
 
-function fechasConEstado(dias, estado) {
+function fechasConEstado(dias: ResumenDia[], estado: EstadoDia): string[] {
   return dias.filter((dia) => dia.estado === estado).map((dia) => dia.fecha);
 }
 
-function construirAdvertencias(dias, cobertura) {
+export function construirAdvertencias(dias: ResumenDia[], cobertura: Cobertura | null): Advertencia[] {
   if (!cobertura) {
     return [
       {
@@ -162,7 +205,7 @@ function construirAdvertencias(dias, cobertura) {
     ];
   }
 
-  const advertencias = [];
+  const advertencias: Advertencia[] = [];
   const fuera = fechasConEstado(dias, "fuera_de_cobertura");
   if (fuera.length > 0) {
     advertencias.push({
@@ -189,5 +232,3 @@ function construirAdvertencias(dias, cobertura) {
   }
   return advertencias;
 }
-
-module.exports = { interpretarPronostico, resumirPorDia, construirAdvertencias, INTERVALOS_POR_DIA };

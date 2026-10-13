@@ -1,33 +1,123 @@
-const { test, describe, before, after, beforeEach } = require("node:test");
-const assert = require("node:assert/strict");
-const { once } = require("node:events");
-const { crearApp } = require("../src/app");
-const { listarFechas } = require("../src/clima/fechas");
+import { test, describe, before, after, beforeEach } from "node:test";
+import assert from "node:assert/strict";
+import { once } from "node:events";
+import type { Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { crearApp } from "../src/app";
+import { listarFechas } from "../src/clima/fechas";
+
+// ---------------------------------------------------------------------------
+// Tipos
+// ---------------------------------------------------------------------------
+
+type EstadoDia = "disponible" | "parcial" | "fuera_de_cobertura" | "sin_datos";
+
+interface ResumenDia {
+  fecha: string;
+  estado: EstadoDia;
+  temperaturaPromedioC: number | null;
+  temperaturaMinimaC: number | null;
+  temperaturaMaximaC: number | null;
+  lluviaMm: number | null;
+  intervalosDisponibles: number;
+}
+
+interface Cobertura {
+  desde: string;
+  hasta: string;
+  primerIntervalo: string;
+  ultimoIntervalo: string;
+}
+
+interface Advertencia {
+  codigo: string;
+  fechas: string[];
+}
+
+interface CuerpoPronostico {
+  fuente: string;
+  ubicacion: { lat: number; lng: number };
+  rango: { fechaInicio: string; fechaFin: string; totalDias: number };
+  consultadoEn: string;
+  desplazamientoUtcSegundos: number;
+  cobertura: Cobertura | null;
+  dias: ResumenDia[];
+  advertencias: Advertencia[];
+}
+
+interface DetalleError {
+  parametro: string;
+  mensaje: string;
+}
+
+interface CuerpoError {
+  error: {
+    codigo: string;
+    mensaje: string;
+    detalles?: DetalleError[];
+  };
+}
+
+interface CuerpoLugares {
+  lugares: unknown[];
+}
+
+interface Resultado<T> {
+  estado: number;
+  texto: string;
+  cuerpo: T;
+}
+
+interface RegistroPronostico {
+  dt: number;
+  main: { temp: number; feels_like: number; humidity: number };
+  weather: { id: number; main: string; description: string }[];
+  pop: number;
+  dt_txt: string;
+  rain?: { "3h": number };
+}
+
+type Simulador = (url: string | URL, opciones: RequestInit | undefined) => Response | Promise<Response>;
+
+interface LlamadaClima {
+  url: URL;
+  opciones: RequestInit | undefined;
+}
+
+type ParametroClima = "lat" | "lng" | "fechaInicio" | "fechaFin";
+
+// ---------------------------------------------------------------------------
+// Constantes y estado compartido
+// ---------------------------------------------------------------------------
 
 const CLAVE_CLIMA = "clave-clima-de-prueba-no-real-456";
 const CLAVE_GEO = "clave-geo-de-prueba-no-real-123";
 const AHORA = new Date("2026-10-11T12:00:00.000Z");
 const HORA_MS = 3600 * 1000;
 
-let simulador;
-let llamadas;
-let llamadasGeo;
-let servidor;
-let baseUrl;
+let simulador: Simulador;
+let llamadas: LlamadaClima[] = [];
+let llamadasGeo: URL[] = [];
+let servidor: Server;
+let baseUrl: string;
 
-function simular(responder) {
+// ---------------------------------------------------------------------------
+// Utilidades
+// ---------------------------------------------------------------------------
+
+function simular(responder: Simulador): void {
   simulador = responder;
 }
 
-function respuestaJson(cuerpo, estado = 200) {
+function respuestaJson(cuerpo: unknown, estado = 200): Response {
   return new Response(JSON.stringify(cuerpo), {
     status: estado,
     headers: { "Content-Type": "application/json" },
   });
 }
 
-function registro(iso, temp, lluvia) {
-  const resultado = {
+function registro(iso: string, temp: number, lluvia?: number): RegistroPronostico {
+  const resultado: RegistroPronostico = {
     dt: Date.parse(iso) / 1000,
     main: { temp, feels_like: temp, humidity: 70 },
     weather: [{ id: 500, main: "Rain", description: "lluvia ligera" }],
@@ -40,14 +130,19 @@ function registro(iso, temp, lluvia) {
   return resultado;
 }
 
-function serie(inicioIso, cantidad, temperatura = () => 20, lluvia = () => undefined) {
+function serie(
+  inicioIso: string,
+  cantidad: number,
+  temperatura: (indice: number) => number = () => 20,
+  lluvia: (indice: number) => number | undefined = () => undefined,
+): RegistroPronostico[] {
   const inicio = Date.parse(inicioIso);
   return Array.from({ length: cantidad }, (_, indice) =>
     registro(new Date(inicio + indice * 3 * HORA_MS).toISOString(), temperatura(indice), lluvia(indice)),
   );
 }
 
-function pronostico(list, timezone = 0) {
+function pronostico(list: unknown[], timezone = 0) {
   return {
     cod: "200",
     message: 0,
@@ -57,7 +152,7 @@ function pronostico(list, timezone = 0) {
   };
 }
 
-function sinResumen(fecha, estado) {
+function sinResumen(fecha: string, estado: EstadoDia): ResumenDia {
   return {
     fecha,
     estado,
@@ -69,48 +164,73 @@ function sinResumen(fecha, estado) {
   };
 }
 
-function rutaClima(parametros) {
+function rutaClima(parametros: Record<string, string>): string {
   return `/api/clima/pronostico?${new URLSearchParams({ lat: "14.6349", lng: "-90.5069", ...parametros })}`;
 }
 
-async function consultar(ruta, base = baseUrl) {
+async function consultar<T = CuerpoPronostico>(ruta: string, base: string = baseUrl): Promise<Resultado<T>> {
   const respuesta = await fetch(`${base}${ruta}`);
   const texto = await respuesta.text();
-  return { estado: respuesta.status, texto, cuerpo: JSON.parse(texto) };
+  return { estado: respuesta.status, texto, cuerpo: JSON.parse(texto) as T };
 }
 
-function verificarSinSecretos(texto) {
+function verificarSinSecretos(texto: string): void {
   assert.ok(!texto.includes(CLAVE_CLIMA));
   assert.ok(!texto.includes(CLAVE_GEO));
   assert.ok(!texto.includes("appid"));
 }
 
-function verificarError(resultado, estado, codigo) {
+function verificarError(resultado: Resultado<CuerpoError>, estado: number, codigo: string): void {
   assert.equal(resultado.estado, estado);
   assert.equal(resultado.cuerpo.error.codigo, codigo);
   assert.equal(typeof resultado.cuerpo.error.mensaje, "string");
   verificarSinSecretos(resultado.texto);
 }
 
-function resumenes(cuerpo) {
+function detallesDe(resultado: Resultado<CuerpoError>): DetalleError[] {
+  const { detalles } = resultado.cuerpo.error;
+  assert.ok(Array.isArray(detalles), "el error debe incluir detalles");
+  return detalles;
+}
+
+function senalDe(opciones: RequestInit | undefined): AbortSignal {
+  const senal = opciones?.signal;
+  assert.ok(senal instanceof AbortSignal, "la petición debe incluir un AbortSignal");
+  return senal;
+}
+
+function resumenes(cuerpo: CuerpoPronostico) {
   return cuerpo.dias.map((dia) => [dia.fecha, dia.estado, dia.temperaturaPromedioC, dia.lluviaMm, dia.intervalosDisponibles]);
 }
 
-async function iniciar(app) {
-  const instancia = app.listen(0, "127.0.0.1");
+async function iniciar(app: ReturnType<typeof crearApp>): Promise<{ instancia: Server; base: string }> {
+  const instancia: Server = app.listen(0, "127.0.0.1");
   await once(instancia, "listening");
-  return { instancia, base: `http://127.0.0.1:${instancia.address().port}` };
+  const direccion = instancia.address() as AddressInfo;
+  return { instancia, base: `http://127.0.0.1:${direccion.port}` };
 }
 
-function detener(instancia) {
+function detener(instancia: Server): void {
   instancia.closeAllConnections();
   instancia.close();
 }
 
+function restaurarTZ(zonaOriginal: string | undefined): void {
+  if (zonaOriginal === undefined) {
+    delete process.env.TZ;
+  } else {
+    process.env.TZ = zonaOriginal;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ciclo de vida
+// ---------------------------------------------------------------------------
+
 before(async () => {
   const app = crearApp({
     apiKey: CLAVE_GEO,
-    fetch: async (url) => {
+    fetch: async (url: string | URL) => {
       llamadasGeo.push(new URL(url));
       return respuestaJson({ type: "FeatureCollection", features: [] });
     },
@@ -118,7 +238,7 @@ before(async () => {
       apiKey: CLAVE_CLIMA,
       tiempoEsperaMs: 50,
       ahora: () => AHORA,
-      fetch: async (url, opciones) => {
+      fetch: async (url: string | URL, opciones?: RequestInit) => {
         llamadas.push({ url: new URL(url), opciones });
         return simulador(url, opciones);
       },
@@ -137,6 +257,10 @@ beforeEach(() => {
   simular(() => respuestaJson(pronostico(serie("2026-10-12T00:00:00Z", 16))));
 });
 
+// ---------------------------------------------------------------------------
+// Pruebas
+// ---------------------------------------------------------------------------
+
 describe("GET /api/clima/pronostico - consulta al proveedor", () => {
   test("consulta el pronóstico de 5 días con coordenadas, unidades e idioma correctos", async () => {
     await consultar(rutaClima({ fechaInicio: "2026-10-12", fechaFin: "2026-10-13" }));
@@ -150,7 +274,7 @@ describe("GET /api/clima/pronostico - consulta al proveedor", () => {
     assert.equal(url.searchParams.get("units"), "metric");
     assert.equal(url.searchParams.get("lang"), "es");
     assert.equal(url.searchParams.get("appid"), CLAVE_CLIMA);
-    assert.ok(opciones.signal instanceof AbortSignal);
+    assert.ok(opciones?.signal instanceof AbortSignal);
     assert.equal(llamadasGeo.length, 0);
   });
 
@@ -177,7 +301,7 @@ describe("GET /api/clima/pronostico - consulta al proveedor", () => {
 
   test("libera el temporizador cuando la consulta termina", async () => {
     await consultar(rutaClima({ fechaInicio: "2026-10-12", fechaFin: "2026-10-12" }));
-    const senal = llamadas[0].opciones.signal;
+    const senal = senalDe(llamadas[0].opciones);
 
     await new Promise((resolve) => setTimeout(resolve, 120));
 
@@ -263,7 +387,7 @@ describe("GET /api/clima/pronostico - resumen diario", () => {
       sinResumen("2026-11-21", "fuera_de_cobertura"),
       sinResumen("2026-11-22", "fuera_de_cobertura"),
     ]);
-    assert.deepEqual(resultado.cuerpo.cobertura.desde, "2026-10-12");
+    assert.deepEqual(resultado.cuerpo.cobertura?.desde, "2026-10-12");
     assert.deepEqual(resultado.cuerpo.advertencias.map((advertencia) => advertencia.codigo), ["FUERA_DE_COBERTURA"]);
   });
 
@@ -276,7 +400,7 @@ describe("GET /api/clima/pronostico - resumen diario", () => {
   });
 
   test("un viaje de 14 días devuelve 14 elementos con el primer y último día parciales", async () => {
-    const lluvias = { 3: 2.4, 38: 0.6 };
+    const lluvias: Record<number, number> = { 3: 2.4, 38: 0.6 };
     simular(() => respuestaJson(pronostico(serie("2026-10-11T15:00:00Z", 40, (i) => i, (i) => lluvias[i]), -21600)));
 
     const resultado = await consultar(rutaClima({ fechaInicio: "2026-10-11", fechaFin: "2026-10-24" }));
@@ -438,7 +562,7 @@ describe("GET /api/clima/pronostico - resumen diario", () => {
         intervalosDisponibles: 8,
       },
     ]);
-    assert.equal(resultado.cuerpo.cobertura.primerIntervalo, "2026-10-12T00:00:00.000Z");
+    assert.equal(resultado.cuerpo.cobertura?.primerIntervalo, "2026-10-12T00:00:00.000Z");
   });
 
   test("ante dos registros con el mismo timestamp conserva el primero recibido", async () => {
@@ -452,7 +576,7 @@ describe("GET /api/clima/pronostico - resumen diario", () => {
 });
 
 describe("GET /api/clima/pronostico - agrupación por fecha local", () => {
-  const casos = [
+  const casos: [descripcion: string, desplazamiento: number, antesDeMedianoche: string, despuesDeMedianoche: string][] = [
     ["desplazamiento negativo (UTC-6)", -21600, "2026-10-13T03:00:00Z", "2026-10-13T06:00:00Z"],
     ["desplazamiento positivo (UTC+9)", 32400, "2026-10-12T12:00:00Z", "2026-10-12T15:00:00Z"],
     ["desplazamiento cero (UTC)", 0, "2026-10-12T21:00:00Z", "2026-10-13T00:00:00Z"],
@@ -483,7 +607,7 @@ describe("GET /api/clima/pronostico - agrupación por fecha local", () => {
     try {
       process.env.TZ = "UTC";
       const referencia = (await consultar(ruta)).cuerpo;
-      const desplazamientos = new Set();
+      const desplazamientos = new Set<number>();
 
       for (const zona of ["America/Guatemala", "Asia/Kolkata", "Pacific/Kiritimati", "America/St_Johns", "Pacific/Pago_Pago"]) {
         process.env.TZ = zona;
@@ -492,11 +616,7 @@ describe("GET /api/clima/pronostico - agrupación por fecha local", () => {
       }
       assert.ok(desplazamientos.size > 1);
     } finally {
-      if (zonaOriginal === undefined) {
-        delete process.env.TZ;
-      } else {
-        process.env.TZ = zonaOriginal;
-      }
+      restaurarTZ(zonaOriginal);
     }
   });
 
@@ -509,19 +629,15 @@ describe("GET /api/clima/pronostico - agrupación por fecha local", () => {
       process.env.TZ = "Europe/Madrid";
       assert.deepEqual(listarFechas("2026-03-28", "2026-03-30"), ["2026-03-28", "2026-03-29", "2026-03-30"]);
     } finally {
-      if (zonaOriginal === undefined) {
-        delete process.env.TZ;
-      } else {
-        process.env.TZ = zonaOriginal;
-      }
+      restaurarTZ(zonaOriginal);
     }
   });
 });
 
 describe("GET /api/clima/pronostico - validación de parámetros", () => {
-  const BASE = { lat: "14.6349", lng: "-90.5069", fechaInicio: "2026-10-12", fechaFin: "2026-10-14" };
+  const BASE: Record<ParametroClima, string> = { lat: "14.6349", lng: "-90.5069", fechaInicio: "2026-10-12", fechaFin: "2026-10-14" };
 
-  const casosInvalidos = [
+  const casosInvalidos: [descripcion: string, cambios: Partial<Record<ParametroClima, string | undefined>>][] = [
     ["falta lat", { lat: undefined }],
     ["falta lng", { lng: undefined }],
     ["falta fechaInicio", { fechaInicio: undefined }],
@@ -570,7 +686,7 @@ describe("GET /api/clima/pronostico - validación de parámetros", () => {
         }
       }
 
-      const resultado = await consultar(`/api/clima/pronostico?${parametros}`);
+      const resultado = await consultar<CuerpoError>(`/api/clima/pronostico?${parametros}`);
 
       verificarError(resultado, 400, "PARAMETRO_INVALIDO");
       assert.ok(Array.isArray(resultado.cuerpo.error.detalles));
@@ -578,30 +694,31 @@ describe("GET /api/clima/pronostico - validación de parámetros", () => {
     });
   }
 
-  for (const parametro of ["lat", "lng", "fechaInicio", "fechaFin"]) {
+  for (const parametro of ["lat", "lng", "fechaInicio", "fechaFin"] as const) {
     test(`rechaza ${parametro} repetido`, async () => {
-      const resultado = await consultar(`/api/clima/pronostico?${new URLSearchParams(BASE)}&${parametro}=${BASE[parametro]}`);
+      const resultado = await consultar<CuerpoError>(`/api/clima/pronostico?${new URLSearchParams(BASE)}&${parametro}=${BASE[parametro]}`);
 
       verificarError(resultado, 400, "PARAMETRO_INVALIDO");
-      assert.deepEqual(resultado.cuerpo.error.detalles.map((detalle) => detalle.parametro), [parametro]);
+      assert.deepEqual(detallesDe(resultado).map((detalle) => detalle.parametro), [parametro]);
       assert.equal(llamadas.length, 0);
     });
   }
 
   test("rechaza parámetros con estructura de objeto", async () => {
-    const resultado = await consultar("/api/clima/pronostico?lat=14.6&lng=-90.5&fechaInicio[a]=2026-10-12&fechaFin=2026-10-14");
+    const resultado = await consultar<CuerpoError>("/api/clima/pronostico?lat=14.6&lng=-90.5&fechaInicio[a]=2026-10-12&fechaFin=2026-10-14");
 
     verificarError(resultado, 400, "PARAMETRO_INVALIDO");
     assert.equal(llamadas.length, 0);
   });
 
   test("informa el rango invertido y el límite técnico en fechaFin", async () => {
-    const invertido = await consultar(rutaClima({ fechaInicio: "2026-10-14", fechaFin: "2026-10-12" }));
-    assert.deepEqual(invertido.cuerpo.error.detalles.map((detalle) => detalle.parametro), ["fechaFin"]);
+    const invertido = await consultar<CuerpoError>(rutaClima({ fechaInicio: "2026-10-14", fechaFin: "2026-10-12" }));
+    assert.deepEqual(detallesDe(invertido).map((detalle) => detalle.parametro), ["fechaFin"]);
 
-    const excesivo = await consultar(rutaClima({ fechaInicio: "2026-01-01", fechaFin: "2027-01-02" }));
-    assert.deepEqual(excesivo.cuerpo.error.detalles.map((detalle) => detalle.parametro), ["fechaFin"]);
-    assert.match(excesivo.cuerpo.error.detalles[0].mensaje, /366/);
+    const excesivo = await consultar<CuerpoError>(rutaClima({ fechaInicio: "2026-01-01", fechaFin: "2027-01-02" }));
+    const detallesExcesivo = detallesDe(excesivo);
+    assert.deepEqual(detallesExcesivo.map((detalle) => detalle.parametro), ["fechaFin"]);
+    assert.match(detallesExcesivo[0].mensaje, /366/);
   });
 
   test("acepta el 29 de febrero de años bisiestos dentro del rango", async () => {
@@ -642,7 +759,7 @@ describe("GET /api/clima/pronostico - errores del proveedor", () => {
     for (const estado of [401, 403]) {
       simular(() => respuestaJson({ cod: estado, message: `Invalid API key ${CLAVE_CLIMA}` }, estado));
 
-      const resultado = await consultar(RUTA);
+      const resultado = await consultar<CuerpoError>(RUTA);
 
       verificarError(resultado, 502, "PROVEEDOR_CREDENCIALES_INVALIDAS");
       assert.match(resultado.cuerpo.error.mensaje, /clima/);
@@ -654,14 +771,14 @@ describe("GET /api/clima/pronostico - errores del proveedor", () => {
   test("límite de solicitudes (429) produce 503", async () => {
     simular(() => respuestaJson({ cod: 429, message: "Your account is temporary blocked" }, 429));
 
-    verificarError(await consultar(RUTA), 503, "PROVEEDOR_LIMITE_SOLICITUDES");
+    verificarError(await consultar<CuerpoError>(RUTA), 503, "PROVEEDOR_LIMITE_SOLICITUDES");
   });
 
   test("otros errores HTTP del proveedor producen 502 sin exponer su cuerpo", async () => {
     for (const estado of [400, 404, 500, 503]) {
       simular(() => new Response(`Internal trace appid=${CLAVE_CLIMA}`, { status: estado }));
 
-      const resultado = await consultar(RUTA);
+      const resultado = await consultar<CuerpoError>(RUTA);
 
       verificarError(resultado, 502, "PROVEEDOR_ERROR");
       assert.ok(!resultado.texto.includes("Internal trace"));
@@ -673,18 +790,18 @@ describe("GET /api/clima/pronostico - errores del proveedor", () => {
       throw new TypeError(`fetch failed https://api.openweathermap.org/data/2.5/forecast?appid=${CLAVE_CLIMA}`);
     });
 
-    verificarError(await consultar(RUTA), 502, "PROVEEDOR_NO_DISPONIBLE");
+    verificarError(await consultar<CuerpoError>(RUTA), 502, "PROVEEDOR_NO_DISPONIBLE");
   });
 
   test("JSON inválido produce 502", async () => {
     simular(() => new Response("<html>no es json</html>", { status: 200 }));
 
-    verificarError(await consultar(RUTA), 502, "PROVEEDOR_RESPUESTA_INVALIDA");
+    verificarError(await consultar<CuerpoError>(RUTA), 502, "PROVEEDOR_RESPUESTA_INVALIDA");
   });
 
   test("una estructura inválida produce 502 y no se confunde con una serie vacía", async () => {
     const valido = registro("2026-10-12T00:00:00Z", 20);
-    const cuerpos = [
+    const cuerpos: unknown[] = [
       {},
       [],
       null,
@@ -706,14 +823,14 @@ describe("GET /api/clima/pronostico - errores del proveedor", () => {
 
     for (const cuerpo of cuerpos) {
       simular(() => respuestaJson(cuerpo));
-      verificarError(await consultar(RUTA), 502, "PROVEEDOR_RESPUESTA_INVALIDA");
+      verificarError(await consultar<CuerpoError>(RUTA), 502, "PROVEEDOR_RESPUESTA_INVALIDA");
     }
   });
 
   test("un registro inválido produce 502 en lugar de un resumen con NaN", async () => {
     const valido = registro("2026-10-12T03:00:00Z", 20);
     const dt = Date.parse("2026-10-12T00:00:00Z") / 1000;
-    const invalidos = [
+    const invalidos: unknown[] = [
       null,
       "texto",
       [],
@@ -729,69 +846,73 @@ describe("GET /api/clima/pronostico - errores del proveedor", () => {
 
     for (const invalido of invalidos) {
       simular(() => respuestaJson(pronostico([invalido, valido])));
-      verificarError(await consultar(RUTA), 502, "PROVEEDOR_RESPUESTA_INVALIDA");
+      verificarError(await consultar<CuerpoError>(RUTA), 502, "PROVEEDOR_RESPUESTA_INVALIDA");
     }
   });
 
   test("un volumen de lluvia presente pero inválido no se convierte en cero", async () => {
     const dt = Date.parse("2026-10-12T00:00:00Z") / 1000;
-    const lluviasInvalidas = [{ "3h": "1.2" }, { "3h": -1 }, { "3h": null }, {}, { "1h": 0.5 }, null, 5, [], "0"];
+    const lluviasInvalidas: unknown[] = [{ "3h": "1.2" }, { "3h": -1 }, { "3h": null }, {}, { "1h": 0.5 }, null, 5, [], "0"];
 
     for (const rain of lluviasInvalidas) {
       simular(() => respuestaJson(pronostico([{ dt, main: { temp: 20 }, rain }])));
-      verificarError(await consultar(RUTA), 502, "PROVEEDOR_RESPUESTA_INVALIDA");
+      verificarError(await consultar<CuerpoError>(RUTA), 502, "PROVEEDOR_RESPUESTA_INVALIDA");
     }
   });
 
   test("intervalos superpuestos producen 502 para no duplicar acumulados", async () => {
     simular(() => respuestaJson(pronostico([registro("2026-10-12T00:00:00Z", 20, 1), registro("2026-10-12T01:00:00Z", 20, 1)])));
 
-    verificarError(await consultar(RUTA), 502, "PROVEEDOR_RESPUESTA_INVALIDA");
+    verificarError(await consultar<CuerpoError>(RUTA), 502, "PROVEEDOR_RESPUESTA_INVALIDA");
   });
 
   test("tiempo de espera agotado cancela la petición y produce 504", async () => {
-    let senal;
-    simular(
-      (url, opciones) =>
-        new Promise((resolve, reject) => {
-          senal = opciones.signal;
-          opciones.signal.addEventListener("abort", () => reject(opciones.signal.reason));
-        }),
-    );
+    let senal: AbortSignal | undefined;
+    simular((_url, opciones) => {
+      const actual = senalDe(opciones);
+      senal = actual;
+      return new Promise<Response>((_resolve, reject) => {
+        actual.addEventListener("abort", () => reject(actual.reason));
+      });
+    });
 
-    const resultado = await consultar(RUTA);
+    const resultado = await consultar<CuerpoError>(RUTA);
 
     verificarError(resultado, 504, "PROVEEDOR_TIEMPO_AGOTADO");
-    assert.equal(senal.aborted, true);
+    assert.equal(senal?.aborted, true);
   });
 
   test("el tiempo de espera también cubre la lectura del cuerpo", async () => {
-    let senal;
-    simular((url, opciones) => {
-      senal = opciones.signal;
+    let senal: AbortSignal | undefined;
+    simular((_url, opciones) => {
+      const actual = senalDe(opciones);
+      senal = actual;
+      // Respuesta parcial: solo implementa lo que el cliente necesita leer.
       return {
         ok: true,
         status: 200,
         body: null,
-        json: () => new Promise((resolve, reject) => opciones.signal.addEventListener("abort", () => reject(opciones.signal.reason))),
-      };
+        json: () => new Promise<unknown>((_resolve, reject) => actual.addEventListener("abort", () => reject(actual.reason))),
+      } as unknown as Response;
     });
 
-    const resultado = await consultar(RUTA);
+    const resultado = await consultar<CuerpoError>(RUTA);
 
     verificarError(resultado, 504, "PROVEEDOR_TIEMPO_AGOTADO");
-    assert.equal(senal.aborted, true);
+    assert.equal(senal?.aborted, true);
   });
 
   test("no registra la clave ni detalles del proveedor en la consola", async () => {
-    const registrados = [];
+    const registrados: string[] = [];
     const originales = { log: console.log, warn: console.warn, error: console.error };
-    for (const metodo of Object.keys(originales)) {
-      console[metodo] = (...argumentos) => registrados.push(argumentos.map(String).join(" "));
+    for (const metodo of Object.keys(originales) as (keyof typeof originales)[]) {
+      console[metodo] = (...argumentos: unknown[]) => {
+        registrados.push(argumentos.map(String).join(" "));
+      };
     }
 
     try {
-      const escenarios = [
+      const escenarios: Simulador[] = [
         () => respuestaJson({ message: `Invalid API key ${CLAVE_CLIMA}` }, 401),
         () => new Response(`trace ${CLAVE_CLIMA}`, { status: 500 }),
         () => {
@@ -802,7 +923,7 @@ describe("GET /api/clima/pronostico - errores del proveedor", () => {
       ];
       for (const escenario of escenarios) {
         simular(escenario);
-        await consultar(RUTA);
+        await consultar<CuerpoError>(RUTA);
       }
     } finally {
       Object.assign(console, originales);
@@ -815,9 +936,9 @@ describe("GET /api/clima/pronostico - errores del proveedor", () => {
     simular(() => {
       throw new TypeError("fetch failed");
     });
-    verificarError(await consultar(RUTA), 502, "PROVEEDOR_NO_DISPONIBLE");
+    verificarError(await consultar<CuerpoError>(RUTA), 502, "PROVEEDOR_NO_DISPONIBLE");
 
-    const lugares = await consultar("/api/lugares?lat=14.6&lng=-90.5&categoria=entertainment.museum");
+    const lugares = await consultar<CuerpoLugares>("/api/lugares?lat=14.6&lng=-90.5&categoria=entertainment.museum");
 
     assert.equal(lugares.estado, 200);
     assert.deepEqual(lugares.cuerpo, { lugares: [] });
@@ -826,7 +947,7 @@ describe("GET /api/clima/pronostico - errores del proveedor", () => {
 });
 
 describe("GET /api/clima/pronostico - configuración", () => {
-  async function conAppSinClave(apiKey, prueba) {
+  async function conAppSinClave(apiKey: string | undefined, prueba: (base: string) => Promise<void>): Promise<void> {
     const app = crearApp({
       apiKey: CLAVE_GEO,
       fetch: async () => respuestaJson({ type: "FeatureCollection", features: [] }),
@@ -842,21 +963,21 @@ describe("GET /api/clima/pronostico - configuración", () => {
 
   test("sin clave responde 503 y GET /api/lugares sigue funcionando", async () => {
     await conAppSinClave("  ", async (base) => {
-      const clima = await consultar(rutaClima({ fechaInicio: "2026-10-12", fechaFin: "2026-10-13" }), base);
+      const clima = await consultar<CuerpoError>(rutaClima({ fechaInicio: "2026-10-12", fechaFin: "2026-10-13" }), base);
       verificarError(clima, 503, "SERVICIO_NO_CONFIGURADO");
       assert.match(clima.cuerpo.error.mensaje, /clima/);
 
-      const invalida = await consultar(rutaClima({ fechaInicio: "2026-02-30", fechaFin: "2026-10-13" }), base);
+      const invalida = await consultar<CuerpoError>(rutaClima({ fechaInicio: "2026-02-30", fechaFin: "2026-10-13" }), base);
       verificarError(invalida, 400, "PARAMETRO_INVALIDO");
 
-      const lugares = await consultar("/api/lugares?lat=14.6&lng=-90.5&categoria=entertainment.museum", base);
+      const lugares = await consultar<CuerpoLugares>("/api/lugares?lat=14.6&lng=-90.5&categoria=entertainment.museum", base);
       assert.equal(lugares.estado, 200);
       assert.deepEqual(lugares.cuerpo, { lugares: [] });
     });
   });
 
   test("GET /api/clima ya no existe: el único endpoint de clima es /api/clima/pronostico", async () => {
-    const resultado = await consultar("/api/clima?latitud=14.6&longitud=-90.5&fechaHora=2026-10-12T15:00:00Z");
+    const resultado = await consultar<CuerpoError>("/api/clima?latitud=14.6&longitud=-90.5&fechaHora=2026-10-12T15:00:00Z");
 
     verificarError(resultado, 404, "RUTA_NO_ENCONTRADA");
     assert.equal(llamadas.length, 0);
@@ -867,7 +988,7 @@ describe("GET /api/clima/pronostico - configuración", () => {
     delete process.env.OPENWEATHER_API_KEY;
     try {
       await conAppSinClave(undefined, async (base) => {
-        const clima = await consultar(rutaClima({ fechaInicio: "2026-10-12", fechaFin: "2026-10-13" }), base);
+        const clima = await consultar<CuerpoError>(rutaClima({ fechaInicio: "2026-10-12", fechaFin: "2026-10-13" }), base);
         verificarError(clima, 503, "SERVICIO_NO_CONFIGURADO");
       });
     } finally {
