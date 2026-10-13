@@ -1,92 +1,56 @@
-# Informe de cambios: unificación del clima en OpenWeather y mantenimiento del backend
+# Informe de cambios: clima con OpenWeather y arreglos del backend
 
-Rama: `aolivac4/mantenimiento-backend` (basada en `main` después del PR #30).
-Fecha: 12 de octubre de 2026.
+Rama: `aolivac4/mantenimiento-backend`
+Fecha: 12 de octubre de 2026
 
-## Resumen
+## Contexto
 
-El proyecto tenía dos endpoints de clima que hacían cosas parecidas con proveedores distintos:
+Después de que se fusionaron los últimos PR nos quedaron dos endpoints de clima en el backend. Uno era `GET /api/clima`, que consultaba Open-Meteo hora por hora y era el que usaba el frontend. El otro era `GET /api/clima/pronostico`, que usa OpenWeather y devuelve un resumen por cada día del viaje, pero ninguna pantalla lo llamaba.
 
-| Endpoint | Proveedor | Granularidad | Quién lo usaba |
-| --- | --- | --- | --- |
-| `GET /api/clima` | Open-Meteo | Una hora concreta | El frontend (una petición por cada parada) |
-| `GET /api/clima/pronostico` | OpenWeather | Resumen por día del viaje | Nadie |
+Como en el equipo habíamos quedado en usar OpenWeather, dejé solo ese endpoint y conecté el frontend a él. Así tenemos un solo proveedor y una sola clave (`OPENWEATHER_API_KEY`).
 
-El equipo había acordado usar OpenWeather, así que se eliminó `GET /api/clima` (Open-Meteo) y se conectó el frontend a `GET /api/clima/pronostico`. Ahora hay un solo endpoint de clima, un solo proveedor y una sola clave de API (`OPENWEATHER_API_KEY`).
+## Qué cambié en el backend
 
-## 1. Cambios en el backend
+Borré tres archivos. `src/routes/clima.js` era la ruta de Open-Meteo. `src/clima/climaService.js` era el cliente que hacía las consultas a Open-Meteo. `src/clima/prepararParadasClima.js` le agregaba la probabilidad de lluvia a cada parada, pero ningún archivo lo usaba. Revisándolo encontré además que importaba mal el servicio, así que aunque alguien lo hubiera conectado no habría funcionado.
 
-### Archivos eliminados
+En `src/app.js` quité el registro de la ruta vieja. Si alguien llama a `/api/clima` ahora recibe un 404 con el mismo formato de error que el resto de la API. Cambié la prueba que revisaba esa ruta por una que comprueba que ya no existe, y actualicé los dos README para que no la mencionen.
 
-| Archivo | Motivo |
-| --- | --- |
-| `src/routes/clima.js` | Ruta `GET /api/clima` de Open-Meteo, reemplazada por `/api/clima/pronostico`. |
-| `src/clima/climaService.js` | Cliente de Open-Meteo con caché en memoria. Solo lo usaban la ruta anterior y `prepararParadasClima.js`. |
-| `src/clima/prepararParadasClima.js` | Agregaba `probabilidad_lluvia` a las paradas con Open-Meteo. Ningún archivo lo importaba, y además tenía un error: importaba el módulo completo y lo llamaba como función, así que siempre fallaba sin avisar. |
+Los archivos `src/clima/servicio.js` y `src/clima/fechas.js` se quedan porque los usa el endpoint de OpenWeather.
 
-Se conservan `src/clima/servicio.js` y `src/clima/fechas.js`, que usa el endpoint de OpenWeather.
+## Qué cambié en el frontend
 
-### Archivos modificados
+El servicio `src/services/clima.ts` ahora llama a `/api/clima/pronostico` y usa los tipos que ya teníamos en `shared/types/clima.ts`. Si el backend responde con error (por ejemplo, cuando falta la clave) o no hay conexión, se muestra "Pronóstico no disponible" y la página sigue funcionando normal.
 
-- **`src/app.js`:** se quitó el registro de la ruta `/api/clima`. Una petición a esa ruta ahora devuelve `404 RUTA_NO_ENCONTRADA`, con el formato de error común de la API.
-- **`test/clima.test.js`:** la prueba que comprobaba que `/api/clima` seguía existiendo se reemplazó por una que comprueba que ya no existe y que no llama al proveedor.
-- **`README.md` (raíz) y `backend/README.md`:** se quitó la documentación de `/api/clima`, y se indica que `/api/clima/pronostico` es el único endpoint de clima y el que consume el frontend.
+Un detalle: el paso 1 todavía no guarda las coordenadas del destino, entonces para saber dónde consultar el clima tomo el punto medio de las paradas del itinerario. Si más adelante se agregan las coordenadas del destino, se usan esas primero.
 
-## 2. Cambios en el frontend
+En la página del paso 4 ya no se pide el clima por cada parada. Se hace una sola consulta cuando termina de generarse el itinerario y el resultado se muestra una vez por día, debajo de los botones de los días. Lo cambié así por dos razones. La primera es que OpenWeather da un resumen del día completo, así que repetir el mismo dato en cada parada no tenía sentido. La segunda es que antes un viaje de 4 días con 5 paradas diarias hacía unas 20 peticiones, y ahora hace una sola, lo cual también ayuda con el límite del plan gratuito.
 
-### `src/services/clima.ts` (reescrito)
+El componente `IndicadorClima` ahora muestra la temperatura mínima, máxima y promedio y los milímetros de lluvia esperados. Si el día tiene datos incompletos lo indica, y si la fecha queda fuera del pronóstico (OpenWeather solo cubre unos 5 días hacia adelante) también lo avisa. Usé las mismas clases de CSS que ya existían, así que no toqué estilos.
 
-- `consultarPronostico({ lat, lng, fechaInicio, fechaFin })` llama a `/api/clima/pronostico` y devuelve la respuesta tipada con `RespuestaClima` de `shared/types/clima.ts`, el contrato que ya existía para OpenWeather. Si el backend responde con error (por ejemplo `503` porque falta la clave) o la red falla, devuelve `null` y la interfaz muestra "Pronóstico no disponible".
-- Las coordenadas se envían con 6 decimales (`toFixed(6)`), porque el backend rechaza la notación exponencial (por ejemplo `1e-7`).
-- `coordenadasDelViaje(viaje, itinerarios)` decide qué ubicación consultar. Usa las coordenadas del destino si existen; como el paso 1 todavía no geocodifica el destino, normalmente usa el centro de las paradas del itinerario.
-- `hayLluviaSignificativa(dia)` marca un día como lluvioso si la lluvia acumulada es de **10 mm o más** (`UMBRAL_LLUVIA_MM`). OpenWeather (plan gratuito, pronóstico de 5 días cada 3 horas) entrega milímetros de lluvia, no la probabilidad de lluvia que daba Open-Meteo, así que la advertencia ahora se basa en la cantidad. 10 mm diarios suele considerarse lluvia moderada; el valor está en una sola constante para ajustarlo si el equipo lo decide.
+Algo que cambia respecto a como estaba: Open-Meteo daba probabilidad de lluvia y OpenWeather (en el plan gratuito) da milímetros. Por eso la advertencia de lluvia ahora sale cuando se esperan 10 mm o más en el día, que es más o menos lo que se considera lluvia moderada. Ese valor está en la constante `UMBRAL_LLUVIA_MM` por si queremos ajustarlo.
 
-### `src/components/IndicadorClima.tsx` (reescrito)
+Por último, en `vite.config.ts` cambié el proxy de `/api/clima` a `/api` para que cualquier endpoint nuevo del backend funcione en desarrollo sin tener que modificarlo otra vez.
 
-Antes recibía coordenadas, fecha y hora, y hacía su propia petición. Ahora solo recibe el estado de la consulta y el resumen del día, y muestra:
+## Cómo lo probé
 
-- Temperatura mínima y máxima, promedio y lluvia esperada en mm.
-- Una nota si el resumen es parcial (el día tiene menos de 8 intervalos de 3 horas).
-- Un aviso si la fecha está fuera de cobertura: OpenWeather solo pronostica unos 5 días hacia adelante.
-- La advertencia de lluvia, que sugiere priorizar lugares bajo techo cuando se supera el umbral.
+Corrí las pruebas del backend (216, todas pasan) y las del módulo de IA (19, todas pasan). También compilé el frontend con `npm run build` sin errores.
 
-Reutiliza las clases CSS existentes (`indicador-clima`, `clima-normal`, `clima-alerta`, `clima-advertencia`, `sin-datos`), así que no hubo cambios de estilos.
+Además levanté el backend y el frontend con la clave real de OpenWeather y consulté el pronóstico pasando por el proxy de Vite. Llegaron los datos de los siguientes 5 días; las fechas fuera de ese rango salieron marcadas como fuera de cobertura y `/api/clima` respondió 404, como se esperaba.
 
-### `src/pages/Paso4Generacion.tsx`
+## Otros arreglos que van en la misma rama
 
-- Cuando el itinerario está listo, se hace **una sola** consulta al pronóstico para todo el rango, desde la fecha del primer día hasta la del último. La consulta se cancela si el itinerario cambia o se regenera.
-- El indicador se muestra **una vez por día**, debajo del selector de días, en lugar de una vez por parada.
+Antes de lo del clima corregí algunas cosas del backend que encontré al revisar `main`:
 
-Por qué cambia de "por parada" a "por día":
+- En `schema.prisma` faltaba la línea `output` del generador y por eso `npx prisma generate` y `npx prisma migrate dev` fallaban. La regresé.
+- La tabla `Usuario` se había agregado editando la migración inicial, que ya estaba en `main`. Eso hace que Prisma pida reiniciar la base de quien ya la tenía aplicada. Dejé la migración inicial como estaba y moví `Usuario` a una migración nueva (`20261013045400_agregar_usuario`).
+- El script `npm run ai:test` ahora también corre las pruebas de validación de estancias, que no se estaban ejecutando.
+- En el README principal habían quedado restos de un conflicto de merge (`lucia/backend-bd-caching` y `main` sueltos en el texto). Los quité.
+- Eliminé `backendGUIATURISTICA.zip`, que era una copia vieja de la configuración de Prisma subida por error.
 
-1. OpenWeather entrega un resumen diario. Repetir el mismo dato en cada parada sería redundante y confuso.
-2. Antes se hacía una petición por parada. Con 5 paradas al día y un viaje de 4 días eran 20 peticiones; ahora es una por viaje, lo que también cuida la cuota gratuita de OpenWeather.
+## Pendientes
 
-### `vite.config.ts`
+Hay algunas cosas que no hice porque dependen de decisiones del equipo:
 
-El proxy de desarrollo pasó de `/api/clima` a `/api`. Así cubre `/api/clima/pronostico` y cualquier endpoint futuro (por ejemplo `/api/lugares`) sin tener que volver a tocar la configuración.
-
-## 3. Verificación
-
-| Prueba | Resultado |
-| --- | --- |
-| `npm test` en `backend` | 216 pruebas, 0 fallos |
-| `npm run ai:test` en `backend` | 12 + 7 pruebas, 0 fallos |
-| `npm run build` en `frontend` (TypeScript estricto y Vite) | Correcta |
-| Prueba de punta a punta (backend y Vite levantados, clave real de OpenWeather, petición a través del proxy de Vite) | Llegaron los resúmenes diarios de 5 días; las fechas fuera del pronóstico se marcaron `fuera_de_cobertura` y `/api/clima` respondió `404` |
-
-## 4. Mantenimiento previo incluido en la misma rama
-
-Estos cambios se hicieron antes de la unificación del clima y van en el mismo PR:
-
-- **Prisma:** se restauró `output = "../generated/prisma"` en el generador. Sin esa línea, `npx prisma generate` y `npx prisma migrate dev` fallaban.
-- **Migraciones:** se restauró la migración inicial y la tabla `Usuario` pasó a una migración nueva, `20261013045400_agregar_usuario`. Editar una migración ya publicada hace que Prisma detecte el cambio y pida reiniciar la base de datos.
-- **Script `ai:test`:** ahora también ejecuta las pruebas de validación de estancias.
-- **README raíz:** se limpiaron restos de un conflicto de merge mal resuelto.
-- **`backendGUIATURISTICA.zip`:** se eliminó; era una copia obsoleta de la configuración de Prisma.
-
-## 5. Pendientes y recomendaciones
-
-- **Geocodificación del destino:** el paso 1 no guarda la latitud y longitud del destino. El clima usa el centro de las paradas, que hoy son datos de ejemplo alrededor de la Ciudad de Guatemala. Cuando el itinerario use lugares reales o se geocodifique el destino, el pronóstico corresponderá al destino real sin cambiar el código del clima.
-- **Optimizador (`optimizer/`):** acepta `probabilidad_lluvia` por parada para reordenar la ruta, pero ningún componente le envía ese dato (antes solo lo preparaba `prepararParadasClima.js`, que no se usaba). Si se quiere reordenar por clima con OpenWeather, se puede leer el campo `pop` (probabilidad de precipitación) de cada intervalo de 3 horas y agregarlo al resumen diario de `/api/clima/pronostico`.
-- **Bases de datos locales:** quien haya aplicado la migración inicial modificada debe ejecutar `npx prisma migrate reset` una vez (borra los datos locales).
+- El clima se consulta con el punto medio de las paradas, que por ahora son datos de prueba alrededor de la Ciudad de Guatemala. Cuando usemos lugares reales o guardemos las coordenadas del destino, el pronóstico va a corresponder al lugar correcto sin tocar el código del clima.
+- El optimizador puede reordenar la ruta según la probabilidad de lluvia de cada parada, pero nadie le está mandando ese dato. Si queremos usar esa función, se podría agregar al resumen diario el campo `pop` de OpenWeather, que es justamente la probabilidad de lluvia.
+- Quien ya tenga aplicada la migración inicial modificada va a tener que correr `npx prisma migrate reset` una vez. Ojo, eso borra los datos de la base local.
