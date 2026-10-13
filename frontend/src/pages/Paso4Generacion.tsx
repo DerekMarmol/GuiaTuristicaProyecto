@@ -3,8 +3,10 @@ import { useViaje } from "../context/ViajeContext";
 import Stepper from "../components/Stepper";
 import Recomendaciones from "../components/Recomendaciones";
 import { MapaSeguro } from "../components/MapaSeguro";
-import IndicadorClima from "../components/IndicadorClima";
+import IndicadorClima, { type EstadoPronostico } from "../components/IndicadorClima";
 import AlertaHorario from "../components/AlertaHorario";
+import type { RespuestaClima } from "../../../shared/types";
+import { consultarPronostico, coordenadasDelViaje } from "../services/clima";
 
 import {
   generarItinerario,
@@ -76,6 +78,8 @@ export default function Paso4Generacion() {
   const [diaActivo, setDiaActivo] = useState(0);
   const [votos, setVotos] = useState<Record<string, Voto>>({});
   const [copiado, setCopiado] = useState("");
+  const [pronostico, setPronostico] = useState<RespuestaClima | null>(null);
+  const [estadoPronostico, setEstadoPronostico] = useState<EstadoPronostico>("cargando");
 
   const [codigo] = useState(() =>
     Math.random().toString(36).slice(2, 8).toUpperCase()
@@ -128,6 +132,40 @@ export default function Paso4Generacion() {
       cancelado = true;
     };
   }, [intento]);
+
+  // Pronóstico de OpenWeather: una sola consulta para todas las fechas del itinerario
+  useEffect(() => {
+    if (!itinerarios || itinerarios.length === 0) {
+      return;
+    }
+
+    const coordenadas = coordenadasDelViaje(viaje, itinerarios);
+    if (!coordenadas) {
+      setPronostico(null);
+      setEstadoPronostico("sin_datos");
+      return;
+    }
+
+    const controller = new AbortController();
+    setPronostico(null);
+    setEstadoPronostico("cargando");
+
+    consultarPronostico(
+      {
+        ...coordenadas,
+        fechaInicio: itinerarios[0].fecha,
+        fechaFin: itinerarios[itinerarios.length - 1].fecha,
+      },
+      controller.signal
+    ).then((resultado) => {
+      if (controller.signal.aborted) return;
+
+      setPronostico(resultado);
+      setEstadoPronostico(resultado ? "listo" : "sin_datos");
+    });
+
+    return () => controller.abort();
+  }, [itinerarios]);
 
   function regenerar() {
     setItinerarios(null);
@@ -349,6 +387,14 @@ export default function Paso4Generacion() {
             ))}
           </div>
 
+          {/* Clima del día */}
+          <section aria-label={`Clima del día ${dia.numeroDia}`}>
+            <IndicadorClima
+              estado={estadoPronostico}
+              dia={pronostico?.dias.find((d) => d.fecha === dia.fecha)}
+            />
+          </section>
+
           {/* Mapa */}
           <div
             className="mapa-dia"
@@ -405,19 +451,6 @@ export default function Paso4Generacion() {
                           nombreLugar={p.nombre}
                           estado={alerta.estado}
                           mensaje={alerta.mensaje}
-                        />
-                      )}
-
-                      {/* Clima */}
-                      {!descartada && (
-                        <IndicadorClima
-                          lat={p.lat}
-                          lng={p.lng}
-                          fecha={dia.fecha}
-                          hora={
-                            horarios[i]?.inicio ??
-                            p.horaApertura
-                          }
                         />
                       )}
 

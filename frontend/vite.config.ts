@@ -19,10 +19,10 @@ export default defineConfig({
     }),
   ],
 
-  //Redirigir consultas meteorológicas al backend
+  // Redirigir las consultas a la API del backend
   server: {
     proxy: {
-      "/api/clima": {
+      "/api": {
         target: "http://localhost:3000",
         changeOrigin: true,
       },

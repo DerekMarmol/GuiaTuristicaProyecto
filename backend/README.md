@@ -33,9 +33,21 @@ El servidor carga `backend/.env` sin sobrescribir variables que ya estén defini
 npm start      # inicia el servidor
 npm run dev    # inicia el servidor y lo reinicia al detectar cambios
 npm test       # ejecuta las pruebas con Geoapify y OpenWeather simulados (no requiere claves)
+npm run ai:test   # pruebas del módulo de IA (validador, orquestador y validación de estancias)
 ```
 
 Si falta `GEOAPIFY_API_KEY`, `npm start` termina con un mensaje que indica la variable faltante.
+
+## Base de datos (Prisma)
+
+El esquema está en `prisma/schema.prisma` y las migraciones en `prisma/migrations/`. El cliente se genera en `generated/prisma` (excluido de Git).
+
+```powershell
+docker compose up -d postgres   # desde la raíz del repositorio
+npx prisma migrate dev          # aplica las migraciones pendientes y genera el cliente
+```
+
+Para cambiar el esquema, edita `schema.prisma` y crea una migración nueva con `npx prisma migrate dev --name <descripcion>`. No edites migraciones que ya están en `main`: Prisma detecta el cambio de checksum y pide reiniciar la base de datos. Si tu base local quedó en ese estado, ejecuta `npx prisma migrate reset` (borra los datos locales).
 
 ## Endpoint `GET /api/lugares`
 
@@ -223,7 +235,7 @@ $respuesta.lugares | Format-Table nombre, @{ n = "estado"; e = { $_.horario.esta
 
 Devuelve, para cada fecha del viaje, un resumen de temperatura y lluvia calculado con el pronóstico de [OpenWeather 5 Day / 3 Hour Forecast](https://openweathermap.org/forecast5). Recibe las coordenadas reales del destino y las fechas; no consulta viajes guardados, no geocodifica el nombre del destino y no modifica el itinerario.
 
-Es independiente de `GET /api/clima` (clima de una hora concreta con Open-Meteo, que usa el indicador del frontend): ninguno de los dos modifica el comportamiento del otro.
+Es el único endpoint de clima del backend y el que consume el frontend: el paso 4 hace una sola consulta por viaje y muestra el resumen de cada día del itinerario.
 
 ### Clave de OpenWeather
 

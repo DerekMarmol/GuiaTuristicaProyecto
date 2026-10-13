@@ -8,7 +8,7 @@
     "dev": "node --watch src/server.js",
     "test": "node --test \"test/**/*.test.js\"",
     "postinstall": "prisma skills sync || exit 0",
-    "ai:test": "tsx src/ai/validator.test.ts",
+    "ai:test": "tsx src/ai/validator.test.ts && tsx --test src/ai/validacionEstancia.test.ts",
     "ai:probar": "tsx src/ai/scripts/probar.ts",
     "ai:tipos": "tsc --noEmit --strict --module nodenext --moduleResolution nodenext --target es2022 --skipLibCheck src/ai/index.ts"
   },
