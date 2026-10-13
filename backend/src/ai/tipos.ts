@@ -1,33 +1,46 @@
 import type { Itinerario, Parada, Viaje } from "../../../shared/types";
-
+import type { IntervaloHorario } from "./validacionEstancia";
 
 export interface LugarReal {
   placeId: string;
   nombre: string;
   lat: number;
   lng: number;
-  horaApertura: string; 
-  horaCierre: string; 
-  categoria: string; 
-  precioEstimado?: number; 
+  horaApertura: string;
+  horaCierre: string;
+  categoria: string;
+  precioEstimado?: number;
+
+  intervalosHorario?: IntervaloHorario[];
 }
 
 export type ViajeIA = Pick<
   Viaje,
-  "id" | "destino" | "tipoViaje" | "presupuesto" | "transporte" | "intereses" | "fechaInicio" | "fechaFin"
+  | "id"
+  | "destino"
+  | "tipoViaje"
+  | "presupuesto"
+  | "transporte"
+  | "intereses"
+  | "fechaInicio"
+  | "fechaFin"
 > & {
   presupuestoDiario?: number;
   hospedaje?: boolean;
   nombreHotel?: string;
 };
 
+export type ParadaIA = Parada & {
+  placeId: string;
+  motivo?: string;
+};
 
-export type ParadaIA = Parada & { placeId: string; motivo?: string };
-export type ItinerarioIA = Omit<Itinerario, "paradas"> & { paradas: ParadaIA[] };
+export type ItinerarioIA = Omit<Itinerario, "paradas"> & {
+  paradas: ParadaIA[];
+};
 
 export interface ResultadoGeneracion {
   itinerarios: ItinerarioIA[];
   intentos: number;
-
   advertencias: string[];
 }
