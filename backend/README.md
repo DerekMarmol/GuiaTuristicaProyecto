@@ -231,23 +231,11 @@ $respuesta = Invoke-RestMethod -Uri "http://localhost:3000/api/lugares?lat=14.63
 $respuesta.lugares | Format-Table nombre, @{ n = "estado"; e = { $_.horario.estado } }, @{ n = "horario"; e = { $_.horario.valorOriginal } } -Wrap
 ```
 
-## Endpoint `GET /api/clima`
-
-Devuelve el clima de una hora concreta mediante [Open-Meteo](https://open-meteo.com/) (no requiere clave). Lo usa el indicador de clima del frontend. Las respuestas se guardan en memoria durante 30 minutos por coordenadas y día.
-
-| Parámetro | Obligatorio | Regla |
-| --- | --- | --- |
-| `latitud` | Sí | Número entre -90 y 90 |
-| `longitud` | Sí | Número entre -180 y 180 |
-| `fechaHora` | Sí | Fecha y hora interpretable por `Date` (por ejemplo `2026-10-12T15:00:00Z`) |
-
-Respuesta `200`: `{ "disponible": true, "clima": { "fechaHora", "temperatura", "probabilidadLluvia", "codigoClima", "malClima" } }`. Si Open-Meteo no responde o no hay datos para esa hora, devuelve `{ "disponible": false, "clima": null }`. Los parámetros ausentes o inválidos producen `400` con el código `PARAMETRO_INVALIDO` y el mismo formato de error que el resto de la API.
-
 ## Endpoint `GET /api/clima/pronostico`
 
 Devuelve, para cada fecha del viaje, un resumen de temperatura y lluvia calculado con el pronóstico de [OpenWeather 5 Day / 3 Hour Forecast](https://openweathermap.org/forecast5). Recibe las coordenadas reales del destino y las fechas; no consulta viajes guardados, no geocodifica el nombre del destino y no modifica el itinerario.
 
-Es independiente de `GET /api/clima` (clima de una hora concreta con Open-Meteo, que usa el indicador del frontend): ninguno de los dos modifica el comportamiento del otro.
+Es el único endpoint de clima del backend y el que consume el frontend: el paso 4 hace una sola consulta por viaje y muestra el resumen de cada día del itinerario.
 
 ### Clave de OpenWeather
 

@@ -1,53 +1,24 @@
-import { useEffect, useState } from "react";
-import { consultarClima, type DatosClima } from "../services/clima";
+import type { PronosticoDiario } from "../../../shared/types";
+import { hayLluviaSignificativa, UMBRAL_LLUVIA_MM } from "../services/clima";
+
+export type EstadoPronostico = "cargando" | "listo" | "sin_datos";
 
 interface Props {
-  lat: number;
-  lng: number;
-  fecha: string;
-  hora: string;
+  estado: EstadoPronostico;
+  dia?: PronosticoDiario;
 }
 
-type Estado = "cargando" | "disponible" | "sin_datos";
+const INTERVALOS_POR_DIA = 8;
 
-export default function IndicadorClima({
-  lat,
-  lng,
-  fecha,
-  hora,
-}: Props) {
-  const [estado, setEstado] = useState<Estado>("cargando");
-  const [clima, setClima] = useState<DatosClima | null>(null);
+function SinDatos() {
+  return (
+    <div className="indicador-clima sin-datos">
+      Pronóstico no disponible para este día.
+    </div>
+  );
+}
 
-  useEffect(() => {
-    const controller = new AbortController();
-
-    async function cargar() {
-      setEstado("cargando");
-      setClima(null);
-
-      const fechaHora = `${fecha}T${hora}:00`;
-
-      const resultado = await consultarClima(
-        lat,
-        lng,
-        fechaHora,
-        controller.signal
-      );
-
-      if (controller.signal.aborted) {
-        return;
-      }
-
-      setClima(resultado);
-      setEstado(resultado ? "disponible" : "sin_datos");
-    }
-
-    cargar();
-
-    return () => controller.abort();
-  }, [lat, lng, fecha, hora]);
-
+export default function IndicadorClima({ estado, dia }: Props) {
   if (estado === "cargando") {
     return (
       <div className="indicador-clima" role="status">
@@ -56,35 +27,51 @@ export default function IndicadorClima({
     );
   }
 
-  if (estado === "sin_datos" || !clima) {
+  if (estado === "sin_datos" || !dia) {
+    return <SinDatos />;
+  }
+
+  if (dia.estado === "fuera_de_cobertura") {
     return (
       <div className="indicador-clima sin-datos">
-        Pronóstico no disponible para esta visita.
+        Esta fecha está fuera del pronóstico disponible (cubre aproximadamente los próximos 5 días).
       </div>
     );
   }
 
+  const { temperaturaMinimaC: minima, temperaturaMaximaC: maxima, temperaturaPromedioC: promedio, lluviaMm } = dia;
+
+  if (minima === null || maxima === null || promedio === null || lluviaMm === null) {
+    return <SinDatos />;
+  }
+
+  const lluvia = hayLluviaSignificativa(dia);
+
   return (
-    <div
-      className={`indicador-clima ${
-        clima.malClima ? "clima-alerta" : "clima-normal"
-      }`}
-    >
+    <div className={`indicador-clima ${lluvia ? "clima-alerta" : "clima-normal"}`}>
       <div className="clima-datos">
         <span>
-          Temperatura: <strong>{clima.temperatura} °C</strong>
+          Temperatura: <strong>{Math.round(minima)}–{Math.round(maxima)} °C</strong>
         </span>
 
         <span>
-          Probabilidad de lluvia:{" "}
-          <strong>{clima.probabilidadLluvia}%</strong>
+          Promedio: <strong>{Math.round(promedio)} °C</strong>
+        </span>
+
+        <span>
+          Lluvia esperada: <strong>{lluviaMm} mm</strong>
         </span>
       </div>
 
-      {clima.malClima && (
+      {dia.estado === "parcial" && (
+        <p className="nota">
+          Resumen parcial: hay datos de {dia.intervalosDisponibles} de {INTERVALOS_POR_DIA} intervalos de tres horas.
+        </p>
+      )}
+
+      {lluvia && (
         <p className="clima-advertencia" role="status">
-          Advertencia: se pronostican condiciones
-          meteorológicas desfavorables durante esta visita.
+          Advertencia: se esperan {UMBRAL_LLUVIA_MM} mm de lluvia o más este día. Considera priorizar lugares bajo techo.
         </p>
       )}
     </div>

@@ -62,8 +62,7 @@ Nunca edites una migración que ya se subió a `main`.
 El backend expone:
 
 - `GET /api/lugares`: lugares cercanos a unas coordenadas mediante Geoapify, por categoría, por los intereses que elige el usuario o por ambos, con sus horarios. Requiere `GEOAPIFY_API_KEY` en `backend/.env`.
-- `GET /api/clima`: clima de una hora concreta mediante Open-Meteo (lo usa el frontend).
-- `GET /api/clima/pronostico`: resumen diario del clima para las fechas del viaje mediante OpenWeather. Requiere `OPENWEATHER_API_KEY`.
+- `GET /api/clima/pronostico`: resumen diario del clima para las fechas del viaje mediante OpenWeather; lo consume el paso 4 del frontend. Requiere `OPENWEATHER_API_KEY`.
 
 ```powershell
 cd backend
