@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-js"
   output   = "../generated/prisma"
 }
 
@@ -21,8 +21,18 @@ model Viaje {
   fechaFin    DateTime
   hospedaje   Boolean
   nombreHotel String?
+  estado      String   @default("en_curso") // "en_curso" | "completado"
+  creadoEn    DateTime @default(now()) 
+  usuarioId   String?
+  actualizadoEn    DateTime @updatedAt
+  esPublico        Boolean  @default(false)
+  codigoCompartido String?  @unique
 
+  usuario     Usuario?     @relation(fields: [usuarioId], references: [id])
   itinerarios Itinerario[]
+
+  @@index([usuarioId, creadoEn])
+  @@index([codigoCompartido])
 }
 
 model Itinerario {
@@ -31,8 +41,10 @@ model Itinerario {
   numeroDia Int
   fecha     DateTime
 
-  viaje     Viaje    @relation(fields: [viajeId], references: [id])
+  viaje     Viaje    @relation(fields: [viajeId], references: [id], onDelete: Cascade)
   paradas   Parada[]
+
+  @@unique([viajeId, numeroDia])
 }
 
 model Parada {
@@ -45,7 +57,7 @@ model Parada {
   horaCierre            String
   tiempoEstanciaMinutos Int
 
-  itinerario            Itinerario   @relation(fields: [itinerarioId], references: [id])
+  itinerario            Itinerario   @relation(fields: [itinerarioId], references: [id], onDelete: Cascade)
   restriccion           Restriccion?
 }
 
@@ -55,7 +67,7 @@ model Restriccion {
   tipoEntorno       String // "Bajo Techo" | "Al aire libre"
   sensibilidadClima String // "baja" | "media" | "alta"
 
-  parada            Parada @relation(fields: [paradaId], references: [id])
+  parada            Parada @relation(fields: [paradaId], references: [id], onDelete: Cascade)
 }
 
 model Usuario {
@@ -64,4 +76,6 @@ model Usuario {
   contrasena String   // hash bcrypt, nunca la contraseña en texto plano
   nombre     String
   creadoEn   DateTime @default(now())
+
+  viajes     Viaje[]
 }
