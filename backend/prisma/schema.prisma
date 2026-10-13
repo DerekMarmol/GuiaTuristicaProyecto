@@ -20,8 +20,14 @@ model Viaje {
   fechaFin    DateTime
   hospedaje   Boolean
   nombreHotel String?
+  estado      String   @default("en_curso") // "en_curso" | "completado"
+  creadoEn    DateTime @default(now()) 
+  usuarioId   String?
 
+  usuario     Usuario?     @relation(fields: [usuarioId], references: [id])
   itinerarios Itinerario[]
+
+  @@index([usuarioId, creadoEn])
 }
 
 model Itinerario {
@@ -62,4 +68,6 @@ model Usuario {
   contrasena String   // hash bcrypt, nunca la contraseña en texto plano
   nombre     String
   creadoEn   DateTime @default(now())
+
+  viajes     Viaje[]
 }
