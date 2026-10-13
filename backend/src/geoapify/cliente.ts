@@ -1,14 +1,31 @@
-const { ErrorApi } = require("../errores");
-const { transformarLugares } = require("./transformar");
+import { ErrorApi } from "../errores";
+import type { FuncionFetch } from "../tipos";
+import { transformarLugares, type Lugar } from "./transformar";
 
-const URL_PLACES = "https://api.geoapify.com/v2/places";
+export const URL_PLACES = "https://api.geoapify.com/v2/places";
 const TIEMPO_ESPERA_MS = 10000;
 
-function formatearCoordenada(valor) {
+export interface ConsultaBusqueda {
+  lat: number;
+  lng: number;
+  categorias: string[];
+  radio: number;
+  limite: number;
+}
+
+export type BuscarLugares = (consulta: ConsultaBusqueda) => Promise<Lugar[]>;
+
+interface OpcionesCliente {
+  apiKey?: string;
+  fetch?: FuncionFetch;
+  tiempoEsperaMs?: number;
+}
+
+function formatearCoordenada(valor: number): string {
   return valor.toFixed(7).replace(/\.?0+$/, "");
 }
 
-function errorPorEstado(estado) {
+function errorPorEstado(estado: number): ErrorApi {
   if (estado === 401 || estado === 403) {
     return new ErrorApi(
       502,
@@ -26,11 +43,15 @@ function errorPorEstado(estado) {
   return new ErrorApi(502, "PROVEEDOR_ERROR", "El proveedor de lugares respondió con un error.");
 }
 
-function errorTiempoAgotado() {
+function errorTiempoAgotado(): ErrorApi {
   return new ErrorApi(504, "PROVEEDOR_TIEMPO_AGOTADO", "El proveedor de lugares tardó demasiado en responder.");
 }
 
-function crearClienteGeoapify({ apiKey, fetch: fetchImpl = globalThis.fetch, tiempoEsperaMs = TIEMPO_ESPERA_MS } = {}) {
+export function crearClienteGeoapify({
+  apiKey,
+  fetch: fetchImpl = globalThis.fetch,
+  tiempoEsperaMs = TIEMPO_ESPERA_MS,
+}: OpcionesCliente = {}): BuscarLugares {
   const clave = typeof apiKey === "string" ? apiKey.trim() : "";
 
   return async function buscarLugares({ lat, lng, categorias, radio, limite }) {
@@ -54,7 +75,7 @@ function crearClienteGeoapify({ apiKey, fetch: fetchImpl = globalThis.fetch, tie
     const temporizador = setTimeout(() => controlador.abort(), tiempoEsperaMs);
 
     try {
-      let respuesta;
+      let respuesta: Response;
       try {
         respuesta = await fetchImpl(url, {
           headers: { Accept: "application/json" },
@@ -72,7 +93,7 @@ function crearClienteGeoapify({ apiKey, fetch: fetchImpl = globalThis.fetch, tie
         throw errorPorEstado(respuesta.status);
       }
 
-      let datos;
+      let datos: unknown;
       try {
         datos = await respuesta.json();
       } catch {
@@ -88,5 +109,3 @@ function crearClienteGeoapify({ apiKey, fetch: fetchImpl = globalThis.fetch, tie
     }
   };
 }
-
-module.exports = { crearClienteGeoapify, URL_PLACES };

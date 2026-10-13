@@ -1,11 +1,21 @@
-const { CATEGORIAS_PERMITIDAS } = require("../config/categorias");
-const { CATEGORIAS_POR_INTERES, INTERESES_PERMITIDOS } = require("../config/intereses");
-const { ErrorApi } = require("../errores");
+import { CATEGORIAS_PERMITIDAS } from "../config/categorias";
+import { CATEGORIAS_POR_INTERES, INTERESES_PERMITIDOS } from "../config/intereses";
+import { ErrorApi } from "../errores";
+import type { Consulta, ErrorParametro } from "../tipos";
 
 const DECIMAL = /^-?\d+(\.\d+)?$/;
 const ENTERO = /^\d+$/;
 
-function leerTexto(query, nombre, obligatorio, errores) {
+export interface ConsultaLugares {
+  lat: number;
+  lng: number;
+  categorias: string[];
+  intereses: string[];
+  radio: number;
+  limite: number;
+}
+
+function leerTexto(query: Consulta, nombre: string, obligatorio: boolean, errores: ErrorParametro[]): string | null {
   const valor = query[nombre];
 
   if (valor === undefined) {
@@ -28,7 +38,7 @@ function leerTexto(query, nombre, obligatorio, errores) {
   return valor;
 }
 
-function validarDecimal(query, nombre, minimo, maximo, errores) {
+function validarDecimal(query: Consulta, nombre: string, minimo: number, maximo: number, errores: ErrorParametro[]): number | null {
   const texto = leerTexto(query, nombre, true, errores);
   if (texto === null) {
     return null;
@@ -48,7 +58,14 @@ function validarDecimal(query, nombre, minimo, maximo, errores) {
   return numero;
 }
 
-function validarEntero(query, nombre, minimo, maximo, predeterminado, errores) {
+function validarEntero(
+  query: Consulta,
+  nombre: string,
+  minimo: number,
+  maximo: number,
+  predeterminado: number,
+  errores: ErrorParametro[],
+): number | null {
   if (query[nombre] === undefined) {
     return predeterminado;
   }
@@ -67,13 +84,13 @@ function validarEntero(query, nombre, minimo, maximo, predeterminado, errores) {
   return numero;
 }
 
-function normalizarInteres(texto) {
-  return texto.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+export function normalizarInteres(texto: string): string {
+  return texto.trim().normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 
 const INTERES_POR_CLAVE = new Map(INTERESES_PERMITIDOS.map((interes) => [normalizarInteres(interes), interes]));
 
-function validarCategoria(query, errores) {
+function validarCategoria(query: Consulta, errores: ErrorParametro[]): string | null {
   const texto = leerTexto(query, "categoria", false, errores);
   if (texto === null) {
     return null;
@@ -90,7 +107,7 @@ function validarCategoria(query, errores) {
   return texto;
 }
 
-function validarIntereses(query, errores) {
+function validarIntereses(query: Consulta, errores: ErrorParametro[]): string[] | null {
   const texto = leerTexto(query, "intereses", false, errores);
   if (texto === null) {
     return null;
@@ -102,8 +119,8 @@ function validarIntereses(query, errores) {
     return null;
   }
 
-  const intereses = [];
-  const desconocidos = [];
+  const intereses: string[] = [];
+  const desconocidos: string[] = [];
   for (const elemento of elementos) {
     const interes = INTERES_POR_CLAVE.get(normalizarInteres(elemento));
     if (!interes) {
@@ -124,7 +141,7 @@ function validarIntereses(query, errores) {
   return intereses;
 }
 
-function combinarCategorias(categoria, intereses) {
+function combinarCategorias(categoria: string | null, intereses: string[]): string[] {
   const categorias = new Set(categoria ? [categoria] : []);
   for (const interes of intereses) {
     for (const categoriaInteres of CATEGORIAS_POR_INTERES[interes]) {
@@ -134,8 +151,8 @@ function combinarCategorias(categoria, intereses) {
   return [...categorias];
 }
 
-function validarConsultaLugares(query) {
-  const errores = [];
+export function validarConsultaLugares(query: Consulta): ConsultaLugares {
+  const errores: ErrorParametro[] = [];
 
   const lat = validarDecimal(query, "lat", -90, 90, errores);
   const lng = validarDecimal(query, "lng", -180, 180, errores);
@@ -148,7 +165,7 @@ function validarConsultaLugares(query) {
     errores.push({ parametro: "categoria", mensaje: "Debes indicar el parámetro categoria, intereses o ambos." });
   }
 
-  if (errores.length > 0) {
+  if (errores.length > 0 || lat === null || lng === null || radio === null || limite === null) {
     throw new ErrorApi(400, "PARAMETRO_INVALIDO", "Los parámetros de la consulta no son válidos.", errores);
   }
 
@@ -161,5 +178,3 @@ function validarConsultaLugares(query) {
     limite,
   };
 }
-
-module.exports = { validarConsultaLugares, normalizarInteres };

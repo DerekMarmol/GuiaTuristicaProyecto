@@ -1,14 +1,39 @@
-const express = require("express");
-const { crearClienteGeoapify } = require("./geoapify/cliente");
-const { crearClienteDetalles } = require("./geoapify/detalles");
-const { crearEnriquecedorHorarios } = require("./geoapify/enriquecer");
-const { crearRutaLugares } = require("./routes/lugares");
-const { crearClienteOpenWeather } = require("./openweather/cliente");
-const { crearServicioClima } = require("./clima/servicio");
-const { crearRutaPronosticoClima } = require("./routes/pronosticoClima");
-const { manejarErrores } = require("./errores");
+import express, { type Express } from "express";
+import { crearClienteGeoapify } from "./geoapify/cliente";
+import { crearClienteDetalles } from "./geoapify/detalles";
+import { crearEnriquecedorHorarios } from "./geoapify/enriquecer";
+import { crearRutaLugares } from "./routes/lugares";
+import { crearClienteOpenWeather } from "./openweather/cliente";
+import { crearServicioClima } from "./clima/servicio";
+import { crearRutaPronosticoClima } from "./routes/pronosticoClima";
+import { manejarErrores } from "./errores";
+import type { FuncionFetch } from "./tipos";
 
-function crearApp({ apiKey = process.env.GEOAPIFY_API_KEY, fetch, tiempoEsperaMs, detalles = {}, clima = {} } = {}) {
+export interface OpcionesApp {
+  apiKey?: string;
+  fetch?: FuncionFetch;
+  tiempoEsperaMs?: number;
+  detalles?: {
+    tiempoEsperaMs?: number;
+    concurrencia?: number;
+    intervaloMs?: number;
+    presupuestoMs?: number;
+  };
+  clima?: {
+    apiKey?: string;
+    fetch?: FuncionFetch;
+    tiempoEsperaMs?: number;
+    ahora?: () => Date;
+  };
+}
+
+export function crearApp({
+  apiKey = process.env.GEOAPIFY_API_KEY,
+  fetch,
+  tiempoEsperaMs,
+  detalles = {},
+  clima = {},
+}: OpcionesApp = {}): Express {
   const app = express();
   app.disable("x-powered-by");
 
@@ -40,5 +65,3 @@ function crearApp({ apiKey = process.env.GEOAPIFY_API_KEY, fetch, tiempoEsperaMs
 
   return app;
 }
-
-module.exports = { crearApp };

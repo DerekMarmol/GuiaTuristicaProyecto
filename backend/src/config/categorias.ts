@@ -1,4 +1,4 @@
-const CATEGORIAS_PERMITIDAS = Object.freeze([
+export const CATEGORIAS_PERMITIDAS: readonly string[] = Object.freeze([
   "entertainment.museum",
   "entertainment.culture",
   "catering.restaurant",
@@ -8,5 +8,3 @@ const CATEGORIAS_PERMITIDAS = Object.freeze([
   "tourism.sights",
   "leisure.park",
 ]);
-
-module.exports = { CATEGORIAS_PERMITIDAS };

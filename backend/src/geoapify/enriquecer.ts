@@ -1,10 +1,20 @@
-const { interpretarHorario, horarioErrorConsulta } = require("./horario");
+import { interpretarHorario, horarioErrorConsulta, type Horario } from "./horario";
+import type { ConsultarDetalles } from "./detalles";
 
-const CONCURRENCIA_DETALLES = 4;
-const INTERVALO_DETALLES_MS = 250;
-const PRESUPUESTO_DETALLES_MS = 10000;
+export const CONCURRENCIA_DETALLES = 4;
+export const INTERVALO_DETALLES_MS = 250;
+export const PRESUPUESTO_DETALLES_MS = 10000;
 
-function esperar(ms, senal) {
+interface OpcionesEnriquecedor {
+  consultarDetalles: ConsultarDetalles;
+  concurrencia?: number;
+  intervaloMs?: number;
+  presupuestoMs?: number;
+}
+
+export type EnriquecerHorarios = <T extends { idExterno: string }>(lugares: T[]) => Promise<(T & { horario: Horario })[]>;
+
+function esperar(ms: number, senal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (ms <= 0 || senal.aborted) {
       resolve();
@@ -20,25 +30,25 @@ function esperar(ms, senal) {
   });
 }
 
-function crearEnriquecedorHorarios({
+export function crearEnriquecedorHorarios({
   consultarDetalles,
   concurrencia = CONCURRENCIA_DETALLES,
   intervaloMs = INTERVALO_DETALLES_MS,
   presupuestoMs = PRESUPUESTO_DETALLES_MS,
-}) {
-  return async function enriquecerHorarios(lugares) {
+}: OpcionesEnriquecedor): EnriquecerHorarios {
+  return async function enriquecerHorarios<T extends { idExterno: string }>(lugares: T[]) {
     if (lugares.length === 0) {
       return [];
     }
 
     const identificadores = [...new Set(lugares.map((lugar) => lugar.idExterno))];
-    const horarios = new Map();
+    const horarios = new Map<string, Horario>();
     const controlador = new AbortController();
     const { signal: senal } = controlador;
     let siguiente = 0;
     let proximoInicio = 0;
 
-    async function obtenerHorario(idExterno) {
+    async function obtenerHorario(idExterno: string): Promise<Horario> {
       try {
         const propiedades = await consultarDetalles(idExterno, senal);
         return interpretarHorario(propiedades.opening_hours);
@@ -47,7 +57,7 @@ function crearEnriquecedorHorarios({
       }
     }
 
-    async function trabajador() {
+    async function trabajador(): Promise<void> {
       while (siguiente < identificadores.length && !senal.aborted) {
         const idExterno = identificadores[siguiente++];
         const ahora = Date.now();
@@ -64,8 +74,8 @@ function crearEnriquecedorHorarios({
       }
     }
 
-    let temporizador;
-    const presupuestoAgotado = new Promise((resolve) => {
+    let temporizador: NodeJS.Timeout | undefined;
+    const presupuestoAgotado = new Promise<void>((resolve) => {
       temporizador = setTimeout(() => {
         controlador.abort();
         resolve();
@@ -82,5 +92,3 @@ function crearEnriquecedorHorarios({
     return lugares.map((lugar) => ({ ...lugar, horario: horarios.get(lugar.idExterno) ?? horarioErrorConsulta() }));
   };
 }
-
-module.exports = { crearEnriquecedorHorarios, CONCURRENCIA_DETALLES, INTERVALO_DETALLES_MS, PRESUPUESTO_DETALLES_MS };

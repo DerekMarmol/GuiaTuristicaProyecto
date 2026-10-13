@@ -1,29 +1,95 @@
-const { test, describe, before, after, beforeEach } = require("node:test");
-const assert = require("node:assert/strict");
-const { once } = require("node:events");
-const { crearApp } = require("../src/app");
-const { interpretarHorario } = require("../src/geoapify/horario");
-const { extraerRegistroDetalles } = require("../src/geoapify/detalles");
-const { crearEnriquecedorHorarios, CONCURRENCIA_DETALLES } = require("../src/geoapify/enriquecer");
+import { test, describe, before, after, beforeEach } from "node:test";
+import assert from "node:assert/strict";
+import { once } from "node:events";
+import type { Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { crearApp } from "../src/app";
+import { interpretarHorario } from "../src/geoapify/horario";
+import { extraerRegistroDetalles } from "../src/geoapify/detalles";
+import { crearEnriquecedorHorarios, CONCURRENCIA_DETALLES } from "../src/geoapify/enriquecer";
+
+// ---------------------------------------------------------------------------
+// Tipos
+// ---------------------------------------------------------------------------
+
+type EstadoHorario = "disponible" | "no_publicado" | "no_interpretable" | "error_consulta";
+
+interface Horario {
+  estado: EstadoHorario;
+  valorOriginal: string | null;
+  fuente: "geoapify";
+}
+
+interface Geometria {
+  type: string;
+  coordinates: unknown;
+}
+
+interface Feature {
+  type: "Feature";
+  properties: Record<string, unknown>;
+  geometry?: Geometria;
+}
+
+interface LugarRespuesta {
+  idExterno: string;
+  proveedor: string;
+  nombre: string;
+  direccion: string;
+  lat: number;
+  lng: number;
+  categorias: string[];
+  horario: Horario;
+}
+
+interface CuerpoLugares {
+  lugares: LugarRespuesta[];
+}
+
+interface CuerpoError {
+  error: { codigo: string; mensaje: string };
+}
+
+interface Resultado<T> {
+  estado: number;
+  texto: string;
+  cuerpo: T;
+}
+
+interface ConsultaDetalles {
+  url: URL;
+  opciones: RequestInit | undefined;
+}
+
+type RespuestaSimulada = Response | Promise<Response>;
+
+// Entradas deliberadamente inválidas: se convierten al tipo del parámetro real.
+type EntradaHorario = Parameters<typeof interpretarHorario>[0];
+type EntradaDetalles = Parameters<typeof extraerRegistroDetalles>[0];
+
+// ---------------------------------------------------------------------------
+// Utilidades
+// ---------------------------------------------------------------------------
 
 const CLAVE = "clave-de-prueba-no-real-456";
+const PUNTO: Geometria = { type: "Point", coordinates: [-90.5, 14.6] };
 
-function horario(estado, valorOriginal = null) {
+function horario(estado: EstadoHorario, valorOriginal: string | null = null): Horario {
   return { estado, valorOriginal, fuente: "geoapify" };
 }
 
-function respuestaJson(cuerpo, estado = 200) {
+function respuestaJson(cuerpo: unknown, estado = 200): Response {
   return new Response(JSON.stringify(cuerpo), {
     status: estado,
     headers: { "Content-Type": "application/json" },
   });
 }
 
-function coleccion(features) {
+function coleccion(features: unknown[]) {
   return { type: "FeatureCollection", features };
 }
 
-function lugarBusqueda(id, extra = {}) {
+function lugarBusqueda(id: string, extra: Record<string, unknown> = {}): Feature {
   return {
     type: "Feature",
     properties: {
@@ -35,22 +101,36 @@ function lugarBusqueda(id, extra = {}) {
       categories: ["tourism.sights"],
       ...extra,
     },
-    geometry: { type: "Point", coordinates: [-90.5, 14.6] },
+    geometry: PUNTO,
   };
 }
 
-function detalles(id, propiedades = {}, geometry = { type: "Point", coordinates: [-90.5, 14.6] }) {
+function detalles(id: string, propiedades: Record<string, unknown> = {}, geometry: Geometria = PUNTO): Feature {
   return { type: "Feature", properties: { feature_type: "details", place_id: id, ...propiedades }, geometry };
 }
 
-function esperarAborto(senal) {
-  return new Promise((resolve, reject) => {
+function esperarAborto(senal: AbortSignal): Promise<never> {
+  return new Promise<never>((_resolve, reject) => {
     senal.addEventListener("abort", () => reject(senal.reason));
   });
 }
 
+function senalDe(opciones: RequestInit | undefined): AbortSignal {
+  const senal = opciones?.signal;
+  assert.ok(senal instanceof AbortSignal, "la petición debe incluir un AbortSignal");
+  return senal;
+}
+
+function puertoDe(servidor: Server): number {
+  return (servidor.address() as AddressInfo).port;
+}
+
+// ---------------------------------------------------------------------------
+// interpretarHorario
+// ---------------------------------------------------------------------------
+
 describe("interpretarHorario", () => {
-  const disponibles = [
+  const disponibles: [descripcion: string, valor: string][] = [
     ["horarios distintos según el día", "Mo-Fr 09:00-17:00; Sa 10:00-14:00"],
     ["varios intervalos en un mismo día", "Mo-Fr 08:00-12:00,14:00-18:00"],
     ["turnos que cruzan la medianoche", "Fr-Sa 22:00-03:00"],
@@ -70,52 +150,64 @@ describe("interpretarHorario", () => {
 
   test("un día cerrado no equivale a un horario ausente", () => {
     assert.equal(interpretarHorario("Su off").estado, "disponible");
-    assert.equal(interpretarHorario(undefined).estado, "no_publicado");
+    assert.equal(interpretarHorario(undefined as EntradaHorario).estado, "no_publicado");
   });
 
-  for (const [descripcion, valor] of [
+  const ausentes: [descripcion: string, valor: unknown][] = [
     ["ausente", undefined],
     ["null", null],
     ["texto vacío", ""],
     ["texto con solo espacios", "   "],
-  ]) {
+  ];
+
+  for (const [descripcion, valor] of ausentes) {
     test(`marca no_publicado con valor ${descripcion} sin asignar uno por defecto`, () => {
-      assert.deepEqual(interpretarHorario(valor), horario("no_publicado"));
+      assert.deepEqual(interpretarHorario(valor as EntradaHorario), horario("no_publicado"));
     });
   }
 
-  for (const [descripcion, valor] of [
+  const invalidos: [descripcion: string, valor: string][] = [
     ["hora fuera del día", "Mo-Fr 25:00-26:00"],
     ["texto libre", "lunes a viernes 9 a 5"],
     ["formato de 12 horas", "Mo-Fr 9am-5pm"],
     ["texto sin horario", "abierto casi siempre"],
-  ]) {
+  ];
+
+  for (const [descripcion, valor] of invalidos) {
     test(`marca no_interpretable un horario inválido (${descripcion}) y conserva el texto`, () => {
       assert.deepEqual(interpretarHorario(valor), horario("no_interpretable", valor));
     });
   }
 
-  for (const [descripcion, valor] of [
+  const tiposInesperados: [descripcion: string, valor: unknown][] = [
     ["número", 9],
     ["booleano", true],
     ["objeto", { lunes: "09:00-17:00" }],
     ["arreglo", ["Mo-Fr 09:00-17:00"]],
-  ]) {
+  ];
+
+  for (const [descripcion, valor] of tiposInesperados) {
     test(`marca no_interpretable un tipo inesperado (${descripcion}) con valorOriginal null`, () => {
-      assert.deepEqual(interpretarHorario(valor), horario("no_interpretable"));
+      assert.deepEqual(interpretarHorario(valor as EntradaHorario), horario("no_interpretable"));
     });
   }
 
-  for (const [descripcion, valor] of [
+  const reglasAdministrativas: [descripcion: string, valor: string][] = [
     ["festivos", "Mo-Fr 09:00-17:00; PH off"],
     ["horario exclusivo de festivos", "PH 10:00-14:00"],
     ["vacaciones escolares", "Mo-Fr 08:00-15:00; SH off"],
-  ]) {
+  ];
+
+  for (const [descripcion, valor] of reglasAdministrativas) {
     test(`marca no_interpretable una regla que requiere ubicación administrativa (${descripcion})`, () => {
       assert.deepEqual(interpretarHorario(valor), horario("no_interpretable", valor));
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// extraerRegistroDetalles
+// ---------------------------------------------------------------------------
 
 describe("extraerRegistroDetalles", () => {
   test("toma el horario del registro details del lugar e ignora edificios y otros lugares", () => {
@@ -124,7 +216,7 @@ describe("extraerRegistroDetalles", () => {
         { type: "Feature", properties: { feature_type: "building", place_id: "edificio", opening_hours: "24/7" } },
         { type: "Feature", properties: { feature_type: "radius_100.cafe", place_id: "cafe", opening_hours: "Mo 08:00-09:00" } },
         detalles("lugar-1", { opening_hours: "Tu-Su 09:00-16:00" }),
-      ]),
+      ]) as EntradaDetalles,
       "lugar-1",
     );
 
@@ -132,24 +224,25 @@ describe("extraerRegistroDetalles", () => {
   });
 
   test("acepta geometrías que no son puntos", () => {
-    const poligono = { type: "Polygon", coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] };
-    const propiedades = extraerRegistroDetalles(coleccion([detalles("p", { opening_hours: "24/7" }, poligono)]), "p");
+    const poligono: Geometria = { type: "Polygon", coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] };
+    const propiedades = extraerRegistroDetalles(coleccion([detalles("p", { opening_hours: "24/7" }, poligono)]) as EntradaDetalles, "p");
 
     assert.equal(propiedades.opening_hours, "24/7");
   });
 
   test("acepta el único registro details aunque su place_id tenga otra codificación o no exista", () => {
-    for (const registro of [
+    const registros: Feature[] = [
       detalles("51c2a0-codificacion-distinta", { opening_hours: "24/7" }),
       { type: "Feature", properties: { feature_type: "details", opening_hours: "24/7" } },
-    ]) {
-      assert.equal(extraerRegistroDetalles(coleccion([registro]), "51f0a6-busqueda").opening_hours, "24/7");
+    ];
+    for (const registro of registros) {
+      assert.equal(extraerRegistroDetalles(coleccion([registro]) as EntradaDetalles, "51f0a6-busqueda").opening_hours, "24/7");
     }
   });
 
   test("con varios registros details elige solo el que coincide exactamente con el lugar", () => {
     const propiedades = extraerRegistroDetalles(
-      coleccion([detalles("otro", { opening_hours: "24/7" }), detalles("p", { opening_hours: "Mo 10:00-12:00" })]),
+      coleccion([detalles("otro", { opening_hours: "24/7" }), detalles("p", { opening_hours: "Mo 10:00-12:00" })]) as EntradaDetalles,
       "p",
     );
 
@@ -157,7 +250,7 @@ describe("extraerRegistroDetalles", () => {
   });
 
   test("rechaza respuestas mal formadas o sin el registro del lugar", () => {
-    const casos = [
+    const casos: unknown[] = [
       null,
       "texto",
       [],
@@ -171,10 +264,14 @@ describe("extraerRegistroDetalles", () => {
       coleccion([detalles("p"), detalles("p")]),
     ];
     for (const datos of casos) {
-      assert.throws(() => extraerRegistroDetalles(datos, "p"), { name: "ErrorDetalles" });
+      assert.throws(() => extraerRegistroDetalles(datos as EntradaDetalles, "p"), { name: "ErrorDetalles" });
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// crearEnriquecedorHorarios
+// ---------------------------------------------------------------------------
 
 describe("crearEnriquecedorHorarios", () => {
   const LUGARES = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"].map((id) => ({ idExterno: id, nombre: id }));
@@ -193,10 +290,10 @@ describe("crearEnriquecedorHorarios", () => {
   });
 
   test("consulta una sola vez cada identificador", async () => {
-    const consultados = [];
+    const consultados: string[] = [];
     const enriquecer = crearEnriquecedorHorarios({
       intervaloMs: 0,
-      consultarDetalles: async (id) => {
+      consultarDetalles: async (id: string) => {
         consultados.push(id);
         return { opening_hours: "24/7" };
       },
@@ -242,7 +339,7 @@ describe("crearEnriquecedorHorarios", () => {
   });
 
   test("espacia el inicio de las consultas", async () => {
-    const inicios = [];
+    const inicios: number[] = [];
     const enriquecer = crearEnriquecedorHorarios({
       concurrencia: 4,
       intervaloMs: 40,
@@ -260,12 +357,12 @@ describe("crearEnriquecedorHorarios", () => {
   });
 
   test("al agotar el presupuesto cancela las consultas pendientes y marca error_consulta", async () => {
-    const senales = [];
+    const senales: AbortSignal[] = [];
     const enriquecer = crearEnriquecedorHorarios({
       concurrencia: 2,
       intervaloMs: 0,
       presupuestoMs: 80,
-      consultarDetalles: (id, senal) => {
+      consultarDetalles: (id: string, senal: AbortSignal) => {
         senales.push(senal);
         if (id === "a") {
           return Promise.resolve({ opening_hours: "Mo-Fr 09:00-17:00" });
@@ -293,7 +390,7 @@ describe("crearEnriquecedorHorarios", () => {
     const enriquecer = crearEnriquecedorHorarios({
       intervaloMs: 0,
       presupuestoMs: 50,
-      consultarDetalles: () => new Promise(() => {}),
+      consultarDetalles: () => new Promise<never>(() => {}),
     });
 
     const inicio = Date.now();
@@ -304,18 +401,22 @@ describe("crearEnriquecedorHorarios", () => {
   });
 });
 
-describe("GET /api/lugares - horarios de Geoapify", () => {
-  let simularBusqueda;
-  let simularDetalles;
-  let busquedas;
-  let consultasDetalles;
-  let servidor;
-  let baseUrl;
+// ---------------------------------------------------------------------------
+// GET /api/lugares
+// ---------------------------------------------------------------------------
 
-  async function consultar(ruta) {
+describe("GET /api/lugares - horarios de Geoapify", () => {
+  let simularBusqueda: (url: URL, opciones: RequestInit | undefined) => RespuestaSimulada;
+  let simularDetalles: (id: string, opciones: RequestInit | undefined) => RespuestaSimulada;
+  let busquedas: URL[] = [];
+  let consultasDetalles: ConsultaDetalles[] = [];
+  let servidor: Server;
+  let baseUrl: string;
+
+  async function consultar<T = CuerpoLugares>(ruta: string): Promise<Resultado<T>> {
     const respuesta = await fetch(`${baseUrl}${ruta}`);
     const texto = await respuesta.text();
-    return { estado: respuesta.status, texto, cuerpo: JSON.parse(texto) };
+    return { estado: respuesta.status, texto, cuerpo: JSON.parse(texto) as T };
   }
 
   before(async () => {
@@ -323,11 +424,11 @@ describe("GET /api/lugares - horarios de Geoapify", () => {
       apiKey: CLAVE,
       tiempoEsperaMs: 50,
       detalles: { tiempoEsperaMs: 50, intervaloMs: 0, presupuestoMs: 2000 },
-      fetch: async (url, opciones) => {
+      fetch: async (url: string | URL, opciones?: RequestInit) => {
         const direccion = new URL(url);
         if (direccion.pathname === "/v2/place-details") {
           consultasDetalles.push({ url: direccion, opciones });
-          return simularDetalles(direccion.searchParams.get("id"), opciones);
+          return simularDetalles(direccion.searchParams.get("id") ?? "", opciones);
         }
         busquedas.push(direccion);
         return simularBusqueda(direccion, opciones);
@@ -335,7 +436,7 @@ describe("GET /api/lugares - horarios de Geoapify", () => {
     });
     servidor = app.listen(0, "127.0.0.1");
     await once(servidor, "listening");
-    baseUrl = `http://127.0.0.1:${servidor.address().port}`;
+    baseUrl = `http://127.0.0.1:${puertoDe(servidor)}`;
   });
 
   after(() => {
@@ -364,7 +465,7 @@ describe("GET /api/lugares - horarios de Geoapify", () => {
     assert.equal(url.searchParams.get("features"), "details");
     assert.equal(url.searchParams.get("apiKey"), CLAVE);
     assert.deepEqual([...url.searchParams.keys()].sort(), ["apiKey", "features", "id"]);
-    assert.ok(opciones.signal instanceof AbortSignal);
+    assert.ok(opciones?.signal instanceof AbortSignal);
   });
 
   test("conserva el horario publicado y los datos originales de la búsqueda", async () => {
@@ -419,7 +520,7 @@ describe("GET /api/lugares - horarios de Geoapify", () => {
   test("combina horarios disponibles, ausentes, no interpretables y consultas fallidas sin alterar orden ni límite", async () => {
     const ids = ["ok", "sin", "nulo", "vacio", "invalido", "tipo", "festivos", "http500", "http429", "red", "timeout", "malformado", "ajeno", "extra"];
     simularBusqueda = () => respuestaJson(coleccion(ids.map((id) => lugarBusqueda(id))));
-    const respuestas = {
+    const respuestas: Record<string, (opciones: RequestInit | undefined) => RespuestaSimulada> = {
       ok: () => respuestaJson(coleccion([detalles("ok", { opening_hours: "24/7" })])),
       sin: () => respuestaJson(coleccion([detalles("sin")])),
       nulo: () => respuestaJson(coleccion([detalles("nulo", { opening_hours: null })])),
@@ -432,7 +533,7 @@ describe("GET /api/lugares - horarios de Geoapify", () => {
       red: () => {
         throw new TypeError(`fetch failed https://api.geoapify.com/v2/place-details?apiKey=${CLAVE}`);
       },
-      timeout: (opciones) => esperarAborto(opciones.signal),
+      timeout: (opciones) => esperarAborto(senalDe(opciones)),
       malformado: () => new Response("<html>no es json</html>", { status: 200 }),
       ajeno: () =>
         respuestaJson(
@@ -443,7 +544,11 @@ describe("GET /api/lugares - horarios de Geoapify", () => {
           ]),
         ),
     };
-    simularDetalles = (id, opciones) => respuestas[id](opciones);
+    simularDetalles = (id, opciones) => {
+      const responder = respuestas[id];
+      assert.ok(responder, `no hay respuesta simulada para ${id}`);
+      return responder(opciones);
+    };
 
     const resultado = await consultar(`${RUTA}&limite=13`);
 
@@ -469,7 +574,9 @@ describe("GET /api/lugares - horarios de Geoapify", () => {
     );
     assert.equal(consultasDetalles.length, 13);
     assert.ok(!consultasDetalles.some(({ url }) => url.searchParams.get("id") === "extra"));
-    assert.ok(consultasDetalles.find(({ url }) => url.searchParams.get("id") === "timeout").opciones.signal.aborted);
+    const consultaTimeout = consultasDetalles.find(({ url }) => url.searchParams.get("id") === "timeout");
+    assert.ok(consultaTimeout, "no se consultó el lugar timeout");
+    assert.ok(senalDe(consultaTimeout.opciones).aborted);
     assert.ok(!resultado.texto.includes(CLAVE));
     assert.ok(!resultado.texto.includes("apiKey"));
     assert.ok(!resultado.texto.includes("stack trace"));
@@ -494,14 +601,15 @@ describe("GET /api/lugares - horarios de Geoapify", () => {
   });
 
   test("conserva los errores de la búsqueda principal sin consultar detalles", async () => {
-    for (const [estadoProveedor, estado, codigo] of [
+    const casos: [estadoProveedor: number, estado: number, codigo: string][] = [
       [429, 503, "PROVEEDOR_LIMITE_SOLICITUDES"],
       [401, 502, "PROVEEDOR_CREDENCIALES_INVALIDAS"],
       [500, 502, "PROVEEDOR_ERROR"],
-    ]) {
+    ];
+    for (const [estadoProveedor, estado, codigo] of casos) {
       simularBusqueda = () => respuestaJson({ message: `error ${CLAVE}` }, estadoProveedor);
 
-      const resultado = await consultar(RUTA);
+      const resultado = await consultar<CuerpoError>(RUTA);
 
       assert.equal(resultado.estado, estado);
       assert.equal(resultado.cuerpo.error.codigo, codigo);
@@ -514,21 +622,21 @@ describe("GET /api/lugares - horarios de Geoapify", () => {
     const app = crearApp({
       apiKey: CLAVE,
       detalles: { tiempoEsperaMs: 5000, intervaloMs: 0, presupuestoMs: 100, concurrencia: 2 },
-      fetch: async (url, opciones) => {
+      fetch: async (url: string | URL, opciones?: RequestInit) => {
         const direccion = new URL(url);
         if (direccion.pathname === "/v2/place-details") {
           consultasDetalles.push({ url: direccion, opciones });
-          return esperarAborto(opciones.signal);
+          return esperarAborto(senalDe(opciones));
         }
         return respuestaJson(coleccion(["p1", "p2", "p3", "p4", "p5"].map((id) => lugarBusqueda(id))));
       },
     });
-    const servidorPresupuesto = app.listen(0, "127.0.0.1");
+    const servidorPresupuesto: Server = app.listen(0, "127.0.0.1");
     await once(servidorPresupuesto, "listening");
     try {
       const inicio = Date.now();
-      const respuesta = await fetch(`http://127.0.0.1:${servidorPresupuesto.address().port}${RUTA}`);
-      const cuerpo = await respuesta.json();
+      const respuesta = await fetch(`http://127.0.0.1:${puertoDe(servidorPresupuesto)}${RUTA}`);
+      const cuerpo = (await respuesta.json()) as CuerpoLugares;
 
       assert.equal(respuesta.status, 200);
       assert.ok(Date.now() - inicio < 2000);
@@ -537,7 +645,7 @@ describe("GET /api/lugares - horarios de Geoapify", () => {
         ["p1", "p2", "p3", "p4", "p5"].map((id) => [id, "error_consulta"]),
       );
       assert.equal(consultasDetalles.length, 2);
-      assert.ok(consultasDetalles.every(({ opciones }) => opciones.signal.aborted));
+      assert.ok(consultasDetalles.every(({ opciones }) => opciones?.signal?.aborted === true));
     } finally {
       servidorPresupuesto.closeAllConnections();
       servidorPresupuesto.close();

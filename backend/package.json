@@ -2,11 +2,13 @@
   "name": "backend",
   "version": "1.0.0",
   "description": "",
-  "main": "src/server.js",
+  "main": "dist/server.js",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js",
-    "test": "node --test \"test/**/*.test.js\"",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "tsx --test \"test/**/*.test.ts\"",
     "postinstall": "prisma skills sync || exit 0",
     "ai:test": "tsx src/ai/validator.test.ts && tsx --test src/ai/validacionEstancia.test.ts",
     "ai:probar": "tsx src/ai/scripts/probar.ts",
@@ -20,6 +22,7 @@
     "node": ">=20"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^26.6.4",
     "prisma": "^6.19.3",
     "tsx": "^4.23.15",

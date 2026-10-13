@@ -1,4 +1,4 @@
-const CATEGORIAS_POR_INTERES = Object.freeze({
+export const CATEGORIAS_POR_INTERES: Readonly<Record<string, readonly string[]>> = Object.freeze({
   Cultura: Object.freeze(["entertainment.culture", "entertainment.museum"]),
   Historia: Object.freeze(["tourism.sights", "heritage"]),
   "Gastronomía": Object.freeze(["catering.restaurant", "catering.cafe"]),
@@ -26,6 +26,4 @@ const CATEGORIAS_POR_INTERES = Object.freeze({
   ]),
 });
 
-const INTERESES_PERMITIDOS = Object.freeze(Object.keys(CATEGORIAS_POR_INTERES));
-
-module.exports = { CATEGORIAS_POR_INTERES, INTERESES_PERMITIDOS };
+export const INTERESES_PERMITIDOS: readonly string[] = Object.freeze(Object.keys(CATEGORIAS_POR_INTERES));

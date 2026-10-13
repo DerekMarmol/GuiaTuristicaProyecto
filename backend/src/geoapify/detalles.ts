@@ -1,26 +1,42 @@
-const URL_PLACE_DETAILS = "https://api.geoapify.com/v2/place-details";
-const TIEMPO_ESPERA_DETALLE_MS = 5000;
+import { esObjeto, type FuncionFetch } from "../tipos";
 
-class ErrorDetalles extends Error {
-  constructor(motivo) {
+export const URL_PLACE_DETAILS = "https://api.geoapify.com/v2/place-details";
+export const TIEMPO_ESPERA_DETALLE_MS = 5000;
+
+export type PropiedadesDetalles = Record<string, unknown>;
+
+export type ConsultarDetalles = (idExterno: string, senal: AbortSignal) => Promise<PropiedadesDetalles>;
+
+interface OpcionesCliente {
+  apiKey?: string;
+  fetch?: FuncionFetch;
+  tiempoEsperaMs?: number;
+}
+
+export class ErrorDetalles extends Error {
+  motivo: string;
+
+  constructor(motivo: string) {
     super(`No se obtuvieron detalles válidos del lugar: ${motivo}.`);
     this.name = "ErrorDetalles";
     this.motivo = motivo;
   }
 }
 
-function esObjeto(valor) {
-  return valor !== null && typeof valor === "object" && !Array.isArray(valor);
+interface RegistroDetalles {
+  properties: PropiedadesDetalles;
 }
 
-function extraerRegistroDetalles(datos, idExterno) {
+function esRegistroDetalles(feature: unknown): feature is RegistroDetalles {
+  return esObjeto(feature) && esObjeto(feature.properties) && feature.properties.feature_type === "details";
+}
+
+export function extraerRegistroDetalles(datos: unknown, idExterno: string): PropiedadesDetalles {
   if (!esObjeto(datos) || !Array.isArray(datos.features)) {
     throw new ErrorDetalles("estructura inesperada");
   }
 
-  const registros = datos.features.filter(
-    (feature) => esObjeto(feature) && esObjeto(feature.properties) && feature.properties.feature_type === "details",
-  );
+  const registros = datos.features.filter(esRegistroDetalles);
   if (registros.length === 1) {
     return registros[0].properties;
   }
@@ -32,7 +48,11 @@ function extraerRegistroDetalles(datos, idExterno) {
   throw new ErrorDetalles("registro de detalles ausente o ambiguo");
 }
 
-function crearClienteDetalles({ apiKey, fetch: fetchImpl = globalThis.fetch, tiempoEsperaMs = TIEMPO_ESPERA_DETALLE_MS } = {}) {
+export function crearClienteDetalles({
+  apiKey,
+  fetch: fetchImpl = globalThis.fetch,
+  tiempoEsperaMs = TIEMPO_ESPERA_DETALLE_MS,
+}: OpcionesCliente = {}): ConsultarDetalles {
   const clave = typeof apiKey === "string" ? apiKey.trim() : "";
 
   return async function consultarDetalles(idExterno, senal) {
@@ -57,7 +77,7 @@ function crearClienteDetalles({ apiKey, fetch: fetchImpl = globalThis.fetch, tie
     }
 
     try {
-      let respuesta;
+      let respuesta: Response;
       try {
         respuesta = await fetchImpl(url, {
           headers: { Accept: "application/json" },
@@ -72,7 +92,7 @@ function crearClienteDetalles({ apiKey, fetch: fetchImpl = globalThis.fetch, tie
         throw new ErrorDetalles(`HTTP ${respuesta.status}`);
       }
 
-      let datos;
+      let datos: unknown;
       try {
         datos = await respuesta.json();
       } catch {
@@ -86,5 +106,3 @@ function crearClienteDetalles({ apiKey, fetch: fetchImpl = globalThis.fetch, tie
     }
   };
 }
-
-module.exports = { crearClienteDetalles, extraerRegistroDetalles, ErrorDetalles, URL_PLACE_DETAILS, TIEMPO_ESPERA_DETALLE_MS };
