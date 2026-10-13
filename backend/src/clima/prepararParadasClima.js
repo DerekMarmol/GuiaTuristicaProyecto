@@ -1,5 +1,5 @@
 
-const obtenerClima = require("./climaService");
+const { consultarClima: obtenerClima } = require("./climaService");
 
 async function prepararParadasClima(paradas, fechaHora) {
   if (!Array.isArray(paradas)) {

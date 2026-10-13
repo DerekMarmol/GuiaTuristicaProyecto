@@ -858,8 +858,14 @@ describe("GET /api/clima/pronostico - configuración", () => {
   test("no intercepta la ruta GET /api/clima existente", async () => {
     const resultado = await consultar("/api/clima");
 
-    assert.equal(resultado.estado, 400);
-    assert.equal(typeof resultado.cuerpo.error, "string");
+    verificarError(resultado, 400, "PARAMETRO_INVALIDO");
+    assert.equal(llamadas.length, 0);
+  });
+
+  test("GET /api/clima rechaza coordenadas o fecha inválidas con el formato de error común", async () => {
+    const resultado = await consultar("/api/clima?latitud=200&longitud=-90.5&fechaHora=2026-10-12T15:00:00Z");
+
+    verificarError(resultado, 400, "PARAMETRO_INVALIDO");
     assert.equal(llamadas.length, 0);
   });
 

@@ -33,9 +33,21 @@ El servidor carga `backend/.env` sin sobrescribir variables que ya estén defini
 npm start      # inicia el servidor
 npm run dev    # inicia el servidor y lo reinicia al detectar cambios
 npm test       # ejecuta las pruebas con Geoapify y OpenWeather simulados (no requiere claves)
+npm run ai:test   # pruebas del módulo de IA (validador, orquestador y validación de estancias)
 ```
 
 Si falta `GEOAPIFY_API_KEY`, `npm start` termina con un mensaje que indica la variable faltante.
+
+## Base de datos (Prisma)
+
+El esquema está en `prisma/schema.prisma` y las migraciones en `prisma/migrations/`. El cliente se genera en `generated/prisma` (excluido de Git).
+
+```powershell
+docker compose up -d postgres   # desde la raíz del repositorio
+npx prisma migrate dev          # aplica las migraciones pendientes y genera el cliente
+```
+
+Para cambiar el esquema, edita `schema.prisma` y crea una migración nueva con `npx prisma migrate dev --name <descripcion>`. No edites migraciones que ya están en `main`: Prisma detecta el cambio de checksum y pide reiniciar la base de datos. Si tu base local quedó en ese estado, ejecuta `npx prisma migrate reset` (borra los datos locales).
 
 ## Endpoint `GET /api/lugares`
 
@@ -218,6 +230,18 @@ Comprobación manual de horarios con un límite pequeño (consume hasta 6 crédi
 $respuesta = Invoke-RestMethod -Uri "http://localhost:3000/api/lugares?lat=14.6349&lng=-90.5069&categoria=catering.restaurant&radio=2000&limite=5"
 $respuesta.lugares | Format-Table nombre, @{ n = "estado"; e = { $_.horario.estado } }, @{ n = "horario"; e = { $_.horario.valorOriginal } } -Wrap
 ```
+
+## Endpoint `GET /api/clima`
+
+Devuelve el clima de una hora concreta mediante [Open-Meteo](https://open-meteo.com/) (no requiere clave). Lo usa el indicador de clima del frontend. Las respuestas se guardan en memoria durante 30 minutos por coordenadas y día.
+
+| Parámetro | Obligatorio | Regla |
+| --- | --- | --- |
+| `latitud` | Sí | Número entre -90 y 90 |
+| `longitud` | Sí | Número entre -180 y 180 |
+| `fechaHora` | Sí | Fecha y hora interpretable por `Date` (por ejemplo `2026-10-12T15:00:00Z`) |
+
+Respuesta `200`: `{ "disponible": true, "clima": { "fechaHora", "temperatura", "probabilidadLluvia", "codigoClima", "malClima" } }`. Si Open-Meteo no responde o no hay datos para esa hora, devuelve `{ "disponible": false, "clima": null }`. Los parámetros ausentes o inválidos producen `400` con el código `PARAMETRO_INVALIDO` y el mismo formato de error que el resto de la API.
 
 ## Endpoint `GET /api/clima/pronostico`
 

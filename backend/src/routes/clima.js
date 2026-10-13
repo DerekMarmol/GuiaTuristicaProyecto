@@ -1,6 +1,6 @@
-
 const express = require("express");
 const { consultarClima } = require("../clima/climaService");
+const { ErrorApi } = require("../errores");
 
 function crearRutaClima() {
   const router = express.Router();
@@ -16,35 +16,21 @@ function crearRutaClima() {
       !longitud.trim() ||
       !fechaHora.trim()
     ) {
-      return res.status(400).json({
-        error: "Se requieren latitud, longitud y fechaHora"
-      });
+      throw new ErrorApi(400, "PARAMETRO_INVALIDO", "Se requieren latitud, longitud y fechaHora.");
     }
 
+    let clima;
     try {
-      const clima = await consultarClima(
-        latitud,
-        longitud,
-        fechaHora
-      );
-
-      if (!clima) {
-        return res.json({
-          disponible: false,
-          clima: null
-        });
-      }
-
-      return res.json({
-        disponible: true,
-        clima
-      });
-
+      clima = await consultarClima(latitud, longitud, fechaHora);
     } catch (error) {
-      return res.status(400).json({
-        error: error.message
-      });
+      throw new ErrorApi(400, "PARAMETRO_INVALIDO", error.message);
     }
+
+    if (!clima) {
+      return res.json({ disponible: false, clima: null });
+    }
+
+    return res.json({ disponible: true, clima });
   });
 
   return router;
