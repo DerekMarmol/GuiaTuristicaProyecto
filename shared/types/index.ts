@@ -3,3 +3,4 @@ export * from "./viaje";
 export * from "./itinerario";
 export * from "./restriccion";
 export * from "./lugarInteres";
+export * from "./clima";
