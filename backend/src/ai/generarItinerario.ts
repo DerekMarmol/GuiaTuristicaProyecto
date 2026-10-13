@@ -48,7 +48,7 @@ export async function generarItinerarios({ viaje, candidatos, cliente, maxIntent
         return { 
           itinerarios: itinerariosConHolgura, 
           intentos: intento, 
-          advertencias: [] 
+          advertencias: ultimo.advertencias,
         };
       }
       errores = ultimo.errores;
@@ -63,7 +63,10 @@ export async function generarItinerarios({ viaje, candidatos, cliente, maxIntent
     return { 
       itinerarios: itinerariosConHolgura, 
       intentos: maxIntentos, 
-      advertencias: ultimo.errores 
+      advertencias: [
+        ...ultimo.errores,
+        ...ultimo.advertencias,
+      ],
     };
   }
   

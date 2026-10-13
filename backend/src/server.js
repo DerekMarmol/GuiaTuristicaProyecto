@@ -12,6 +12,10 @@ if (!apiKey) {
   process.exit(1);
 }
 
+if (!process.env.OPENWEATHER_API_KEY?.trim()) {
+  console.warn("Falta la variable de entorno OPENWEATHER_API_KEY. GET /api/clima/pronostico responderá 503 hasta que se defina en backend/.env.");
+}
+
 const puerto = Number(process.env.PORT) || 3000;
 
 crearApp({ apiKey }).listen(puerto, () => {

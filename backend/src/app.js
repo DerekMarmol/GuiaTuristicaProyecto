@@ -3,9 +3,12 @@ const { crearClienteGeoapify } = require("./geoapify/cliente");
 const { crearClienteDetalles } = require("./geoapify/detalles");
 const { crearEnriquecedorHorarios } = require("./geoapify/enriquecer");
 const { crearRutaLugares } = require("./routes/lugares");
+const { crearClienteOpenWeather } = require("./openweather/cliente");
+const { crearServicioClima } = require("./clima/servicio");
+const { crearRutaPronosticoClima } = require("./routes/pronosticoClima");
 const { manejarErrores } = require("./errores");
 
-function crearApp({ apiKey = process.env.GEOAPIFY_API_KEY, fetch, tiempoEsperaMs, detalles = {} } = {}) {
+function crearApp({ apiKey = process.env.GEOAPIFY_API_KEY, fetch, tiempoEsperaMs, detalles = {}, clima = {} } = {}) {
   const app = express();
   app.disable("x-powered-by");
 
@@ -18,6 +21,14 @@ function crearApp({ apiKey = process.env.GEOAPIFY_API_KEY, fetch, tiempoEsperaMs
     presupuestoMs: detalles.presupuestoMs,
   });
   app.use("/api/lugares", crearRutaLugares(buscarLugares, enriquecerHorarios));
+
+  const obtenerPronostico = crearClienteOpenWeather({
+    apiKey: clima.apiKey === undefined ? process.env.OPENWEATHER_API_KEY : clima.apiKey,
+    fetch: clima.fetch,
+    tiempoEsperaMs: clima.tiempoEsperaMs,
+  });
+  const consultarClima = crearServicioClima({ obtenerPronostico, ahora: clima.ahora });
+  app.use("/api/clima/pronostico", crearRutaPronosticoClima(consultarClima));
 
   app.use((req, res) => {
     res.status(404).json({

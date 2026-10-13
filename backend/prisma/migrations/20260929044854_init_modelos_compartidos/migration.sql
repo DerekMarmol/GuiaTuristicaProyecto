@@ -61,17 +61,3 @@ ALTER TABLE "Parada" ADD CONSTRAINT "Parada_itinerarioId_fkey" FOREIGN KEY ("iti
 
 -- AddForeignKey
 ALTER TABLE "Restriccion" ADD CONSTRAINT "Restriccion_paradaId_fkey" FOREIGN KEY ("paradaId") REFERENCES "Parada"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- CreateTable
-CREATE TABLE "Usuario" (
-    "id" TEXT NOT NULL,
-    "correo" TEXT NOT NULL,
-    "contrasena" TEXT NOT NULL,
-    "nombre" TEXT NOT NULL,
-    "creadoEn" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "Usuario_pkey" PRIMARY KEY ("id")
-);
-
--- CreateIndex
-CREATE UNIQUE INDEX "Usuario_correo_key" ON "Usuario"("correo");

@@ -1,3 +1,4 @@
+
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
@@ -17,4 +18,14 @@ export default defineConfig({
       devOptions: { enabled: false },
     }),
   ],
+
+  // Redirigir las consultas a la API del backend
+  server: {
+    proxy: {
+      "/api": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+      },
+    },
+  },
 });

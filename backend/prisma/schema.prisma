@@ -69,6 +69,7 @@ model Restriccion {
 
   parada            Parada @relation(fields: [paradaId], references: [id], onDelete: Cascade)
 }
+
 model Usuario {
   id         String   @id @default(uuid())
   correo     String   @unique // se guarda en minúsculas (la API lo normaliza)
