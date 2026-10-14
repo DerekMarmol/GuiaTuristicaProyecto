@@ -78,7 +78,7 @@ const t = (nombre: string, fn: () => void | Promise<void>) => (async () => fn())
   await t("sobrevive a errores de red del modelo", async () => {
     let k = 0;
     const cliente = { async generarPlan() { if (k++ === 0) throw new Error("503"); return buena; } };
-    assert.equal((await generarItinerarios({ viaje: V, candidatos: L, cliente })).intentos, 2);
+    assert.equal((await generarItinerarios({ viaje: V, candidatos: L, cliente, esperaReintentoMs: 0 })).intentos, 2);
   });
   await t("sin candidatos no llama al modelo", async () => {
     let llamado = false;

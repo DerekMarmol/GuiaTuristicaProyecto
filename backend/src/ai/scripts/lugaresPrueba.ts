@@ -1,6 +1,6 @@
 import type { LugarReal, ViajeIA } from "../tipos";
 
-// DATOS DE PRUEBA (horarios aproximados, no oficiales). Se reemplazan por Google Places (Ana Laura).
+// Por ahora son datos de prueba (horarios aproximados, no oficiales).
 export const LUGARES_PRUEBA: LugarReal[] = [
   { placeId: "test_palacio", nombre: "Palacio Nacional de la Cultura", lat: 14.6417, lng: -90.5133, horaApertura: "09:00", horaCierre: "16:00", categoria: "Historia", precioEstimado: 60 },
   { placeId: "test_catedral", nombre: "Catedral Metropolitana", lat: 14.6414, lng: -90.5130, horaApertura: "08:00", horaCierre: "18:00", categoria: "Historia", precioEstimado: 0 },
