@@ -15,9 +15,13 @@ interface Params {
   candidatos: LugarReal[];
   cliente: ClienteLLM;
   maxIntentos?: number;
+  /** Espera base (ms) antes de reintentar si falló la llamada al modelo (ej. 503). Crece con cada intento. */
+  esperaReintentoMs?: number;
 }
 
-export async function generarItinerarios({ viaje, candidatos, cliente, maxIntentos = 3 }: Params): Promise<ResultadoGeneracion> {
+const esperar = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+export async function generarItinerarios({ viaje, candidatos, cliente, maxIntentos = 3, esperaReintentoMs = 2000 }: Params): Promise<ResultadoGeneracion> {
   if (candidatos.length === 0) {
     throw new ErrorGeneracionIA("No hay lugares reales para armar el itinerario.", []);
   }
@@ -28,6 +32,7 @@ export async function generarItinerarios({ viaje, candidatos, cliente, maxIntent
   }
 
   let errores: string[] = [];
+  let errorModelo: string | null = null;
   let ultimo: ResultadoValidacion | null = null;
 
   for (let intento = 1; intento <= maxIntentos; intento++) {
@@ -47,7 +52,9 @@ export async function generarItinerarios({ viaje, candidatos, cliente, maxIntent
       }
       errores = ultimo.errores;
     } catch (e) {
-      errores = [`Error al llamar al modelo: ${e instanceof Error ? e.message : String(e)}`];
+      // Fallo del servicio (503, red, cuota...): no es culpa del plan, así que no se le pasa al modelo como error.
+      errorModelo = `Error al llamar al modelo: ${e instanceof Error ? e.message : String(e)}`;
+      if (intento < maxIntentos) await esperar(esperaReintentoMs * intento);
     }
   }
 
@@ -64,5 +71,8 @@ export async function generarItinerarios({ viaje, candidatos, cliente, maxIntent
     };
   }
   
-  throw new ErrorGeneracionIA(`No se obtuvo un itinerario válido tras ${maxIntentos} intentos.`, errores);
+  throw new ErrorGeneracionIA(
+    `No se obtuvo un itinerario válido tras ${maxIntentos} intentos.`,
+    errorModelo ? [errorModelo, ...errores] : errores
+  );
 }
