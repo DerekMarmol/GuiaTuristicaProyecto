@@ -25,6 +25,9 @@ interface LugarRespuesta {
   lat: number;
   lng: number;
   categorias: string[];
+  tipo_entorno: "indoor" | "outdoor";
+  sensibilidad_clima: "baja" | "media" | "alta";
+  regla_clima: string | null;
   horario: Horario;
 }
 
@@ -66,6 +69,7 @@ type ParametroLugares = "lat" | "lng" | "categoria" | "radio" | "limite" | "inte
 
 const CLAVE = "clave-de-prueba-no-real-123";
 const SIN_HORARIO: Horario = { estado: "no_publicado", valorOriginal: null, fuente: "geoapify" };
+const MUSEO_INDOOR = { tipo_entorno: "indoor", sensibilidad_clima: "baja", regla_clima: "entertainment.museum" } as const;
 
 let simulador: Simulador;
 let llamadas: Llamada[] = [];
@@ -197,6 +201,7 @@ describe("GET /api/lugares - consulta exitosa", () => {
           lat: 14.5907,
           lng: -90.5242,
           categorias: ["entertainment", "entertainment.museum"],
+          ...MUSEO_INDOOR,
           horario: SIN_HORARIO,
         },
       ],
@@ -443,6 +448,7 @@ describe("GET /api/lugares - búsqueda por intereses", () => {
         lat: 14.6045,
         lng: -90.4895,
         categorias: ["entertainment", "entertainment.museum"],
+        ...MUSEO_INDOOR,
         horario: SIN_HORARIO,
       },
     ]);

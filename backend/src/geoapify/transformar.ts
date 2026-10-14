@@ -1,10 +1,12 @@
+import type { ClasificacionClima } from "../../../shared/types";
+import { clasificarEntorno } from "../clima/clasificacion";
 import { ErrorApi } from "../errores";
 import { esObjeto } from "../tipos";
 
 const PROVEEDOR = "geoapify";
 const CLAVE_CATEGORIA = /^[a-z0-9_]+(\.[a-z0-9_]+)*$/;
 
-export interface Lugar {
+export interface Lugar extends ClasificacionClima {
   idExterno: string;
   proveedor: typeof PROVEEDOR;
   nombre: string;
@@ -59,6 +61,7 @@ function transformarLugar(feature: unknown): Lugar | null {
     lat,
     lng: lon,
     categorias,
+    ...clasificarEntorno(categorias),
   };
 }
 

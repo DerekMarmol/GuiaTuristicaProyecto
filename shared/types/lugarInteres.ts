@@ -1,3 +1,5 @@
+import type { ClasificacionClima } from "./entornoClima";
+
 export type EstadoHorario = "disponible" | "no_publicado" | "no_interpretable" | "error_consulta";
 
 export type HorarioLugar =
@@ -5,7 +7,7 @@ export type HorarioLugar =
   | { estado: "no_interpretable"; valorOriginal: string | null; fuente: "geoapify" }
   | { estado: "no_publicado" | "error_consulta"; valorOriginal: null; fuente: "geoapify" };
 
-export interface LugarInteres {
+export interface LugarInteres extends ClasificacionClima {
   idExterno: string;
   proveedor: "geoapify";
   nombre: string;
