@@ -2,15 +2,15 @@
   "name": "backend",
   "version": "1.0.0",
   "description": "",
-  "main": "dist/server.js",
+  "main": "dist/backend/src/server.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/server.js",
+    "start": "node dist/backend/src/server.js",
     "dev": "tsx watch src/server.ts",
     "typecheck": "tsc -p tsconfig.json",
     "test": "tsx --test \"test/**/*.test.ts\"",
     "postinstall": "prisma skills sync || exit 0",
-    "ai:test": "tsx src/ai/validator.test.ts && tsx --test src/ai/validacionEstancia.test.ts",
+    "ai:test": "tsx src/ai/validator.test.ts && tsx --test src/ai/validacionEstancia.test.ts src/ai/validacionApertura.test.ts",
     "ai:probar": "tsx src/ai/scripts/probar.ts",
     "ai:tipos": "tsc --noEmit --strict --module nodenext --moduleResolution nodenext --target es2022 --skipLibCheck src/ai/index.ts"
   },

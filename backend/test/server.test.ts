@@ -11,7 +11,7 @@ interface CuerpoError {
 }
 
 // El servidor ahora es TypeScript: se ejecuta con Node cargando tsx como loader.
-// Si prefieres probar la versión compilada, cambia esto por la ruta a dist/server.js
+// Si prefieres probar la versión compilada, cambia esto por la ruta a dist/backend/src/server.js
 // y deja ARGUMENTOS_SERVIDOR = [RUTA_SERVIDOR].
 const RUTA_SERVIDOR = path.join(__dirname, "..", "src", "server.ts");
 const ARGUMENTOS_SERVIDOR = ["--import", "tsx", RUTA_SERVIDOR];
