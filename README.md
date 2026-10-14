@@ -62,6 +62,7 @@ Nunca edites una migración que ya se subió a `main`.
 El backend expone:
 
 - `GET /api/lugares`: lugares cercanos a unas coordenadas mediante Geoapify, por categoría, por los intereses que elige el usuario o por ambos, con sus horarios. Requiere `GEOAPIFY_API_KEY` en `backend/.env`.
+- `POST /api/itinerarios/validar`: recibe una propuesta de itinerario, obtiene los horarios reales de cada lugar en Geoapify y devuelve el plan sin las paradas que estarían cerradas a la hora estimada de llegada. El frontend todavía no lo consume.
 - `GET /api/clima/pronostico`: resumen diario del clima para las fechas del viaje mediante OpenWeather; lo consume el paso 4 del frontend. Requiere `OPENWEATHER_API_KEY`.
 
 ```powershell

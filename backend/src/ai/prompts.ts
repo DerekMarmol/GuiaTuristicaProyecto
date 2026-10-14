@@ -29,7 +29,9 @@ export function construirPrompt(viaje: ViajeIA, candidatos: LugarReal[], errores
     categoria: c.categoria,
     lat: c.lat,
     lng: c.lng,
-    horario: `${c.horaApertura}-${c.horaCierre}`,
+    horario: c.horario
+      ? c.horario.valorOriginal ?? "sin horario verificable"
+      : `${c.horaApertura}-${c.horaCierre}`,
     precioEstimado: c.precioEstimado ?? null,
   }));
 
