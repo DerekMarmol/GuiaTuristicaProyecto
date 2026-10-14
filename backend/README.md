@@ -1,6 +1,6 @@
 # Backend
 
-API HTTP con Node.js, Express y TypeScript (CommonJS). Expone la consulta de lugares de interés mediante [Geoapify Places API](https://apidocs.geoapify.com/docs/places/), enriquecida con los horarios publicados que devuelve [Geoapify Place Details API](https://apidocs.geoapify.com/docs/place-details/), la validación de una propuesta de itinerario contra esos horarios (`POST /api/itinerarios/validar`), el pronóstico del clima para las fechas de un viaje mediante [OpenWeather 5 Day / 3 Hour Forecast](https://openweathermap.org/forecast5) y la priorización de las paradas según la lluvia pronosticada (`POST /api/itinerarios/priorizar-clima`). La configuración de Prisma se mantiene sin cambios.
+API HTTP con Node.js, Express y TypeScript (CommonJS). Expone la consulta de lugares de interés mediante [Geoapify Places API](https://apidocs.geoapify.com/docs/places/), enriquecida con los horarios publicados que devuelve [Geoapify Place Details API](https://apidocs.geoapify.com/docs/place-details/), la validación de una propuesta de itinerario contra esos horarios (`POST /api/itinerarios/validar`), el pronóstico del clima para las fechas de un viaje mediante [OpenWeather 5 Day / 3 Hour Forecast](https://openweathermap.org/forecast5) y la priorización de las paradas según la lluvia pronosticada (`POST /api/itinerarios/priorizar-clima`) y las recomendaciones de hoteles cercanos al itinerario de un día dentro del presupuesto de hospedaje (`POST /api/hoteles/recomendaciones`). La configuración de Prisma se mantiene sin cambios.
 
 ## Requisitos
 
@@ -34,7 +34,7 @@ npm run build  # compila TypeScript a dist/ (el servidor queda en dist/backend/s
 npm start      # inicia el servidor compilado (requiere npm run build)
 npm run dev    # inicia el servidor con tsx y lo reinicia al detectar cambios
 npm run typecheck  # verifica los tipos de src/ y test/
-npm test       # ejecuta todas las pruebas de test/ con Geoapify y OpenWeather simulados (no requiere claves), incluidas las de clasificación y priorización climática
+npm test       # ejecuta todas las pruebas de test/ con Geoapify y OpenWeather simulados (no requiere claves), incluidas las de clasificación y priorización climática y las de recomendaciones de hoteles
 npm run ai:test   # pruebas del módulo de IA (validador, orquestador, validación de estancias y de apertura)
 npm run ai:tipos  # comprobación de tipos estricta del módulo de IA
 ```
@@ -860,3 +860,279 @@ El resultado depende del pronóstico real. Si OpenWeather indica lluvia para la 
 - La lluvia es un acumulado diario, sin distinguir horas: un día con lluvia solo por la noche también prioriza los lugares bajo techo por la mañana.
 - **Zona horaria (limitación previa del módulo de clima).** El resumen diario agrupa por la fecha local que da el desplazamiento único de OpenWeather (`city.timezone`), mientras que las llegadas se calculan con la zona IANA del viaje. Coinciden salvo cuando el destino cambia de horario de verano dentro de la ventana del pronóstico; en ese caso algunos intervalos de lluvia pueden quedar asignados a la fecha contigua. Esto viene de `/api/clima/pronostico` y no se modificó en esta entrega.
 - Siguen vigentes las limitaciones de `/validar`: traslados estimados en línea recta y lugares sin horario verificable descartados.
+
+## Endpoint `POST /api/hoteles/recomendaciones`
+
+Recomienda hoteles cercanos a la zona del itinerario de **un día**, con una tarifa verificada que no supera el presupuesto de hospedaje. Los hoteles salen de Geoapify (categoría `accommodation.hotel`) y las tarifas, de un catálogo local JSON del backend. No consulta Place Details, horarios ni clima, no guarda nada y el frontend todavía no lo consume.
+
+> **Una tarifa registrada no garantiza disponibilidad ni constituye una reserva.** El endpoint no consulta habitaciones libres, no reserva ni cobra. La tarifa es el importe verificado manualmente para las condiciones indicadas; el hotel puede no tener habitaciones o haber cambiado el precio.
+
+### Solicitud
+
+```json
+{
+  "fecha": "2026-10-14",
+  "paradas": [
+    { "lat": 14.6349, "lng": -90.5069 },
+    { "lat": 14.6416, "lng": -90.5133 }
+  ],
+  "presupuestoDiario": 500,
+  "moneda": "GTQ",
+  "ocupacion": 2,
+  "hospedaje": false,
+  "sinHotel": false,
+  "radio": 5000,
+  "limite": 10
+}
+```
+
+| Campo | Obligatorio | Regla |
+| --- | --- | --- |
+| `fecha` | Sí | Fecha real `AAAA-MM-DD` del día del itinerario. También es la fecha de entrada de la noche evaluada: la tarifa debe estar vigente esa noche |
+| `paradas` | Sí | Lista de 0 a 25 objetos `{ lat, lng }` con las paradas **de ese día** (números JSON; `lat` entre -90 y 90, `lng` entre -180 y 180; se acepta `0`). Otros campos de cada parada se ignoran |
+| `presupuestoDiario` | Sí | Presupuesto diario total del usuario, en quetzales. Mayor que 0, como máximo 1 000 000 y con hasta dos decimales. No es el presupuesto total del viaje: el backend no lo divide entre días |
+| `moneda` | Sí | Solo `"GTQ"` |
+| `ocupacion` | Sí | Entero de 1 a 10: número de huéspedes en una habitación |
+| `hospedaje` | Sí | `true` si el usuario ya tiene hospedaje reservado |
+| `sinHotel` | No | `true` si el usuario indicó que no necesita hotel. Por defecto `false` |
+| `radio` | No | Entero de 1 a 50000 metros alrededor del centro, los mismos límites que `/api/lugares`. Por defecto `5000` |
+| `limite` | No | Entero de 1 a 20: número máximo de recomendaciones. Por defecto `10` |
+
+- El cuerpo debe ser un objeto JSON de hasta 32 KB. Los campos desconocidos se ignoran; en particular, **no se acepta un porcentaje enviado por el cliente** (`porcentajeHospedaje` u otro campo no cambia el cálculo).
+- Cualquier dato inválido responde `400 PARAMETRO_INVALIDO` con `detalles` por campo, antes de leer el catálogo o consultar a Geoapify. Esto incluye los casos con `hospedaje: true`.
+- El contrato TypeScript está en `shared/types/hotel.ts` (`SolicitudRecomendacionesHoteles`, `RespuestaRecomendacionesHoteles`, `HotelRecomendado`, `TarifaHotelAplicada`, `MotivoSinRecomendacionesHotel`).
+
+### Regla del 40 %
+
+```
+presupuestoHospedaje = presupuestoDiario × 0.40
+```
+
+El porcentaje es fijo en el backend (`PORCENTAJE_HOSPEDAJE` en `src/hoteles/tarifas.ts`). El cálculo se hace en centavos enteros: `floor(presupuestoDiarioCentavos × 40 / 100)`. Si resulta una fracción de centavo se redondea **hacia abajo**, para no superar el 40 %. Una tarifa se admite si `importeCentavos <= presupuestoHospedajeCentavos`.
+
+| Presupuesto diario | Presupuesto de hospedaje | Tarifa Q200.00 | Tarifa Q200.01 |
+| --- | --- | --- | --- |
+| Q500.00 | Q200.00 (20000 centavos) | Se admite | Se excluye |
+| Q500.02 | Q200.00 (20000.8 centavos → 20000) | Se admite | Se excluye |
+
+### Tarifas admitidas
+
+Para cada hotel se consideran solo las tarifas del catálogo que cumplen **todo** lo siguiente:
+
+- `idExterno` igual, carácter por carácter, al `idExterno` (`place_id`) que devuelve Geoapify. No se relacionan hoteles por nombre.
+- `moneda` `GTQ`. No se convierten monedas.
+- `unidad` `habitacion_noche`: precio de una habitación por una noche.
+- `ocupacion` **igual** a la solicitada. No se combinan habitaciones ni se infieren suplementos por persona: una tarifa para 2 huéspedes no sirve para 1 ni para 3.
+- `importeTotal: true` e `impuestosIncluidos: true`. Las tarifas «desde», con suplementos desconocidos o con impuestos no incluidos o sin determinar (`null`) se excluyen.
+- `vigenciaDesde <= fecha <= vigenciaHasta` (ambas fechas incluidas).
+- Importe dentro del presupuesto de hospedaje.
+
+Si un hotel tiene varias tarifas que cumplen, se elige la de menor `importeCentavos`; si empatan, la de `id` menor en orden de caracteres. Los hoteles sin tarifa que cumpla se excluyen: un precio desconocido nunca se reemplaza por cero.
+
+### Proceso
+
+1. Se valida el cuerpo (`src/validacion/hoteles.ts`).
+2. Si `hospedaje` es `true`, responde vacío con motivo `hospedaje_reservado`. Si `sinHotel` es `true`, con `no_necesita_hotel`. Si ambos son `true`, prevalece `hospedaje_reservado`. En ninguno de los dos casos se lee el catálogo ni se consulta a Geoapify.
+3. Si `paradas` está vacía, responde vacío con `itinerario_sin_paradas` y `centro: null`. Nunca se usa `(0, 0)` como centro por defecto.
+4. Se calcula el centro geográfico de las paradas recibidas (`calcularCentro` en `src/hoteles/geografia.ts`).
+5. Se lee y valida el catálogo. Si está vacío, responde con `catalogo_vacio`; si ninguna tarifa cumple las condiciones y el presupuesto, con `sin_tarifas_aplicables`. En ambos casos no se consulta a Geoapify.
+6. Se hace **una sola** búsqueda en Geoapify Places con el cliente existente (`categories=accommodation.hotel`, círculo de `radio` metros alrededor del centro, hasta 100 candidatos).
+7. Se eliminan los candidatos repetidos por `idExterno`, se relacionan con las tarifas, se calcula la distancia al centro y se ordenan de menor a mayor distancia. Los empates se resuelven por `idExterno`, y se ordena con la distancia sin redondear.
+8. Se aplica `limite` al final, después de filtrar y ordenar.
+
+**Centro del día.** Cada parada se convierte en un vector unitario en 3D (latitud y longitud sobre la esfera), se promedian los vectores y el resultado se vuelve a convertir en latitud y longitud. A diferencia de promediar grados, este método funciona junto al antimeridiano: el centro de `179.9` y `-179.9` es `180`, no `0`. Si las paradas se anulan entre sí (puntos opuestos del globo), el centro no está definido y la solicitud se rechaza con `400`.
+
+**Distancia.** `distanciaLineaRectaMetros` es la distancia en línea recta sobre la esfera terrestre (fórmula de Haversine, radio de 6 371 km) entre el centro del día y el hotel, redondeada al metro. **No es una distancia por carretera ni un tiempo de traslado.**
+
+### Límites de búsqueda
+
+| Límite | Valor | Constante |
+| --- | --- | --- |
+| Candidatos consultados a Geoapify | 100, en una sola petición | `MAX_CANDIDATOS_HOTELES` en `src/hoteles/recomendaciones.ts` |
+| Recomendaciones devueltas | `limite` (1 a 20, por defecto 10) | `LIMITE_MAXIMO` en `src/validacion/hoteles.ts` |
+| Radio | 1 a 50000 m, por defecto 5000 | `RADIO_MAXIMO` |
+| Paradas por día | 25 | `MAX_PARADAS_DIA` |
+| Cuerpo de la solicitud | 32 KB | `LIMITE_CUERPO` en `src/routes/hoteles.ts` |
+
+La búsqueda queda limitada al radio indicado y a los 100 candidatos que devuelve Geoapify, priorizados por cercanía (`bias=proximity`). Un hotel del catálogo que esté más lejos o fuera de esos 100 candidatos no se recomienda. No hay paginación, reintentos ni caché. **Consumo:** 1 crédito de Geoapify Places por solicitud que llega al paso 6; las respuestas vacías de los pasos 2 a 5 no consumen créditos.
+
+### Respuesta (200)
+
+Ejemplo ilustrativo del formato con datos ficticios; no es una tarifa ni un hotel reales:
+
+```json
+{
+  "fecha": "2026-10-14",
+  "moneda": "GTQ",
+  "ocupacion": 2,
+  "presupuestoDiario": 500,
+  "presupuestoDiarioCentavos": 50000,
+  "porcentajeHospedaje": 40,
+  "presupuestoHospedaje": 200,
+  "presupuestoHospedajeCentavos": 20000,
+  "centro": { "lat": 14.6382518, "lng": -90.5101003 },
+  "metodoDistancia": "linea_recta",
+  "busqueda": { "categoria": "accommodation.hotel", "radioMetros": 5000, "maxCandidatos": 100, "candidatosEncontrados": 37 },
+  "hoteles": [
+    {
+      "idExterno": "51ficticio...",
+      "proveedor": "geoapify",
+      "nombre": "Hotel de ejemplo",
+      "direccion": "Dirección de ejemplo",
+      "lat": 14.6391,
+      "lng": -90.5122,
+      "distanciaLineaRectaMetros": 247,
+      "tarifa": {
+        "id": "tarifa-ejemplo-2p",
+        "importe": 185,
+        "importeCentavos": 18500,
+        "moneda": "GTQ",
+        "unidad": "habitacion_noche",
+        "ocupacion": 2,
+        "impuestosIncluidos": true,
+        "vigencia": { "desde": "2026-10-01", "hasta": "2026-12-15" },
+        "verificadoEn": "2026-10-10",
+        "fuente": { "tipo": "url", "referencia": "https://ejemplo.invalid/tarifas" }
+      }
+    }
+  ],
+  "motivo": null,
+  "mensaje": null
+}
+```
+
+| Campo | Significado |
+| --- | --- |
+| `presupuestoDiario`, `presupuestoHospedaje` | En quetzales; los campos `...Centavos` son los valores exactos usados en la comparación |
+| `centro` | Centro usado para buscar y medir, redondeado a 7 decimales; `null` si no se calculó |
+| `busqueda` | Parámetros de la consulta a Geoapify y candidatos distintos recibidos; `null` si no se consultó |
+| `hoteles` | Recomendaciones ordenadas de la más cercana a la más lejana |
+| `motivo`, `mensaje` | `null` si hay recomendaciones; si la lista está vacía, el motivo explícito |
+
+### Respuestas vacías
+
+Todas responden `200` con `hoteles: []`:
+
+| `motivo` | Cuándo | ¿Consulta a Geoapify? |
+| --- | --- | --- |
+| `hospedaje_reservado` | `hospedaje: true` (prevalece sobre `sinHotel`) | No |
+| `no_necesita_hotel` | `sinHotel: true` | No |
+| `itinerario_sin_paradas` | `paradas` vacía; `centro` es `null` | No |
+| `catalogo_vacio` | El catálogo no tiene tarifas registradas | No |
+| `sin_tarifas_aplicables` | Ninguna tarifa cumple fecha, moneda, ocupación, impuestos y presupuesto | No |
+| `sin_hoteles_encontrados` | Geoapify no devolvió hoteles dentro del radio | Sí |
+| `sin_hoteles_elegibles` | Geoapify devolvió hoteles, pero ninguno tiene una tarifa aplicable | Sí |
+
+```json
+{ "fecha": "2026-10-14", "moneda": "GTQ", "ocupacion": 2, "presupuestoDiario": 500, "presupuestoDiarioCentavos": 50000, "porcentajeHospedaje": 40, "presupuestoHospedaje": 200, "presupuestoHospedajeCentavos": 20000, "centro": null, "metodoDistancia": "linea_recta", "busqueda": null, "hoteles": [], "motivo": "hospedaje_reservado", "mensaje": "El usuario ya tiene hospedaje reservado; no se generan recomendaciones de hoteles." }
+```
+
+```json
+{ "fecha": "2026-10-14", "moneda": "GTQ", "ocupacion": 2, "presupuestoDiario": 500, "presupuestoDiarioCentavos": 50000, "porcentajeHospedaje": 40, "presupuestoHospedaje": 200, "presupuestoHospedajeCentavos": 20000, "centro": { "lat": 14.6349, "lng": -90.5069 }, "metodoDistancia": "linea_recta", "busqueda": null, "hoteles": [], "motivo": "catalogo_vacio", "mensaje": "El catálogo de tarifas verificadas no tiene tarifas registradas." }
+```
+
+### Errores
+
+| HTTP | Código | Situación |
+| --- | --- | --- |
+| 400 | `PARAMETRO_INVALIDO` | JSON mal formado o de más de 32 KB, campos ausentes, de otro tipo o fuera de rango (incluye `detalles` por campo) |
+| 500 | `CATALOGO_TARIFAS_INVALIDO` | El catálogo no es JSON válido o no cumple la estructura o la coherencia exigidas. El detalle se escribe solo en la consola del servidor (las rutas de los campos inválidos, sin sus valores); la respuesta no incluye el contenido del catálogo |
+| 500 | `CATALOGO_TARIFAS_NO_DISPONIBLE` | No se pudo leer el archivo del catálogo |
+| 500 | `SERVICIO_NO_CONFIGURADO` | Falta la clave de Geoapify y la solicitud necesita consultar hoteles |
+| 502, 503, 504 | `PROVEEDOR_*` | Los mismos errores de Geoapify que `GET /api/lugares` (credenciales, límite de solicitudes, red, respuesta inválida, tiempo agotado). Un fallo del proveedor nunca se presenta como una búsqueda sin resultados |
+
+### Catálogo de tarifas
+
+Archivo: `backend/data/tarifas-hoteles.json`. Se lee en cada solicitud que llega al paso 5, así que los cambios se aplican sin reiniciar el servidor. La ruta se calcula desde la raíz de `backend/`, y funciona igual con `npm run dev` y con el servidor compilado (`npm start`); el archivo no se copia a `dist/`.
+
+**Estado actual: el catálogo de producción está vacío** (`{ "tarifas": [] }`). En el repositorio no hay tarifas verificadas, así que el endpoint responde `catalogo_vacio` para toda solicitud que necesite hoteles. Las pruebas automáticas usan tarifas y hoteles ficticios definidos dentro de los archivos de prueba.
+
+```json
+{
+  "tarifas": [
+    {
+      "id": "hotel-ejemplo-2026-q4-2p",
+      "idExterno": "<place_id exacto devuelto por Geoapify>",
+      "nombreReferencia": "Nombre del hotel (solo para quien mantiene el archivo)",
+      "importeCentavos": 18500,
+      "moneda": "GTQ",
+      "unidad": "habitacion_noche",
+      "ocupacion": 2,
+      "importeTotal": true,
+      "impuestosIncluidos": true,
+      "vigenciaDesde": "2026-10-01",
+      "vigenciaHasta": "2026-12-15",
+      "verificadoEn": "2026-10-10",
+      "fuente": { "tipo": "url", "referencia": "https://<sitio oficial del hotel>/tarifas" }
+    }
+  ]
+}
+```
+
+| Campo | Regla |
+| --- | --- |
+| `id` | Texto único en el catálogo (1 a 100 caracteres) |
+| `idExterno` | `place_id` de Geoapify del hotel, exacto |
+| `nombreReferencia` | Opcional; ayuda a mantener el archivo, pero no se usa para relacionar ni se devuelve |
+| `importeCentavos` | Entero positivo: importe total de una habitación por noche, en centavos (Q185.00 = `18500`) |
+| `moneda` | Código ISO de tres letras en mayúsculas. Solo `GTQ` se recomienda |
+| `unidad` | `habitacion_noche` |
+| `ocupacion` | Entero de 1 a 10: huéspedes a los que aplica el importe |
+| `importeTotal` | `true` si el importe es concreto y total; `false` para precios «desde» o con suplementos desconocidos (se excluye) |
+| `impuestosIncluidos` | `true`, `false` o `null` si no se sabe. Solo `true` se recomienda |
+| `vigenciaDesde`, `vigenciaHasta` | Fechas reales `AAAA-MM-DD`; noches de entrada en las que aplica, ambas incluidas; `vigenciaHasta >= vigenciaDesde` |
+| `verificadoEn` | Fecha real en que se comprobó la tarifa |
+| `fuente` | `{ "tipo": "url", "referencia": "https://..." }` con la página oficial, o `{ "tipo": "cotizacion", "referencia": "..." }` con la referencia documental de una cotización (número, fecha y emisor) |
+
+No se admiten campos adicionales. Un catálogo con cualquier error (campo faltante o desconocido, `id` repetido, fecha irreal, importe no entero o no positivo, vigencia invertida, URL que no sea `http` o `https`) es inválido por completo y el endpoint responde `500 CATALOGO_TARIFAS_INVALIDO` hasta corregirlo.
+
+#### Cargar y mantener tarifas verificadas
+
+1. Obtén el `idExterno` real del hotel con `GET /api/lugares` (consume créditos):
+
+   ```powershell
+   $r = Invoke-RestMethod -Uri "http://localhost:3000/api/lugares?lat=14.6349&lng=-90.5069&categoria=accommodation.hotel&radio=3000&limite=20"
+   $r.lugares | Format-Table idExterno, nombre, direccion -Wrap
+   ```
+
+2. Verifica la tarifa en la fuente oficial del hotel o con una cotización escrita: importe total por habitación y noche en quetzales, para una ocupación concreta, con impuestos incluidos y con sus fechas de aplicación. Si la fuente solo da un precio «desde», no detalla impuestos o depende de suplementos, regístrala con `importeTotal: false` o `impuestosIncluidos: null` (no se recomendará) o no la registres.
+3. Añade una entrada por cada combinación de ocupación y vigencia. Usa `verificadoEn` con la fecha real de la comprobación. No inventes importes, fuentes ni fechas.
+4. Comprueba el archivo sin consumir créditos (desde `backend/`):
+
+   ```powershell
+   npx tsx -e "require('./src/hoteles/catalogo').crearLectorCatalogo()().then(require('./src/hoteles/catalogo').validarCatalogo).then((t) => console.log('Tarifas válidas:', t.length))"
+   ```
+
+5. Revisa periódicamente las tarifas: elimina las vencidas y vuelve a verificar las que tengan un `verificadoEn` antiguo.
+
+### Ejemplo en PowerShell
+
+Con el servidor iniciado. Con el catálogo vacío, la respuesta es `catalogo_vacio` y no consume créditos; con tarifas cargadas consume 1 crédito de Geoapify:
+
+```powershell
+$cuerpo = @{
+  fecha = "2026-10-14"
+  paradas = @(
+    @{ lat = 14.6349; lng = -90.5069 },
+    @{ lat = 14.6416; lng = -90.5133 }
+  )
+  presupuestoDiario = 500
+  moneda = "GTQ"
+  ocupacion = 2
+  hospedaje = $false
+  limite = 5
+} | ConvertTo-Json -Depth 4
+$r = Invoke-RestMethod -Method Post -Uri "http://localhost:3000/api/hoteles/recomendaciones" -ContentType "application/json; charset=utf-8" -Body $cuerpo
+"Presupuesto de hospedaje: Q$($r.presupuestoHospedaje)  motivo: $($r.motivo)  centro: $($r.centro.lat), $($r.centro.lng)"
+$r.hoteles | Format-Table nombre, distanciaLineaRectaMetros, @{ n = "tarifa"; e = { "Q$($_.tarifa.importe)" } }, @{ n = "fuente"; e = { $_.tarifa.fuente.referencia } } -Wrap
+```
+
+Para ver el cuerpo de un error (`400` o `500`), usa `try { ... } catch { $_.ErrorDetails.Message }`.
+
+### Limitaciones
+
+- **Catálogo vacío.** Mientras no se carguen tarifas verificadas, el endpoint no recomienda ningún hotel. El funcionamiento con datos reales no se ha comprobado; solo está validado con pruebas automáticas que simulan Geoapify y usan tarifas ficticias.
+- Solo GTQ, una habitación por noche y ocupación exacta. Sin conversión de monedas, combinaciones de habitaciones, tarifas para niños ni suplementos.
+- No hay disponibilidad, reservas ni pagos. Una tarifa registrada no garantiza que haya habitaciones ni que el precio siga vigente.
+- La cercanía es en línea recta respecto al centro de las paradas del día, no por carretera.
+- El frontend sigue mostrando sus propias recomendaciones de ejemplo y no llama a este endpoint.
