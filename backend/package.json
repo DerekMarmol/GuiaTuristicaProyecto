@@ -2,11 +2,15 @@
   "name": "backend",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "dist/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "tsx --test \"test/**/*.test.ts\"",
     "postinstall": "prisma skills sync || exit 0",
-    "ai:test": "tsx src/ai/validator.test.ts",
+    "ai:test": "tsx src/ai/validator.test.ts && tsx --test src/ai/validacionEstancia.test.ts",
     "ai:probar": "tsx src/ai/scripts/probar.ts",
     "ai:tipos": "tsc --noEmit --strict --module nodenext --moduleResolution nodenext --target es2022 --skipLibCheck src/ai/index.ts"
   },
@@ -14,7 +18,11 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^26.6.4",
     "prisma": "^6.19.3",
     "tsx": "^4.23.15",
@@ -24,6 +32,8 @@
     "@google/genai": "^2.27.0",
     "@prisma/client": "^6.19.3",
     "dotenv": "^18.0.5",
+    "express": "^5.2.1",
+    "opening_hours": "^3.15.0",
     "zod": "^3.25.76"
   }
 }

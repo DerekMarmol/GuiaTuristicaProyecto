@@ -23,3 +23,52 @@ En caso de presentar un error relacionado con la virtualización al abrir Docker
     ```
 
 4. Reiniciar la computadora para que los cambios se apliquen
+
+## Backend
+
+Backend en **Node.js** con **PostgreSQL** y **Prisma**.
+
+### Requisitos
+- Node.js 20+
+- PostgreSQL 14+ (o el contenedor `postgres` de `docker-compose.yml`)
+
+### Puesta en marcha
+```bash
+docker compose up -d postgres   # o crea la base guia_turistica desde pgAdmin
+cd backend
+npm install
+cp .env.example .env            # edita DATABASE_URL y las claves de API
+npx prisma migrate dev          # aplica las migraciones y genera el cliente de Prisma
+```
+
+Cada vez que hagas `git pull` y haya migraciones nuevas, vuelve a correr `npx prisma migrate dev`.
+
+### Base de datos
+El esquema está en [`backend/prisma/schema.prisma`](backend/prisma/schema.prisma) y las migraciones en `prisma/migrations/`.
+Para cambiar el esquema: edita `schema.prisma` y corre `npx prisma migrate dev --name <descripcion>`.
+Nunca edites una migración que ya se subió a `main`.
+
+#### `Usuario`
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | String (uuid) | PK |
+| `correo` | String | único; se guarda en minúsculas |
+| `contrasena` | String | hash bcrypt, nunca la contraseña en texto plano |
+| `nombre` | String | |
+| `creadoEn` | DateTime | fecha de registro |
+
+### API
+
+El backend expone:
+
+- `GET /api/lugares`: lugares cercanos a unas coordenadas mediante Geoapify, por categoría, por los intereses que elige el usuario o por ambos, con sus horarios. Requiere `GEOAPIFY_API_KEY` en `backend/.env`.
+- `GET /api/clima/pronostico`: resumen diario del clima para las fechas del viaje mediante OpenWeather; lo consume el paso 4 del frontend. Requiere `OPENWEATHER_API_KEY`.
+
+```powershell
+cd backend
+npm install
+npm test
+npm start
+```
+
+Consulta [backend/README.md](backend/README.md) para la configuración, los parámetros, las categorías admitidas y los códigos de error.
