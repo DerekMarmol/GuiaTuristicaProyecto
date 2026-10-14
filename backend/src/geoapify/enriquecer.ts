@@ -1,11 +1,12 @@
 import { interpretarHorario, horarioErrorConsulta, type Horario } from "./horario";
-import type { ConsultarDetalles } from "./detalles";
+import { transformarDetalles, type Lugar } from "./transformar";
+import type { ConsultarDetalles, PropiedadesDetalles } from "./detalles";
 
 export const CONCURRENCIA_DETALLES = 4;
 export const INTERVALO_DETALLES_MS = 250;
 export const PRESUPUESTO_DETALLES_MS = 10000;
 
-interface OpcionesEnriquecedor {
+export interface OpcionesEnriquecedor {
   consultarDetalles: ConsultarDetalles;
   concurrencia?: number;
   intervaloMs?: number;
@@ -13,6 +14,19 @@ interface OpcionesEnriquecedor {
 }
 
 export type EnriquecerHorarios = <T extends { idExterno: string }>(lugares: T[]) => Promise<(T & { horario: Horario })[]>;
+
+export interface LugarResuelto {
+  lugar: Lugar | null;
+  horario: Horario;
+}
+
+export type ResolverLugares = (identificadores: string[]) => Promise<Map<string, LugarResuelto>>;
+
+type ConsultarVarios = <R>(
+  identificadores: string[],
+  transformar: (propiedades: PropiedadesDetalles, idExterno: string) => R,
+  alFallar: () => R,
+) => Promise<Map<string, R>>;
 
 function esperar(ms: number, senal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -30,30 +44,29 @@ function esperar(ms: number, senal: AbortSignal): Promise<void> {
   });
 }
 
-export function crearEnriquecedorHorarios({
+function crearConsultaLimitada({
   consultarDetalles,
   concurrencia = CONCURRENCIA_DETALLES,
   intervaloMs = INTERVALO_DETALLES_MS,
   presupuestoMs = PRESUPUESTO_DETALLES_MS,
-}: OpcionesEnriquecedor): EnriquecerHorarios {
-  return async function enriquecerHorarios<T extends { idExterno: string }>(lugares: T[]) {
-    if (lugares.length === 0) {
-      return [];
-    }
-
-    const identificadores = [...new Set(lugares.map((lugar) => lugar.idExterno))];
-    const horarios = new Map<string, Horario>();
+}: OpcionesEnriquecedor): ConsultarVarios {
+  return async function consultarVarios<R>(
+    identificadores: string[],
+    transformar: (propiedades: PropiedadesDetalles, idExterno: string) => R,
+    alFallar: () => R,
+  ) {
+    const resultados = new Map<string, R>();
     const controlador = new AbortController();
     const { signal: senal } = controlador;
     let siguiente = 0;
     let proximoInicio = 0;
 
-    async function obtenerHorario(idExterno: string): Promise<Horario> {
+    async function obtener(idExterno: string): Promise<R> {
       try {
         const propiedades = await consultarDetalles(idExterno, senal);
-        return interpretarHorario(propiedades.opening_hours);
+        return transformar(propiedades, idExterno);
       } catch {
-        return horarioErrorConsulta();
+        return alFallar();
       }
     }
 
@@ -67,9 +80,9 @@ export function crearEnriquecedorHorarios({
         if (senal.aborted) {
           return;
         }
-        const horario = await obtenerHorario(idExterno);
+        const resultado = await obtener(idExterno);
         if (!senal.aborted) {
-          horarios.set(idExterno, horario);
+          resultados.set(idExterno, resultado);
         }
       }
     }
@@ -89,6 +102,51 @@ export function crearEnriquecedorHorarios({
       clearTimeout(temporizador);
     }
 
+    return resultados;
+  };
+}
+
+export function crearEnriquecedorHorarios(opciones: OpcionesEnriquecedor): EnriquecerHorarios {
+  const consultarVarios = crearConsultaLimitada(opciones);
+
+  return async function enriquecerHorarios<T extends { idExterno: string }>(lugares: T[]) {
+    if (lugares.length === 0) {
+      return [];
+    }
+
+    const identificadores = [...new Set(lugares.map((lugar) => lugar.idExterno))];
+    const horarios = await consultarVarios(
+      identificadores,
+      (propiedades) => interpretarHorario(propiedades.opening_hours),
+      horarioErrorConsulta,
+    );
+
     return lugares.map((lugar) => ({ ...lugar, horario: horarios.get(lugar.idExterno) ?? horarioErrorConsulta() }));
+  };
+}
+
+function lugarNoResuelto(): LugarResuelto {
+  return { lugar: null, horario: horarioErrorConsulta() };
+}
+
+export function crearResolvedorLugares(opciones: OpcionesEnriquecedor): ResolverLugares {
+  const consultarVarios = crearConsultaLimitada(opciones);
+
+  return async function resolverLugares(identificadores) {
+    const unicos = [...new Set(identificadores)];
+    if (unicos.length === 0) {
+      return new Map();
+    }
+
+    const resultados = await consultarVarios<LugarResuelto>(
+      unicos,
+      (propiedades, idExterno) => ({
+        lugar: transformarDetalles(propiedades, idExterno),
+        horario: interpretarHorario(propiedades.opening_hours),
+      }),
+      lugarNoResuelto,
+    );
+
+    return new Map(unicos.map((idExterno) => [idExterno, resultados.get(idExterno) ?? lugarNoResuelto()]));
   };
 }

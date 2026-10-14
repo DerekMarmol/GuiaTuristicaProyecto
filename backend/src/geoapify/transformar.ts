@@ -81,3 +81,10 @@ export function transformarLugares(datos: unknown): Lugar[] {
 
   return lugares;
 }
+
+export function transformarDetalles(propiedades: unknown, idExterno: string): Lugar | null {
+  if (!propiedades || typeof propiedades !== "object") {
+    return null;
+  }
+  return transformarLugar({ properties: { ...propiedades, place_id: idExterno } });
+}

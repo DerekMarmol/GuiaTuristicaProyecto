@@ -1,8 +1,7 @@
 import type { ClienteLLM } from "./cliente";
 import { construirPrompt, SYSTEM_INSTRUCTION } from "./prompts";
-import { validarSalida, type ResultadoValidacion } from "./validator";
+import { validarSalida, verificarZonaHoraria, type ResultadoValidacion } from "./validator";
 import type { LugarReal, ResultadoGeneracion, ViajeIA } from "./tipos";
-import { enriquecerParadasConHolgura } from "./tiempoService";
 
 export class ErrorGeneracionIA extends Error {
   constructor(mensaje: string, public readonly detalles: string[]) {
@@ -18,19 +17,14 @@ interface Params {
   maxIntentos?: number;
 }
 
-// Mapea directamente el arreglo de itinerarios y enriquece las `paradas` de cada día
-function enriquecerItinerariosConHolgura(itinerarios: any[]) {
-  return itinerarios.map((itinerario) => ({
-    ...itinerario,
-    paradas: Array.isArray(itinerario.paradas)
-      ? enriquecerParadasConHolgura(itinerario.paradas)
-      : itinerario.paradas
-  }));
-}
-
 export async function generarItinerarios({ viaje, candidatos, cliente, maxIntentos = 3 }: Params): Promise<ResultadoGeneracion> {
   if (candidatos.length === 0) {
     throw new ErrorGeneracionIA("No hay lugares reales para armar el itinerario.", []);
+  }
+
+  const errorZona = verificarZonaHoraria(viaje, candidatos);
+  if (errorZona) {
+    throw new ErrorGeneracionIA("No se pueden validar los horarios del itinerario.", [errorZona]);
   }
 
   let errores: string[] = [];
@@ -43,12 +37,12 @@ export async function generarItinerarios({ viaje, candidatos, cliente, maxIntent
       ultimo = validarSalida(raw, candidatos, viaje);
       
       if (ultimo.errores.length === 0) {
-        const itinerariosConHolgura = enriquecerItinerariosConHolgura(ultimo.itinerarios);
-
         return { 
-          itinerarios: itinerariosConHolgura, 
+          itinerarios: ultimo.itinerarios, 
           intentos: intento, 
           advertencias: ultimo.advertencias,
+          descartes: ultimo.descartes,
+          diasSinParadas: ultimo.diasSinParadas,
         };
       }
       errores = ultimo.errores;
@@ -58,15 +52,15 @@ export async function generarItinerarios({ viaje, candidatos, cliente, maxIntent
   }
 
   if (ultimo?.viable) {
-    const itinerariosConHolgura = enriquecerItinerariosConHolgura(ultimo.itinerarios);
-
     return { 
-      itinerarios: itinerariosConHolgura, 
+      itinerarios: ultimo.itinerarios, 
       intentos: maxIntentos, 
       advertencias: [
         ...ultimo.errores,
         ...ultimo.advertencias,
       ],
+      descartes: ultimo.descartes,
+      diasSinParadas: ultimo.diasSinParadas,
     };
   }
   
