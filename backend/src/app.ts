@@ -9,6 +9,9 @@ import { crearPriorizadorClima } from "./ai/prioridadClima";
 import { crearClienteOpenWeather } from "./openweather/cliente";
 import { crearServicioClima } from "./clima/servicio";
 import { crearRutaPronosticoClima } from "./routes/pronosticoClima";
+import { crearLectorCatalogo, type LeerCatalogo } from "./hoteles/catalogo";
+import { crearRecomendadorHoteles } from "./hoteles/recomendaciones";
+import { crearRutaHoteles } from "./routes/hoteles";
 import { manejarErrores } from "./errores";
 import type { FuncionFetch } from "./tipos";
 
@@ -28,6 +31,10 @@ export interface OpcionesApp {
     tiempoEsperaMs?: number;
     ahora?: () => Date;
   };
+  hoteles?: {
+    leerCatalogo?: LeerCatalogo;
+    rutaCatalogo?: string;
+  };
 }
 
 export function crearApp({
@@ -36,6 +43,7 @@ export function crearApp({
   tiempoEsperaMs,
   detalles = {},
   clima = {},
+  hoteles = {},
 }: OpcionesApp = {}): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -64,6 +72,12 @@ export function crearApp({
   app.use("/api/itinerarios", crearRutaItinerarios(validarPropuesta, priorizarPorClima));
 
   app.use("/api/clima/pronostico", crearRutaPronosticoClima(consultarClima));
+
+  const recomendarHoteles = crearRecomendadorHoteles({
+    buscarLugares,
+    leerCatalogo: hoteles.leerCatalogo ?? crearLectorCatalogo(hoteles.rutaCatalogo),
+  });
+  app.use("/api/hoteles", crearRutaHoteles(recomendarHoteles));
 
   app.use((req, res) => {
     res.status(404).json({
