@@ -512,6 +512,9 @@ describe("GET /api/lugares - horarios de Geoapify", () => {
         lat: 14.5907,
         lng: -90.5242,
         categorias: ["entertainment", "entertainment.museum"],
+        tipo_entorno: "indoor",
+        sensibilidad_clima: "baja",
+        regla_clima: "entertainment.museum",
         horario: horario("disponible", "Tu-Fr 09:00-16:00; Sa,Su 09:00-12:00,13:30-16:00; Mo off"),
       },
     ]);

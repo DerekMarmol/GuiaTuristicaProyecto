@@ -97,6 +97,9 @@ describe("transformarLugares", () => {
         lat: 14.6417,
         lng: -90.5128,
         categorias: ["commercial.marketplace", "building"],
+        tipo_entorno: "outdoor",
+        sensibilidad_clima: "media",
+        regla_clima: "commercial.marketplace",
       },
     ]);
   });
