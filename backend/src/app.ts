@@ -5,6 +5,7 @@ import { crearEnriquecedorHorarios, crearResolvedorLugares } from "./geoapify/en
 import { crearRutaLugares } from "./routes/lugares";
 import { crearRutaItinerarios } from "./routes/itinerarios";
 import { crearValidadorPropuestas } from "./ai/propuesta";
+import { crearPriorizadorClima } from "./ai/prioridadClima";
 import { crearClienteOpenWeather } from "./openweather/cliente";
 import { crearServicioClima } from "./clima/servicio";
 import { crearRutaPronosticoClima } from "./routes/pronosticoClima";
@@ -50,15 +51,18 @@ export function crearApp({
   const enriquecerHorarios = crearEnriquecedorHorarios(opcionesDetalles);
   app.use("/api/lugares", crearRutaLugares(buscarLugares, enriquecerHorarios));
 
-  const validarPropuesta = crearValidadorPropuestas({ resolverLugares: crearResolvedorLugares(opcionesDetalles) });
-  app.use("/api/itinerarios", crearRutaItinerarios(validarPropuesta));
-
   const obtenerPronostico = crearClienteOpenWeather({
     apiKey: clima.apiKey === undefined ? process.env.OPENWEATHER_API_KEY : clima.apiKey,
     fetch: clima.fetch,
     tiempoEsperaMs: clima.tiempoEsperaMs,
   });
   const consultarClima = crearServicioClima({ obtenerPronostico, ahora: clima.ahora });
+
+  const resolverLugares = crearResolvedorLugares(opcionesDetalles);
+  const validarPropuesta = crearValidadorPropuestas({ resolverLugares });
+  const priorizarPorClima = crearPriorizadorClima({ resolverLugares, consultarClima });
+  app.use("/api/itinerarios", crearRutaItinerarios(validarPropuesta, priorizarPorClima));
+
   app.use("/api/clima/pronostico", crearRutaPronosticoClima(consultarClima));
 
   app.use((req, res) => {
