@@ -6,4 +6,5 @@ export interface Parada {
   horaApertura: string;
   horaCierre: string;
   tiempoEstanciaMinutos: number;
+  placeId?: string;
 }
