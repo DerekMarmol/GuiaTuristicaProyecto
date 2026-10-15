@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import Fastify, { type FastifyInstance } from "fastify";
 import { crearClienteGeoapify } from "./geoapify/cliente";
 import { crearClienteDetalles } from "./geoapify/detalles";
 import { crearEnriquecedorHorarios, crearResolvedorLugares } from "./geoapify/enriquecer";
@@ -36,9 +36,14 @@ export function crearApp({
   tiempoEsperaMs,
   detalles = {},
   clima = {},
-}: OpcionesApp = {}): Express {
-  const app = express();
-  app.disable("x-powered-by");
+}: OpcionesApp = {}): FastifyInstance {
+  // Igual que con Express: rutas sin distinguir mayúsculas y con o sin barra final.
+  // frameworkErrors da el mismo formato de error a fallos previos al enrutamiento, como una URL mal formada.
+  const app = Fastify({
+    routerOptions: { ignoreTrailingSlash: true, caseSensitive: false },
+    frameworkErrors: manejarErrores,
+  });
+  app.setErrorHandler(manejarErrores);
 
   const buscarLugares = crearClienteGeoapify({ apiKey, fetch, tiempoEsperaMs });
   const consultarDetalles = crearClienteDetalles({ apiKey, fetch, tiempoEsperaMs: detalles.tiempoEsperaMs });
@@ -49,7 +54,7 @@ export function crearApp({
     presupuestoMs: detalles.presupuestoMs,
   };
   const enriquecerHorarios = crearEnriquecedorHorarios(opcionesDetalles);
-  app.use("/api/lugares", crearRutaLugares(buscarLugares, enriquecerHorarios));
+  app.register(crearRutaLugares(buscarLugares, enriquecerHorarios), { prefix: "/api/lugares" });
 
   const obtenerPronostico = crearClienteOpenWeather({
     apiKey: clima.apiKey === undefined ? process.env.OPENWEATHER_API_KEY : clima.apiKey,
@@ -61,17 +66,15 @@ export function crearApp({
   const resolverLugares = crearResolvedorLugares(opcionesDetalles);
   const validarPropuesta = crearValidadorPropuestas({ resolverLugares });
   const priorizarPorClima = crearPriorizadorClima({ resolverLugares, consultarClima });
-  app.use("/api/itinerarios", crearRutaItinerarios(validarPropuesta, priorizarPorClima));
+  app.register(crearRutaItinerarios(validarPropuesta, priorizarPorClima), { prefix: "/api/itinerarios" });
 
-  app.use("/api/clima/pronostico", crearRutaPronosticoClima(consultarClima));
+  app.register(crearRutaPronosticoClima(consultarClima), { prefix: "/api/clima/pronostico" });
 
-  app.use((req, res) => {
-    res.status(404).json({
+  app.setNotFoundHandler((req, reply) => {
+    reply.code(404).send({
       error: { codigo: "RUTA_NO_ENCONTRADA", mensaje: "La ruta solicitada no existe." },
     });
   });
-
-  app.use(manejarErrores);
 
   return app;
 }

@@ -1,6 +1,5 @@
 import { test, describe, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { once } from "node:events";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { crearApp } from "../src/app";
@@ -138,8 +137,8 @@ describe("POST /api/itinerarios/validar", () => {
         return respuestaJson(detalles(id));
       },
     });
-    servidor = app.listen(0, "127.0.0.1");
-    await once(servidor, "listening");
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    servidor = app.server;
     baseUrl = `http://127.0.0.1:${(servidor.address() as AddressInfo).port}`;
   });
 
