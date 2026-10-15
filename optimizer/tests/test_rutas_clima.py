@@ -48,8 +48,6 @@ def crear_paradas_prueba():
 
     return paradas
 
-
-# PRUEBA 1: Comprobar que el orden cambia el costo climático
 def test_costo_climatico_segun_orden():
     paradas = crear_paradas_prueba()
 
@@ -68,8 +66,6 @@ def test_costo_climatico_segun_orden():
     assert costo_2 == 50
     assert costo_2 < costo_1
 
-
-# PRUEBA 2: Comprobar que se selecciona la mejor ruta
 def test_seleccionar_mejor_ruta_por_clima():
     paradas = crear_paradas_prueba()
 

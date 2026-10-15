@@ -57,3 +57,50 @@ Recibe una lista de paradas con sus restricciones y devuelve el mejor orden posi
   "distancia_total_km": 12.4
 }
 ```
+
+## POST /reoptimize
+
+Recibe las paradas que **faltan por visitar** (ya sin las que el usuario completó) junto con la hora actual, y recalcula el mejor orden para el resto del día. Se usa cuando algo cambia en ruta (un retraso, un cambio de clima) y hay que replanificar sin tocar lo que ya pasó.
+
+Es el mismo motor que `/optimize`, con una sola diferencia: la ruta no puede "empezar" antes de la hora real en la que está el usuario.
+
+**Sintaxis de la petición:**
+```json
+{
+  "paradas": [
+    {
+      "id": "parada_2",
+      "lat": 14.6407,
+      "lng": -90.5133,
+      "hora_apertura": "10:00",
+      "hora_cierre": "17:00",
+      "tiempo_estancia_minutos": 45
+    },
+    {
+      "id": "parada_3",
+      "lat": 14.6290,
+      "lng": -90.5220,
+      "hora_apertura": "08:00",
+      "hora_cierre": "20:00",
+      "tiempo_estancia_minutos": 90
+    }
+  ],
+  "hora_actual_minutos": 780
+}
+```
+`hora_actual_minutos` es la hora actual expresada en minutos desde medianoche (ej. `780` = 1:00pm).
+
+**Respuesta (200 OK):**
+```json
+{
+  "orden_optimo": ["parada_3", "parada_2"],
+  "distancia_total_km": 5.1
+}
+```
+
+**Respuesta (422) si ya no alcanza el tiempo:**
+```json
+{
+  "detail": "Ya no se alcanza a llegar a tiempo a parada_2 desde la hora actual."
+}
+```
