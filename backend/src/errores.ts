@@ -1,4 +1,4 @@
-import type { ErrorRequestHandler } from "express";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import type { ErrorParametro } from "./tipos";
 
 export class ErrorApi extends Error {
@@ -15,22 +15,32 @@ export class ErrorApi extends Error {
   }
 }
 
-export const manejarErrores: ErrorRequestHandler = (err, req, res, next) => {
-  if (res.headersSent) {
-    return next(err);
+function esErrorDelCliente(err: unknown): err is Error & { statusCode: number } {
+  if (!(err instanceof Error) || !("statusCode" in err)) {
+    return false;
   }
+  const { statusCode } = err;
+  return typeof statusCode === "number" && statusCode >= 400 && statusCode < 500;
+}
 
+export function manejarErrores(err: unknown, req: FastifyRequest, reply: FastifyReply): FastifyReply {
   if (err instanceof ErrorApi) {
     const error: { codigo: string; mensaje: string; detalles?: ErrorParametro[] } = { codigo: err.codigo, mensaje: err.message };
     if (err.detalles) {
       error.detalles = err.detalles;
     }
-    res.status(err.estado).json({ error });
-    return;
+    return reply.code(err.estado).send({ error });
   }
 
-  console.error("Error interno no controlado:", err && err.name);
-  res.status(500).json({
+  // Errores propios de Fastify causados por la solicitud (URL mal formada, tipo de contenido no admitido, etc.).
+  if (esErrorDelCliente(err)) {
+    return reply.code(err.statusCode).send({
+      error: { codigo: "SOLICITUD_INVALIDA", mensaje: "La solicitud no es válida." },
+    });
+  }
+
+  console.error("Error interno no controlado:", err instanceof Error ? err.name : err);
+  return reply.code(500).send({
     error: { codigo: "ERROR_INTERNO", mensaje: "Ocurrió un error interno en el servidor." },
   });
-};
+}
