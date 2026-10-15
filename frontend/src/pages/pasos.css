@@ -96,3 +96,32 @@
 .lugar-meta .estrella { color: var(--coral-osc); }
 .lugar-meta .etiqueta-presupuesto { padding: .25rem .6rem; border: 1px solid var(--coral-osc); border-radius: 99px; background: #fbd5c8; }
 .aviso-vacio { margin: .8rem 0 0; padding: .8rem .9rem; border: 1px dashed var(--linea-fuerte); border-radius: 12px; background: var(--arena); }
+/* Calificación post-actividad */
+.visita-acciones { margin-top: .7rem; }
+.btn-visita { padding: .5rem .9rem; border: 1.5px solid var(--agua-osc); border-radius: 99px; background: #fff; color: var(--agua-osc); font: 700 .85rem/1 var(--font-ui); letter-spacing: .05em; text-transform: uppercase; cursor: pointer; }
+.btn-visita:hover { background: var(--agua); color: var(--ciruela); }
+.parada.visitada { border-left-color: var(--verde); }
+.sello-visitada { display: inline-block; margin-left: .5rem; padding: .15rem .5rem; border-radius: 99px; background: var(--verde); color: var(--ciruela); font: 700 .7rem/1.2 var(--font-ui); letter-spacing: .08em; text-transform: uppercase; vertical-align: middle; }
+.calificar { margin-top: .8rem; padding: .9rem; border: 1.5px dashed var(--linea-fuerte); border-radius: 12px; background: var(--papel); }
+.calificar-titulo { margin: 0; font: 700 1rem var(--font-ui); color: var(--ciruela) !important; }
+.estrellas { display: flex; flex-wrap: wrap; align-items: center; gap: .15rem; margin-top: .5rem; }
+.estrella-btn { padding: 0 .1rem; border: 0; background: none; font-size: 1.6rem; line-height: 1; color: var(--linea-fuerte); cursor: pointer; transition: transform .15s, color .15s; }
+.estrella-btn.activa { color: var(--naranja); }
+.estrella-btn:hover { transform: scale(1.15); }
+.estrella-btn:focus-visible, .etiqueta:focus-visible, .btn-visita:focus-visible { outline: 3px solid var(--agua-osc); outline-offset: 2px; }
+.estrellas-texto { flex-basis: 100%; margin: .2rem 0 0; font: 700 .85rem var(--font-ui); letter-spacing: .06em; text-transform: uppercase; color: var(--suave); }
+.etiquetas { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .7rem; }
+.etiqueta { padding: .4rem .7rem; border: 1.5px solid var(--linea-fuerte); border-radius: 99px; background: #fff; color: var(--ciruela); font: 600 .8rem/1 var(--font-ui); letter-spacing: .04em; cursor: pointer; }
+.etiqueta[aria-pressed="true"] { background: var(--agua); border-color: var(--agua-osc); }
+.calificar-label { display: block; margin-top: .8rem; font: 700 .8rem var(--font-ui); letter-spacing: .08em; text-transform: uppercase; }
+.calificar-texto { width: 100%; margin-top: .3rem; padding: .6rem; border: 1.5px solid var(--linea-fuerte); border-radius: 10px; background: #fff; font: .9rem var(--font-body); color: var(--ciruela); resize: vertical; box-sizing: border-box; }
+.calificar-acciones { display: flex; flex-direction: column; gap: .6rem; margin-top: .8rem; }
+.calificar-acciones button { width: 100%; margin-top: 0; }
+@media (min-width: 560px) { .calificar-acciones { flex-direction: row; } .calificar-acciones button { flex: 1; } }
+.calificacion-resumen { margin-top: .7rem; }
+.estrellas-fijas { font-size: 1.3rem; color: var(--naranja); letter-spacing: .05em; }
+.estrellas-fijas .vacias { color: var(--linea-fuerte); }
+.etiquetas-fijas { display: flex; flex-wrap: wrap; gap: .3rem; margin: .4rem 0 0; padding: 0; list-style: none; }
+.etiquetas-fijas li { padding: .2rem .55rem; border-radius: 99px; background: var(--arena); font: 600 .75rem var(--font-ui); letter-spacing: .04em; }
+.calificacion-comentario { font-style: italic; }
+.enlace-mini { margin-top: .4rem; padding: 0; border: 0; background: none; color: var(--agua-osc); font: 700 .75rem var(--font-ui); letter-spacing: .08em; text-transform: uppercase; text-decoration: underline; cursor: pointer; }
