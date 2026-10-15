@@ -5,6 +5,8 @@ import Recomendaciones from "../components/Recomendaciones";
 import { MapaSeguro } from "../components/MapaSeguro";
 import IndicadorClima, { type EstadoPronostico } from "../components/IndicadorClima";
 import AlertaHorario from "../components/AlertaHorario";
+import PanelPresupuesto from "../components/PanelPresupuesto";
+import { generarGastosSimulados } from "../services/gastos";
 import CalificacionParada, { ResumenCalificacion } from "../components/CalificacionParada";
 import type { RespuestaClima } from "../../../shared/types";
 import { consultarPronostico, coordenadasDelViaje } from "../services/clima";
@@ -69,6 +71,10 @@ export default function Paso4Generacion() {
     reiniciar,
     calificaciones,
     guardarCalificacion,
+    gastos,
+    setGastos,
+    agregarGasto,
+    eliminarGasto,
   } = useViaje();
 
   // Estados
@@ -93,6 +99,11 @@ export default function Paso4Generacion() {
   const enlaceRef = useRef<HTMLInputElement>(null);
 
   const esGrupo = viaje.tipoViaje === "amigos";
+  const presupuestoDiario =
+    viaje.presupuestoDiario ??
+    (viaje.presupuesto !== undefined
+      ? Math.round(viaje.presupuesto / Math.max(1, diasDeViaje(viaje.fechaInicio, viaje.fechaFin)))
+      : 500);
   const dias = diasDeViaje(viaje.fechaInicio, viaje.fechaFin);
   const enlace = `https://guiaturistica.example/votar/${codigo}`;
 
@@ -118,6 +129,8 @@ export default function Paso4Generacion() {
         if (cancelado) return;
 
         setItinerarios(resultado);
+        // TODO(backend): cargar los gastos reales (Lucía) en lugar de simularlos.
+        setGastos(generarGastosSimulados(resultado, presupuestoDiario));
         setDiaActivo(0);
         setVotos({});
         setFase("listo");
@@ -399,6 +412,17 @@ export default function Paso4Generacion() {
               dia={pronostico?.dias.find((d) => d.fecha === dia.fecha)}
             />
           </section>
+
+          {/* Presupuesto del día */}
+          <PanelPresupuesto
+            numeroDia={dia.numeroDia}
+            presupuestoDiario={presupuestoDiario}
+            gastosDelDia={gastos.filter((g) => g.numeroDia === dia.numeroDia)}
+            totalGastadoViaje={gastos.reduce((s, g) => s + g.monto, 0)}
+            presupuestoTotal={viaje.presupuesto}
+            onAgregar={agregarGasto}
+            onEliminar={eliminarGasto}
+          />
 
           {/* Mapa */}
           <div
