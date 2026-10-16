@@ -1,8 +1,7 @@
 import type { ClienteLLM } from "./cliente";
 import { construirPrompt, SYSTEM_INSTRUCTION } from "./prompts";
-import { validarSalida, type ResultadoValidacion } from "./validator";
+import { validarSalida, verificarZonaHoraria, type ResultadoValidacion } from "./validator";
 import type { LugarReal, ResultadoGeneracion, ViajeIA } from "./tipos";
-import { enriquecerParadasConHolgura } from "./tiempoService";
 
 export class ErrorGeneracionIA extends Error {
   constructor(mensaje: string, public readonly detalles: string[]) {
@@ -16,24 +15,24 @@ interface Params {
   candidatos: LugarReal[];
   cliente: ClienteLLM;
   maxIntentos?: number;
+  /** Espera base (ms) antes de reintentar si falló la llamada al modelo (ej. 503). Crece con cada intento. */
+  esperaReintentoMs?: number;
 }
 
-// Mapea directamente el arreglo de itinerarios y enriquece las `paradas` de cada día
-function enriquecerItinerariosConHolgura(itinerarios: any[]) {
-  return itinerarios.map((itinerario) => ({
-    ...itinerario,
-    paradas: Array.isArray(itinerario.paradas)
-      ? enriquecerParadasConHolgura(itinerario.paradas)
-      : itinerario.paradas
-  }));
-}
+const esperar = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-export async function generarItinerarios({ viaje, candidatos, cliente, maxIntentos = 3 }: Params): Promise<ResultadoGeneracion> {
+export async function generarItinerarios({ viaje, candidatos, cliente, maxIntentos = 3, esperaReintentoMs = 2000 }: Params): Promise<ResultadoGeneracion> {
   if (candidatos.length === 0) {
     throw new ErrorGeneracionIA("No hay lugares reales para armar el itinerario.", []);
   }
 
+  const errorZona = verificarZonaHoraria(viaje, candidatos);
+  if (errorZona) {
+    throw new ErrorGeneracionIA("No se pueden validar los horarios del itinerario.", [errorZona]);
+  }
+
   let errores: string[] = [];
+  let errorModelo: string | null = null;
   let ultimo: ResultadoValidacion | null = null;
 
   for (let intento = 1; intento <= maxIntentos; intento++) {
@@ -43,32 +42,37 @@ export async function generarItinerarios({ viaje, candidatos, cliente, maxIntent
       ultimo = validarSalida(raw, candidatos, viaje);
       
       if (ultimo.errores.length === 0) {
-        const itinerariosConHolgura = enriquecerItinerariosConHolgura(ultimo.itinerarios);
-
         return { 
-          itinerarios: itinerariosConHolgura, 
+          itinerarios: ultimo.itinerarios, 
           intentos: intento, 
           advertencias: ultimo.advertencias,
+          descartes: ultimo.descartes,
+          diasSinParadas: ultimo.diasSinParadas,
         };
       }
       errores = ultimo.errores;
     } catch (e) {
-      errores = [`Error al llamar al modelo: ${e instanceof Error ? e.message : String(e)}`];
+      // Fallo del servicio (503, red, cuota...): no es culpa del plan, así que no se le pasa al modelo como error.
+      errorModelo = `Error al llamar al modelo: ${e instanceof Error ? e.message : String(e)}`;
+      if (intento < maxIntentos) await esperar(esperaReintentoMs * intento);
     }
   }
 
   if (ultimo?.viable) {
-    const itinerariosConHolgura = enriquecerItinerariosConHolgura(ultimo.itinerarios);
-
     return { 
-      itinerarios: itinerariosConHolgura, 
+      itinerarios: ultimo.itinerarios, 
       intentos: maxIntentos, 
       advertencias: [
         ...ultimo.errores,
         ...ultimo.advertencias,
       ],
+      descartes: ultimo.descartes,
+      diasSinParadas: ultimo.diasSinParadas,
     };
   }
   
-  throw new ErrorGeneracionIA(`No se obtuvo un itinerario válido tras ${maxIntentos} intentos.`, errores);
+  throw new ErrorGeneracionIA(
+    `No se obtuvo un itinerario válido tras ${maxIntentos} intentos.`,
+    errorModelo ? [errorModelo, ...errores] : errores
+  );
 }

@@ -1,22 +1,76 @@
+import type { HorarioLugar } from "../../../shared/types";
 import { SalidaIASchema, MAX_PARADAS_POR_DIA } from "./schemas";
 import { aMinutos, diasEntre, sumarDias } from "./fechas";
-import type { ItinerarioIA, LugarReal, ParadaIA, ViajeIA } from "./tipos";
-import { validarEstancia } from "./validacionEstancia";
+import type {
+  DescarteParada,
+  DiaSinParadas,
+  ItinerarioIA,
+  LugarReal,
+  MotivoDescarte,
+  ParadaIA,
+  ViajeValidacion,
+} from "./tipos";
+import { crearPlanificadorDia, type EstimadorTraslado } from "./validacionApertura";
+import { esHoraValida, esZonaHorariaValida } from "./zonaHoraria";
+
+export const HORA_INICIO_PREDETERMINADA = "09:00";
+export const ZONA_REFERENCIA_SIN_HORARIOS_REALES = "UTC";
 
 export interface ResultadoValidacion {
   errores: string[];
   advertencias: string[];
   itinerarios: ItinerarioIA[];
+  descartes: DescarteParada[];
+  diasSinParadas: DiaSinParadas[];
   viable: boolean;
+}
+
+export interface LugarNoResuelto {
+  motivo: MotivoDescarte;
+  horario: HorarioLugar | null;
+}
+
+export interface OpcionesValidacion {
+  lugaresNoResueltos?: ReadonlyMap<string, LugarNoResuelto>;
+  estimarTraslado?: EstimadorTraslado;
+}
+
+const MENSAJE_POR_MOTIVO: Record<MotivoDescarte, string> = {
+  cerrado: "estaría cerrado a la hora estimada de llegada",
+  horario_no_publicado: "no tiene un horario publicado que permita verificar la apertura",
+  horario_no_interpretable: "su horario publicado no se pudo interpretar",
+  error_consulta: "no se pudo consultar su horario",
+  apertura_desconocida: "su horario no permite confirmar que esté abierto a la hora estimada de llegada",
+  lugar_no_resuelto: "no se pudieron confirmar sus datos con el proveedor",
+  tiempo_insuficiente: "no tiene tiempo suficiente para la visita",
+};
+
+export function verificarZonaHoraria(viaje: ViajeValidacion, candidatos: LugarReal[]): string | null {
+  if (viaje.zonaHoraria !== undefined && !esZonaHorariaValida(viaje.zonaHoraria)) {
+    return `La zona horaria "${viaje.zonaHoraria}" no es un identificador IANA válido.`;
+  }
+  if (viaje.zonaHoraria === undefined && candidatos.some((c) => c.horario !== undefined)) {
+    return "Falta la zona horaria IANA del destino; sin ella no se puede verificar la apertura de los lugares.";
+  }
+  if (viaje.horaInicio !== undefined && !esHoraValida(viaje.horaInicio)) {
+    return `La hora de inicio "${viaje.horaInicio}" no tiene el formato HH:MM.`;
+  }
+  return null;
+}
+
+function resultadoInvalido(errores: string[]): ResultadoValidacion {
+  return { errores, advertencias: [], itinerarios: [], descartes: [], diasSinParadas: [], viable: false };
 }
 
 export function validarSalida(
   raw: unknown,
   candidatos: LugarReal[],
-  viaje: ViajeIA
+  viaje: ViajeValidacion,
+  opciones: OpcionesValidacion = {}
 ): ResultadoValidacion {
   const errores: string[] = [];
   const advertencias: string[] = [];
+  const descartes: DescarteParada[] = [];
   const parsed = SalidaIASchema.safeParse(raw);
 
   if (!parsed.success) {
@@ -26,14 +80,16 @@ export function validarSalida(
       );
     }
 
-    return {
-      errores,
-      advertencias,
-      itinerarios: [],
-      viable: false,
-    };
+    return resultadoInvalido(errores);
   }
 
+  const errorZona = verificarZonaHoraria(viaje, candidatos);
+  if (errorZona) {
+    return resultadoInvalido([errorZona]);
+  }
+
+  const zonaHoraria = viaje.zonaHoraria ?? ZONA_REFERENCIA_SIN_HORARIOS_REALES;
+  const horaInicio = viaje.horaInicio ?? HORA_INICIO_PREDETERMINADA;
   const porId = new Map(candidatos.map((c) => [c.placeId, c]));
   const totalDias = diasEntre(viaje.fechaInicio, viaje.fechaFin);
 
@@ -56,12 +112,45 @@ export function validarSalida(
 
     vistos.add(dia.numeroDia);
 
+    const fecha = sumarDias(viaje.fechaInicio, dia.numeroDia - 1);
+    const planificador = crearPlanificadorDia({
+      fecha,
+      horaInicio,
+      zonaHoraria,
+      estimar: opciones.estimarTraslado,
+    });
+
+    if (!planificador) {
+      errores.push(
+        `Día ${dia.numeroDia}: la hora de inicio ${horaInicio} no existe el ${fecha} en la zona ${zonaHoraria}.`
+      );
+      continue;
+    }
+
     const paradas: ParadaIA[] = [];
 
-    // Hora estimada de inicio del recorrido: 09:00
-    let llegadaEstimada = 9 * 60;
+    const descartar = (
+      placeId: string,
+      nombre: string | null,
+      motivo: MotivoDescarte,
+      llegada: string | null,
+      horario: HorarioLugar | null
+    ) => {
+      const mensaje =
+        `Día ${dia.numeroDia}: "${nombre ?? placeId}" fue descartado porque ${MENSAJE_POR_MOTIVO[motivo]}` +
+        (llegada ? ` (llegada estimada ${llegada}).` : ".");
+      descartes.push({ numeroDia: dia.numeroDia, fecha, placeId, nombre, motivo, mensaje, llegada, horario });
+      advertencias.push(mensaje);
+    };
 
     for (const p of dia.paradas) {
+      const noResuelto = opciones.lugaresNoResueltos?.get(p.placeId);
+
+      if (noResuelto) {
+        descartar(p.placeId, null, noResuelto.motivo, null, noResuelto.horario);
+        continue;
+      }
+
       const real = porId.get(p.placeId);
 
       // Validar que el lugar exista
@@ -88,40 +177,12 @@ export function validarSalida(
         continue;
       }
 
-      let estanciaFinal = p.tiempoEstanciaMinutos;
-
-      // Validar horarios y tiempos mínimos de estancia
-      if (real.intervalosHorario !== undefined) {
-        const horaLlegada =
-          `${String(Math.floor(llegadaEstimada / 60)).padStart(2, "0")}:` +
-          `${String(llegadaEstimada % 60).padStart(2, "0")}`;
-
-        const resultado = validarEstancia({
-          llegada: horaLlegada,
-          duracionSolicitada: estanciaFinal,
-          intervalos: real.intervalosHorario,
-        });
-
-        if (resultado.estado === "descartada") {
-          advertencias.push(
-            `Día ${dia.numeroDia}: "${real.nombre}" fue descartado porque no tiene tiempo suficiente para la visita.`
-          );
-          continue;
-        }
-
-        if (resultado.estado === "ajustada") {
-          estanciaFinal = resultado.duracionMinutos;
-
-          advertencias.push(
-            `Día ${dia.numeroDia}: la estancia en "${real.nombre}" se ajustó a ${estanciaFinal} minutos por su horario de atención.`
-          );
-        }
-
-        // Si hay que esperar a que abra, actualizar la llegada
-        if (resultado.inicio) {
-          llegadaEstimada = aMinutos(resultado.inicio);
-        }
-      } else {
+      if (
+        real.horario === undefined &&
+        real.intervalosHorario === undefined &&
+        real.horaApertura !== undefined &&
+        real.horaCierre !== undefined
+      ) {
         // Compatibilidad con lugares que solo tienen apertura y cierre
         const ventana =
           aMinutos(real.horaCierre) -
@@ -134,16 +195,20 @@ export function validarSalida(
           );
           continue;
         }
-
-        llegadaEstimada = Math.max(
-          llegadaEstimada,
-          aMinutos(real.horaApertura)
-        );
       }
 
-      // Calcular llegada estimada a la siguiente parada
-      // Se consideran 30 minutos de traslado provisional
-      llegadaEstimada += estanciaFinal + 30;
+      const visita = planificador.evaluar(real, p.tiempoEstanciaMinutos);
+
+      if (!visita.aceptada) {
+        descartar(real.placeId, real.nombre, visita.motivo, visita.llegada, real.horario ?? null);
+        continue;
+      }
+
+      if (visita.estado === "ajustada") {
+        advertencias.push(
+          `Día ${dia.numeroDia}: la estancia en "${real.nombre}" se ajustó a ${visita.duracionMinutos} minutos por su horario de atención.`
+        );
+      }
 
       usados.add(p.placeId);
 
@@ -153,9 +218,15 @@ export function validarSalida(
         nombre: real.nombre,
         lat: real.lat,
         lng: real.lng,
-        horaApertura: real.horaApertura,
-        horaCierre: real.horaCierre,
-        tiempoEstanciaMinutos: estanciaFinal,
+        ...(real.direccion !== undefined ? { direccion: real.direccion } : {}),
+        ...(real.horaApertura !== undefined ? { horaApertura: real.horaApertura } : {}),
+        ...(real.horaCierre !== undefined ? { horaCierre: real.horaCierre } : {}),
+        ...(real.horario !== undefined ? { horario: real.horario } : {}),
+        tiempoEstanciaMinutos: visita.duracionMinutos,
+        llegada: visita.llegada,
+        salida: visita.salida,
+        estadoEstancia: visita.estado,
+        traslado: visita.traslado,
         motivo: p.motivo,
       });
     }
@@ -165,15 +236,18 @@ export function validarSalida(
         id: `it-${dia.numeroDia}`,
         viajeId: viaje.id,
         numeroDia: dia.numeroDia,
-        fecha: sumarDias(viaje.fechaInicio, dia.numeroDia - 1),
+        fecha,
         paradas,
       });
     }
   }
 
+  const diasSinParadas: DiaSinParadas[] = [];
+
   // Comprobar que todos los días tengan paradas válidas
   for (let d = 1; d <= totalDias; d++) {
     if (!itinerarios.some((it) => it.numeroDia === d)) {
+      diasSinParadas.push({ numeroDia: d, fecha: sumarDias(viaje.fechaInicio, d - 1) });
       errores.push(
         `Falta el día ${d} (o no quedó ninguna parada válida).`
       );
@@ -182,17 +256,12 @@ export function validarSalida(
 
   itinerarios.sort((a, b) => a.numeroDia - b.numeroDia);
 
-  const viable = Array.from(
-    { length: totalDias },
-    (_, i) => i + 1
-  ).every((d) =>
-    itinerarios.some((it) => it.numeroDia === d)
-  );
-
   return {
     errores,
     advertencias,
     itinerarios,
-    viable,
+    descartes,
+    diasSinParadas,
+    viable: diasSinParadas.length === 0,
   };
 }

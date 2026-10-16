@@ -5,6 +5,9 @@ import Recomendaciones from "../components/Recomendaciones";
 import { MapaSeguro } from "../components/MapaSeguro";
 import IndicadorClima, { type EstadoPronostico } from "../components/IndicadorClima";
 import AlertaHorario from "../components/AlertaHorario";
+import PanelPresupuesto from "../components/PanelPresupuesto";
+import { generarGastosSimulados } from "../services/gastos";
+import CalificacionParada, { ResumenCalificacion } from "../components/CalificacionParada";
 import type { RespuestaClima } from "../../../shared/types";
 import { consultarPronostico, coordenadasDelViaje } from "../services/clima";
 
@@ -66,6 +69,12 @@ export default function Paso4Generacion() {
     setItinerarios,
     irAPaso,
     reiniciar,
+    calificaciones,
+    guardarCalificacion,
+    gastos,
+    setGastos,
+    agregarGasto,
+    eliminarGasto,
   } = useViaje();
 
   // Estados
@@ -78,6 +87,8 @@ export default function Paso4Generacion() {
   const [diaActivo, setDiaActivo] = useState(0);
   const [votos, setVotos] = useState<Record<string, Voto>>({});
   const [copiado, setCopiado] = useState("");
+  const [calificando, setCalificando] = useState<string | null>(null);
+  const [visitadas, setVisitadas] = useState<Record<string, boolean>>({});
   const [pronostico, setPronostico] = useState<RespuestaClima | null>(null);
   const [estadoPronostico, setEstadoPronostico] = useState<EstadoPronostico>("cargando");
 
@@ -88,6 +99,11 @@ export default function Paso4Generacion() {
   const enlaceRef = useRef<HTMLInputElement>(null);
 
   const esGrupo = viaje.tipoViaje === "amigos";
+  const presupuestoDiario =
+    viaje.presupuestoDiario ??
+    (viaje.presupuesto !== undefined
+      ? Math.round(viaje.presupuesto / Math.max(1, diasDeViaje(viaje.fechaInicio, viaje.fechaFin)))
+      : 500);
   const dias = diasDeViaje(viaje.fechaInicio, viaje.fechaFin);
   const enlace = `https://guiaturistica.example/votar/${codigo}`;
 
@@ -113,6 +129,8 @@ export default function Paso4Generacion() {
         if (cancelado) return;
 
         setItinerarios(resultado);
+        // TODO(backend): cargar los gastos reales (Lucía) en lugar de simularlos.
+        setGastos(generarGastosSimulados(resultado, presupuestoDiario));
         setDiaActivo(0);
         setVotos({});
         setFase("listo");
@@ -395,6 +413,17 @@ export default function Paso4Generacion() {
             />
           </section>
 
+          {/* Presupuesto del día */}
+          <PanelPresupuesto
+            numeroDia={dia.numeroDia}
+            presupuestoDiario={presupuestoDiario}
+            gastosDelDia={gastos.filter((g) => g.numeroDia === dia.numeroDia)}
+            totalGastadoViaje={gastos.reduce((s, g) => s + g.monto, 0)}
+            presupuestoTotal={viaje.presupuesto}
+            onAgregar={agregarGasto}
+            onEliminar={eliminarGasto}
+          />
+
           {/* Mapa */}
           <div
             className="mapa-dia"
@@ -420,7 +449,7 @@ export default function Paso4Generacion() {
 
               return (
                 <div key={p.id || i}>
-                  <li className="parada">
+                  <li className={`parada${visitadas[p.id] || calificaciones[p.id] ? " visitada" : ""}`}>
                     {/* Hora */}
                     <div className="hora">
                       {descartada
@@ -436,7 +465,12 @@ export default function Paso4Generacion() {
 
                     {/* Información del lugar */}
                     <div>
-                      <h3>{p.nombre}</h3>
+                      <h3>
+                        {p.nombre}
+                        {(visitadas[p.id] || calificaciones[p.id]) && (
+                          <span className="sello-visitada">Visitada</span>
+                        )}
+                      </h3>
 
                       <p>
                         Abre {p.horaApertura} ·
@@ -452,6 +486,38 @@ export default function Paso4Generacion() {
                           estado={alerta.estado}
                           mensaje={alerta.mensaje}
                         />
+                      )}
+
+                      {/* Calificación post-actividad */}
+                      {!descartada && (
+                        <div className="visita-acciones">
+                          {calificando === p.id ? (
+                            <CalificacionParada
+                              paradaId={p.id}
+                              nombre={p.nombre}
+                              inicial={calificaciones[p.id]}
+                              onCancelar={() => setCalificando(null)}
+                              onGuardar={(c) => {
+                                guardarCalificacion(c);
+                                setVisitadas((v) => ({ ...v, [p.id]: true }));
+                                setCalificando(null);
+                              }}
+                            />
+                          ) : calificaciones[p.id] ? (
+                            <ResumenCalificacion
+                              c={calificaciones[p.id]}
+                              onEditar={() => setCalificando(p.id)}
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn-visita"
+                              onClick={() => setCalificando(p.id)}
+                            >
+                              Ya visité este lugar · Calificar
+                            </button>
+                          )}
+                        </div>
                       )}
 
                       {/* Votaciones */}
