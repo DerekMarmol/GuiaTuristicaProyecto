@@ -1,6 +1,7 @@
 import { useViaje } from "./context/ViajeContext";
 import FondoMapa from "./components/FondoMapa";
 import OfflineBanner from "./components/OfflineBanner";
+import ChatFlotante from "./components/ChatFlotante";
 import Paso1Destino from "./pages/Paso1Destino";
 import Paso2Hospedaje from "./pages/Paso2Hospedaje";
 import Paso3Contexto from "./pages/Paso3Contexto";
@@ -21,6 +22,7 @@ export default function App() {
         {paso === 3 && <Paso3Contexto />}
         {paso === 4 && <Paso4Generacion />}
       </main>
+      <ChatFlotante />
     </>
   );
 }
