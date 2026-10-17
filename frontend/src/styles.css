@@ -252,6 +252,179 @@ pre { margin: 0 0 1rem; padding: .8rem; overflow: auto; font-size: .85rem; color
 .chat-form input { flex: 1; min-width: 0; padding: .6rem; border: 1.5px solid var(--linea-fuerte); border-radius: 10px; background: #fff; font: .9rem var(--font-body); color: var(--ciruela); }
 .chat-form .btn-primario { width: auto; margin-top: 0; padding: .6rem 1rem; }
 .chat-form .btn-primario:disabled { opacity: .5; cursor: not-allowed; }
+
+.telemetria {
+  margin: 1.2rem 0;
+  padding: 1.2rem;
+  background: var(--papel);
+  border: 1px solid var(--linea-fuerte);
+  border-left: 6px solid var(--coral);
+  border-radius: 16px;
+  box-shadow: 0 4px 12px -4px rgba(74, 53, 96, .15);
+}
+
+.telemetria-encabezado {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.telemetria-etiqueta {
+  display: block;
+  margin-bottom: .4rem;
+  font: 700 .72rem/1.2 var(--font-ui);
+  letter-spacing: .14em;
+  color: var(--coral-osc);
+}
+
+.telemetria h3 {
+  margin: 0;
+  font: 700 1.25rem/1.2 var(--font-ui);
+  color: var(--ciruela);
+}
+
+.telemetria-indicador {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  margin-top: .35rem;
+  border-radius: 50%;
+  background: var(--linea-fuerte);
+}
+
+.telemetria-indicador.activo {
+  background: var(--verde);
+  box-shadow: 0 0 0 4px rgba(168, 208, 140, .25);
+}
+
+.telemetria-indicador.solicitando {
+  background: var(--naranja);
+}
+
+.telemetria-indicador.error {
+  background: var(--error);
+}
+
+.telemetria-contenido {
+  margin-top: 1rem;
+  padding: 1.1rem;
+  background: var(--arena);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.telemetria-velocidad {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: .5rem;
+  color: var(--ciruela);
+  font-variant-numeric: tabular-nums;
+}
+
+.telemetria-velocidad strong,
+.telemetria-sin-datos {
+  font: 700 clamp(2.8rem, 9vw, 4rem)/1 var(--font-ui);
+  letter-spacing: -.04em;
+}
+
+.telemetria-unidad {
+  font: 700 1.1rem var(--font-ui);
+  color: var(--suave);
+}
+
+.telemetria-descripcion {
+  margin: .6rem 0 0;
+  font: 400 .85rem/1.5 var(--font-body);
+  color: var(--suave);
+}
+
+.telemetria-estado {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  margin-top: 1rem;
+  padding: .4rem .8rem;
+  background: var(--papel);
+  border: 1px solid var(--linea);
+  border-radius: 99px;
+  font: 600 .8rem var(--font-ui);
+  color: var(--ciruela);
+}
+
+.telemetria-punto {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--linea-fuerte);
+}
+
+.telemetria-punto.activo {
+  background: var(--verde);
+}
+
+.telemetria-punto.solicitando {
+  background: var(--naranja);
+}
+
+.telemetria-punto.error {
+  background: var(--error);
+}
+
+.telemetria-error {
+  margin: .8rem 0 0;
+  padding: .7rem .9rem;
+  background: #fde8e2;
+  border: 1px solid var(--error);
+  border-radius: 10px;
+  color: var(--error);
+  font-size: .85rem;
+}
+
+.telemetria-boton {
+  display: block;
+  width: 100%;
+  margin-top: 1rem;
+  padding: .85rem 1rem;
+  border: 0;
+  border-radius: 12px;
+  background: var(--ciruela);
+  color: var(--crema);
+  font: 700 .9rem/1.2 var(--font-ui);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 4px 0 var(--coral);
+  transition: transform .15s, box-shadow .15s;
+}
+
+.telemetria-boton:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 0 var(--coral);
+}
+
+.telemetria-boton:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 var(--coral);
+}
+
+.telemetria-boton:focus-visible {
+  outline: 3px solid var(--agua-osc);
+  outline-offset: 3px;
+}
+
+@media (max-width: 420px) {
+  .telemetria {
+    padding: 1rem;
+  }
+
+  .telemetria-contenido {
+    padding: .9rem;
+  }
+}
+
 /* Autenticación (GUI-91) */
 input[type="email"], input[type="password"] {
   width: 100%; padding: .8rem .9rem; font: 500 1rem var(--font-body); color: var(--ciruela);

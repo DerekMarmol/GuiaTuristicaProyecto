@@ -3,6 +3,7 @@ import { useViaje } from "../context/ViajeContext";
 import Stepper from "../components/Stepper";
 import Recomendaciones from "../components/Recomendaciones";
 import { MapaSeguro } from "../components/MapaSeguro";
+import { PanelTelemetria } from "../components/PanelTelemetria";
 import IndicadorClima, { type EstadoPronostico } from "../components/IndicadorClima";
 import AlertaHorario from "../components/AlertaHorario";
 import PanelPresupuesto from "../components/PanelPresupuesto";
@@ -432,6 +433,9 @@ export default function Paso4Generacion() {
           >
             <MapaSeguro paradas={dia.paradas} />
           </div>
+
+          {/* Telemetría GPS del recorrido */}
+          <PanelTelemetria />
 
           {/* Paradas */}
           <ol
