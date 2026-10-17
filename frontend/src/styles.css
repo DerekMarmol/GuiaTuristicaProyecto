@@ -424,3 +424,19 @@ pre { margin: 0 0 1rem; padding: .8rem; overflow: auto; font-size: .85rem; color
     padding: .9rem;
   }
 }
+
+/* Autenticación (GUI-91) */
+input[type="email"], input[type="password"] {
+  width: 100%; padding: .8rem .9rem; font: 500 1rem var(--font-body); color: var(--ciruela);
+  background: #fff; border: 1.5px solid var(--linea-fuerte); border-radius: 12px;
+  transition: border-color .2s, box-shadow .2s; box-sizing: border-box;
+}
+.campo-clave { position: relative; }
+.campo-clave input { padding-right: 4.6rem; }
+.ver-clave { position: absolute; top: 50%; right: .5rem; transform: translateY(-50%); padding: .35rem .6rem; border: 0; border-radius: 8px; background: var(--arena); color: var(--ciruela); font: 700 .75rem var(--font-ui); letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+.ver-clave:focus-visible { outline: 3px solid var(--agua-osc); outline-offset: 2px; }
+.btn-primario:disabled, .btn-secundario:disabled { opacity: .6; cursor: not-allowed; }
+.sesion { display: flex; justify-content: center; align-items: center; gap: .6rem; margin-top: .5rem; font: 600 .8rem var(--font-ui); letter-spacing: .06em; text-transform: uppercase; color: var(--suave); }
+.sesion button { padding: .3rem .8rem; border: 1.5px solid var(--ciruela); border-radius: 99px; background: transparent; color: var(--ciruela); font: 700 .75rem var(--font-ui); letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+.sesion button:hover { background: var(--arena); }
+.sesion button:focus-visible { outline: 3px solid var(--agua-osc); outline-offset: 2px; }
