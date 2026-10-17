@@ -1,7 +1,19 @@
 import { useTelemetria } from "../hooks/useTelemetria";
+import { detectarTransporte } from "../utils/detectarTransporte";
 
 export function PanelTelemetria() {
   const { estado, velocidadKmh, error, iniciar, detener } = useTelemetria();
+
+  const medioTransporte = detectarTransporte(velocidadKmh);
+  
+  const transporteTexto =
+    medioTransporte === "detenido"
+        ? "Detenido"
+        : medioTransporte === "caminando"
+            ? "Caminando"
+            : medioTransporte === "vehiculo"
+                ? "En vehículo"
+                : "Sin detectar";
 
   const seguimientoActivo = estado === "activo" || estado === "solicitando";
 
@@ -45,6 +57,10 @@ export function PanelTelemetria() {
         <div className="telemetria-estado" role="status">
           <span className={`telemetria-punto ${estado}`} aria-hidden="true" />
           <span>{estadoTexto}</span>
+        </div>
+        <div className="telemetria-transporte" aria-live="polite">
+            <span>Medio de transporte detectado:</span>
+            <strong>{transporteTexto}</strong>
         </div>
       </div>
 
