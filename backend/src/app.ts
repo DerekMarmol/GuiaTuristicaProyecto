@@ -11,6 +11,7 @@ import { crearServicioClima } from "./clima/servicio";
 import { crearRutaPronosticoClima } from "./routes/pronosticoClima";
 import { manejarErrores } from "./errores";
 import type { FuncionFetch } from "./tipos";
+import { rutaEta } from "./eta/rutaEta";
 
 export interface OpcionesApp {
   apiKey?: string;
@@ -67,6 +68,7 @@ export function crearApp({
   const validarPropuesta = crearValidadorPropuestas({ resolverLugares });
   const priorizarPorClima = crearPriorizadorClima({ resolverLugares, consultarClima });
   app.register(crearRutaItinerarios(validarPropuesta, priorizarPorClima), { prefix: "/api/itinerarios" });
+  app.register(rutaEta, { prefix: "/api/itinerarios" });
 
   app.register(crearRutaPronosticoClima(consultarClima), { prefix: "/api/clima/pronostico" });
 
