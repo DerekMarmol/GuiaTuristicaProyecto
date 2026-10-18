@@ -12,6 +12,9 @@ import { crearRutaPronosticoClima } from "./routes/pronosticoClima";
 import { manejarErrores } from "./errores";
 import type { FuncionFetch } from "./tipos";
 import { rutaEta } from "./eta/rutaEta";
+import { crearAgenteChat } from "./chat/agente";
+import { crearClienteChatGemini, type ClienteChat } from "./chat/clienteChat";
+import { crearRutaChat } from "./chat/rutaChat";
 
 export interface OpcionesApp {
   apiKey?: string;
@@ -29,6 +32,9 @@ export interface OpcionesApp {
     tiempoEsperaMs?: number;
     ahora?: () => Date;
   };
+  chat?: {
+    cliente?: ClienteChat;
+  };
 }
 
 export function crearApp({
@@ -37,6 +43,7 @@ export function crearApp({
   tiempoEsperaMs,
   detalles = {},
   clima = {},
+  chat = {},
 }: OpcionesApp = {}): FastifyInstance {
   // Igual que con Express: rutas sin distinguir mayúsculas y con o sin barra final.
   // frameworkErrors da el mismo formato de error a fallos previos al enrutamiento, como una URL mal formada.
@@ -56,6 +63,8 @@ export function crearApp({
   };
   const enriquecerHorarios = crearEnriquecedorHorarios(opcionesDetalles);
   app.register(crearRutaLugares(buscarLugares, enriquecerHorarios), { prefix: "/api/lugares" });
+  const clienteChat = chat.cliente ?? (process.env.GEMINI_API_KEY ? crearClienteChatGemini() : undefined);
+  app.register(crearRutaChat(crearAgenteChat({ cliente: clienteChat })), { prefix: "/api/chat" });
 
   const obtenerPronostico = crearClienteOpenWeather({
     apiKey: clima.apiKey === undefined ? process.env.OPENWEATHER_API_KEY : clima.apiKey,
