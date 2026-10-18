@@ -23,10 +23,17 @@ Edita `backend/.env` y asigna tu clave:
 | `GEOAPIFY_API_KEY` | Clave de Geoapify. Obligatoria para iniciar el servidor. |
 | `OPENWEATHER_API_KEY` | Clave de OpenWeather. Si falta, el servidor inicia, muestra un aviso y `GET /api/clima/pronostico` responde `503`; `POST /api/itinerarios/priorizar-clima` responde `200` con el orden original e informa la consulta fallida. El resto de las rutas funciona igual. |
 | `PORT` | Puerto HTTP del backend. Valor por defecto: `3000`. |
+| `OPTIMIZER_URL` | URL base del optimizador FastAPI. Por defecto `http://localhost:8000`; el backend llama a `/reoptimize`. |
 | `HOST` | Dirección en la que escucha el servidor. Valor por defecto: `::` (todas las interfaces, IPv6 e IPv4). Usa `127.0.0.1` para aceptar solo conexiones locales. |
 | `DATABASE_URL` | Conexión de Prisma a PostgreSQL (no se usa en los endpoints de lugares ni de clima). |
 
 El servidor carga `backend/.env` sin sobrescribir variables que ya estén definidas en el entorno. El archivo `.env` está excluido de Git; solo se versiona `.env.example`. Las claves se usan únicamente en el servidor: no deben definirse como variables `VITE_` ni enviarse al frontend.
+
+### Reoptimización de una ruta en curso
+
+`POST /api/itinerarios/reoptimizar` recibe `tipo` (`clima`, `retraso` o `parada_cancelada`), las paradas pendientes del día, `horaActualMinutos` (minutos desde medianoche) y, para cancelaciones, `paradaCanceladaId`. El backend elimina la parada cancelada, convierte los campos al contrato del optimizador y llama `POST {OPTIMIZER_URL}/reoptimize`. La respuesta devuelve el nuevo orden y las paradas reordenadas.
+
+En el paso 4, la lluvia significativa del pronóstico dispara el evento de clima automáticamente. Los botones “Reportar retraso y recalcular” y “Cancelar parada y recalcular” envían los otros eventos; la lista y el mapa se actualizan desde el estado compartido del itinerario.
 
 ## Comandos
 

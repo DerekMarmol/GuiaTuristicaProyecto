@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import type { Itinerario, Viaje } from "../../../shared/types";
 
 export type ViajeBorrador = Partial<Viaje> & {
@@ -13,7 +13,7 @@ interface ViajeContextValue {
   itinerarios: Itinerario[] | null;
   actualizarViaje: (datos: ViajeBorrador) => void;
   irAPaso: (paso: number) => void;
-  setItinerarios: (it: Itinerario[] | null) => void;
+  setItinerarios: Dispatch<SetStateAction<Itinerario[] | null>>;
   reiniciar: () => void;
 }
 

@@ -68,6 +68,11 @@
 .hora small { display: block; margin-top: .15rem; font-weight: 500; font-size: .85rem; color: var(--suave); }
 .parada h3 { margin: 0; font: 700 1.1rem/1.25 var(--font-ui); letter-spacing: .02em; }
 .parada p { margin: .3rem 0 0; font-size: .85rem; color: var(--suave); }
+.aviso-plan-actualizado { margin: .7rem 0; padding: .75rem 1rem; border: 1px solid #80bfa1; border-radius: 10px; color: #145c3c; background: #eaf7ef; }
+.acciones-ruta { display: flex; justify-content: flex-end; margin: .6rem 0; }
+.accion-parada { margin-top: .6rem; padding: .35rem .6rem; border: 1px solid var(--linea); border-radius: 8px; color: var(--suave); background: #fff; cursor: pointer; }
+.accion-parada:disabled { opacity: .6; cursor: wait; }
+.estado-parada-visitada { color: #145c3c !important; font-weight: 700; }
 .votos { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .7rem; }
 .voto { padding: .5rem .8rem; border: 1.5px solid var(--linea-fuerte); border-radius: 99px; background: #fff; color: var(--ciruela); font: 600 .85rem/1 var(--font-ui); letter-spacing: .05em; text-transform: uppercase; font-variant-numeric: tabular-nums; cursor: pointer; transition: background .2s, border-color .2s; }
 .voto:hover { border-color: var(--ciruela); }

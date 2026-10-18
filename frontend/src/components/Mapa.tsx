@@ -39,12 +39,17 @@ export function Mapa({ paradas = [] }: MapaProps) {
 
     const bounds = new mapboxgl.LngLatBounds();
 
-    paradas.forEach((parada) => {
+    paradas.forEach((parada, index) => {
       const popup = new mapboxgl.Popup({ offset: 24 }).setHTML(
         `<strong>${parada.nombre}</strong><br/>Abre ${parada.horaApertura} · Cierra ${parada.horaCierre}`
       );
 
-      const marcador = new mapboxgl.Marker({ color: "#c04a2a" })
+      const elemento = document.createElement("div");
+      elemento.className = "marcador-parada";
+      elemento.textContent = String(index + 1);
+      elemento.setAttribute("aria-label", `Parada ${index + 1}: ${parada.nombre}`);
+
+      const marcador = new mapboxgl.Marker({ element: elemento, anchor: "center" })
         .setLngLat([parada.lng, parada.lat])
         .setPopup(popup)
         .addTo(mapa);
