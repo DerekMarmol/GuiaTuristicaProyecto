@@ -1,12 +1,13 @@
 # Backend
 
-API HTTP con Node.js, Fastify y TypeScript (CommonJS). Expone la consulta de lugares de interés mediante [Geoapify Places API](https://apidocs.geoapify.com/docs/places/), enriquecida con los horarios publicados que devuelve [Geoapify Place Details API](https://apidocs.geoapify.com/docs/place-details/), la validación de una propuesta de itinerario contra esos horarios (`POST /api/itinerarios/validar`), el pronóstico del clima para las fechas de un viaje mediante [OpenWeather 5 Day / 3 Hour Forecast](https://openweathermap.org/forecast5) y la priorización de las paradas según la lluvia pronosticada (`POST /api/itinerarios/priorizar-clima`). La configuración de Prisma se mantiene sin cambios.
+API HTTP con Node.js, Fastify y TypeScript (CommonJS). Expone la consulta de lugares de interés mediante [Geoapify Places API](https://apidocs.geoapify.com/docs/places/), enriquecida con los horarios publicados que devuelve [Geoapify Place Details API](https://apidocs.geoapify.com/docs/place-details/), la validación de una propuesta de itinerario contra esos horarios (`POST /api/itinerarios/validar`), el pronóstico del clima para las fechas de un viaje mediante [OpenWeather 5 Day / 3 Hour Forecast](https://openweathermap.org/forecast5) y la priorización de las paradas según la lluvia pronosticada (`POST /api/itinerarios/priorizar-clima`) y las recomendaciones de hoteles cercanos al itinerario de un día con precios referenciales de [SerpApi Google Hotels](https://serpapi.com/google-hotels-api) convertidos a quetzales con [ExchangeRate-API](https://www.exchangerate-api.com/docs/standard-requests) dentro del presupuesto de hospedaje (`POST /api/hoteles/recomendaciones`). La configuración de Prisma se mantiene sin cambios.
 
 ## Requisitos
 
 - Node.js 20 o superior (se usan `fetch`, `AbortController` y `node --test` nativos).
 - Una clave de Geoapify, que se obtiene en [myprojects.geoapify.com](https://myprojects.geoapify.com/).
 - Una clave de OpenWeather para `GET /api/clima/pronostico` (opcional para iniciar el servidor). Consulta [Clave de OpenWeather](#clave-de-openweather).
+- Claves de SerpApi y ExchangeRate-API para `POST /api/hoteles/recomendaciones` (opcionales para iniciar el servidor). Consulta [Claves de SerpApi y ExchangeRate-API](#claves-de-serpapi-y-exchangerate-api).
 
 ## Instalación y configuración
 
@@ -22,6 +23,8 @@ Edita `backend/.env` y asigna tu clave:
 | --- | --- |
 | `GEOAPIFY_API_KEY` | Clave de Geoapify. Obligatoria para iniciar el servidor. |
 | `OPENWEATHER_API_KEY` | Clave de OpenWeather. Si falta, el servidor inicia, muestra un aviso y `GET /api/clima/pronostico` responde `503`; `POST /api/itinerarios/priorizar-clima` responde `200` con el orden original e informa la consulta fallida. El resto de las rutas funciona igual. |
+| `SERPAPI_API_KEY` | Clave de SerpApi (Google Hotels). Si falta, el servidor inicia, muestra un aviso y `POST /api/hoteles/recomendaciones` responde `503` cuando necesita consultar hoteles. El resto de las rutas funciona igual. |
+| `EXCHANGERATE_API_KEY` | Clave de ExchangeRate-API (plan gratuito). Mismo comportamiento que `SERPAPI_API_KEY` si falta. |
 | `PORT` | Puerto HTTP del backend. Valor por defecto: `3000`. |
 | `OPTIMIZER_URL` | URL base del optimizador FastAPI. Por defecto `http://localhost:8000`; el backend llama a `/reoptimize`. |
 | `HOST` | Dirección en la que escucha el servidor. Valor por defecto: `::` (todas las interfaces, IPv6 e IPv4). Usa `127.0.0.1` para aceptar solo conexiones locales. |
@@ -42,7 +45,7 @@ npm run build  # compila TypeScript a dist/ (el servidor queda en dist/backend/s
 npm start      # inicia el servidor compilado (requiere npm run build)
 npm run dev    # inicia el servidor con tsx y lo reinicia al detectar cambios
 npm run typecheck  # verifica los tipos de src/ y test/
-npm test       # ejecuta todas las pruebas de test/ con Geoapify y OpenWeather simulados (no requiere claves), incluidas las de clasificación y priorización climática
+npm test       # ejecuta todas las pruebas de test/ con Geoapify, OpenWeather, SerpApi y ExchangeRate-API simulados (no requiere claves ni consume cuotas), incluidas las de clasificación y priorización climática y las de recomendaciones de hoteles
 npm run ai:test   # pruebas del módulo de IA (validador, orquestador, validación de estancias y de apertura)
 npm run ai:tipos  # comprobación de tipos estricta del módulo de IA
 ```
@@ -868,3 +871,438 @@ El resultado depende del pronóstico real. Si OpenWeather indica lluvia para la 
 - La lluvia es un acumulado diario, sin distinguir horas: un día con lluvia solo por la noche también prioriza los lugares bajo techo por la mañana.
 - **Zona horaria (limitación previa del módulo de clima).** El resumen diario agrupa por la fecha local que da el desplazamiento único de OpenWeather (`city.timezone`), mientras que las llegadas se calculan con la zona IANA del viaje. Coinciden salvo cuando el destino cambia de horario de verano dentro de la ventana del pronóstico; en ese caso algunos intervalos de lluvia pueden quedar asignados a la fecha contigua. Esto viene de `/api/clima/pronostico` y no se modificó en esta entrega.
 - Siguen vigentes las limitaciones de `/validar`: traslados estimados en línea recta y lugares sin horario verificable descartados.
+
+## Endpoint `POST /api/hoteles/recomendaciones`
+
+Recomienda hoteles cercanos a la zona del itinerario de **un día** cuyo precio referencial, convertido a quetzales, no supera el 40 % del presupuesto diario. Los hoteles y sus precios provienen de [SerpApi Google Hotels API](https://serpapi.com/google-hotels-api) (motor `google_hotels`) y la tasa USD → GTQ, del [endpoint estándar de ExchangeRate-API](https://www.exchangerate-api.com/docs/standard-requests) (plan gratuito con clave). No reserva, no cobra, no comprueba disponibilidad, no guarda nada y el frontend todavía no lo consume.
+
+> **El precio es referencial.** Es el importe estructurado que publica Google Hotels a través de SerpApi en el momento de la consulta: puede estar redondeado, cambiar después de la consulta o diferir del importe final de una reserva. El filtro del 40 % garantiza que el **importe referencial convertido** no supera el presupuesto de hospedaje; no garantiza el cargo final.
+
+### Flujo de proveedores
+
+1. Se valida el cuerpo (`src/validacion/hoteles.ts`). Cualquier error responde `400` antes de cualquier llamada externa.
+2. Si `hospedaje` es `true` responde vacío con `hospedaje_reservado`; si `sinHotel` es `true`, con `no_necesita_hotel` (si ambos son `true`, prevalece `hospedaje_reservado`); si `paradas` está vacía, con `itinerario_sin_paradas` y `centro: null`. Ninguno de estos casos llama a SerpApi ni a ExchangeRate-API, ni necesita sus claves.
+3. Se calcula el centro geográfico de las paradas (`calcularCentro` en `src/hoteles/geografia.ts`).
+4. Se comprueba que estén configuradas **las dos** claves. Si falta alguna, responde `503 SERVICIO_NO_CONFIGURADO` sin gastar una búsqueda de SerpApi que después no podría convertirse.
+5. Se consulta **una página** de resultados de SerpApi (o se reutiliza de la caché de búsquedas).
+6. Se normalizan los resultados, se eliminan los repetidos por `property_token` (se conserva la primera aparición) y se descartan los que quedan fuera de `radio`.
+7. Si no queda ningún hotel con precio utilizable dentro del radio, responde vacío **sin consultar el tipo de cambio**.
+8. Se obtiene la tasa USD → GTQ vigente (o se reutiliza de la caché).
+9. Se convierte cada precio a quetzales y se conservan los que no superan el presupuesto de hospedaje.
+10. Se ordena por distancia al centro sin redondear (empates por `idExterno`) y se aplica `limite` al final.
+
+Geoapify no participa en este endpoint: no se usa su clave, ni sus categorías, ni sus identificadores. `GET /api/lugares` y los demás módulos siguen usando Geoapify igual que antes.
+
+### Claves de SerpApi y ExchangeRate-API
+
+| Variable | Proveedor | Dónde obtenerla |
+| --- | --- | --- |
+| `SERPAPI_API_KEY` | SerpApi (Google Hotels) | Crea una cuenta en [serpapi.com](https://serpapi.com/users/sign_up) y copia la clave privada desde [Manage API Key](https://serpapi.com/manage-api-key) |
+| `EXCHANGERATE_API_KEY` | ExchangeRate-API | Regístrate en el plan gratuito en [app.exchangerate-api.com](https://app.exchangerate-api.com/sign-up), confirma el correo (sin confirmar, el proveedor responde `inactive-account`) y copia la clave del panel |
+
+1. Abre `backend/.env` con un editor y añade las dos líneas sin modificar las existentes (en `.env.example` están como marcadores vacíos):
+
+   ```
+   SERPAPI_API_KEY=tu_clave_de_serpapi
+   EXCHANGERATE_API_KEY=tu_clave_de_exchangerate
+   ```
+
+   No uses otras claves del proyecto ni definas estas variables con prefijo `VITE_`: se usan solo en el servidor.
+
+2. Comprueba que tienen valor sin imprimirlas (desde `backend/`):
+
+   ```powershell
+   Select-String -Path .env -Pattern '^SERPAPI_API_KEY=\S+' -Quiet
+   Select-String -Path .env -Pattern '^EXCHANGERATE_API_KEY=\S+' -Quiet
+   ```
+
+3. Reinicia el servidor. Si falta alguna, el servidor inicia igualmente y muestra un aviso; solo este endpoint responde `503 SERVICIO_NO_CONFIGURADO` cuando necesita consultar hoteles. Las salidas tempranas del paso 2 siguen respondiendo `200` y el resto de las rutas no se ve afectado.
+
+Consulta en el panel de cada proveedor la cuota mensual de tu plan. El backend no renueva planes ni reintenta solicitudes.
+
+### Solicitud
+
+```json
+{
+  "fecha": "2026-11-20",
+  "destino": "Antigua Guatemala",
+  "paradas": [
+    { "lat": 14.5586, "lng": -90.7295 },
+    { "lat": 14.5562, "lng": -90.7339 }
+  ],
+  "presupuestoDiario": 500,
+  "moneda": "GTQ",
+  "ocupacion": 2,
+  "hospedaje": false,
+  "sinHotel": false,
+  "radio": 5000,
+  "limite": 10
+}
+```
+
+| Campo | Obligatorio | Regla |
+| --- | --- | --- |
+| `fecha` | Sí | Fecha real `AAAA-MM-DD` del día del itinerario. Es la fecha de entrada de la noche consultada. Se rechaza una fecha que ya pasó en todas las zonas horarias (anterior al día de ayer en UTC) |
+| `destino` | Sí | Texto de 2 a 100 caracteres con la ciudad o zona de búsqueda (por ejemplo, `"Antigua Guatemala"`). Se recortan los espacios y se reducen los repetidos; se rechazan caracteres de control. El backend no lo deduce de las coordenadas ni usa un destino fijo |
+| `paradas` | Sí | Lista de 0 a 25 objetos `{ lat, lng }` con las paradas **de ese día** (números JSON; `lat` entre -90 y 90, `lng` entre -180 y 180; se acepta `0`). Otros campos de cada parada se ignoran |
+| `presupuestoDiario` | Sí | Presupuesto diario total del usuario, en quetzales. Mayor que 0, como máximo 1 000 000, finito y con hasta dos decimales. No es el presupuesto total del viaje: el backend no lo divide entre días |
+| `moneda` | Sí | Solo `"GTQ"` |
+| `ocupacion` | Sí | Entero de 1 a 10: número de **adultos** en una habitación. SerpApi no documenta un máximo; el 10 es un límite propio |
+| `hospedaje` | Sí | `true` si el usuario ya tiene hospedaje reservado |
+| `sinHotel` | No | `true` si el usuario indicó que no necesita hotel. Por defecto `false` |
+| `radio` | No | Entero de 1 a 50000 metros alrededor del centro. Por defecto `5000` |
+| `limite` | No | Entero de 1 a 20: número máximo de recomendaciones. Por defecto `10` |
+
+- El cuerpo debe ser un objeto JSON de hasta 32 KB. Los campos desconocidos se ignoran; en particular, **no se acepta un porcentaje enviado por el cliente** (`porcentajeHospedaje` u otro campo no cambia el cálculo).
+- Cualquier dato inválido responde `400 PARAMETRO_INVALIDO` con `detalles` por campo, antes de consultar a cualquier proveedor. Esto incluye los casos con `hospedaje: true`.
+- El contrato TypeScript está en `shared/types/hotel.ts` (`SolicitudRecomendacionesHoteles`, `RespuestaRecomendacionesHoteles`, `HotelRecomendado`, `TarifaReferencialHotel`, `ImpuestosTarifaHotel`, `FuenteTarifaHotel`, `EstanciaHotel`, `BusquedaHoteles`, `TipoCambioHoteles`, `MotivoSinRecomendacionesHotel`).
+
+#### Cambios incompatibles respecto al contrato anterior
+
+- `destino` es un campo **obligatorio** nuevo, también cuando `hospedaje` o `sinHotel` son `true`.
+- Se rechazan fechas ya pasadas y `9999-12-31` (no tiene día siguiente representable).
+- `ocupacion` significa ahora número de adultos; antes era el número de huéspedes de una tarifa del catálogo.
+- `hoteles[].proveedor` es `"serpapi"` e `idExterno` es el `property_token` de SerpApi; ya no son `place_id` de Geoapify. No hay equivalencia entre ambos identificadores.
+- `hoteles[].direccion` se eliminó: la búsqueda de SerpApi no la incluye y no se consultan detalles por hotel.
+- `hoteles[].tarifa` cambió de forma (`TarifaHotelAplicada` → `TarifaReferencialHotel`): ya no tiene `id`, `ocupacion`, `vigencia`, `verificadoEn` ni `impuestosIncluidos: true`; incorpora `referencial`, `importeUsd`, `importeUsdCentavos`, `noches`, `campo`, `impuestos` y una `fuente` distinta.
+- `busqueda` cambió de forma y se añadieron `destino`, `estancia` y `tipoCambio` a la respuesta.
+- Los motivos `catalogo_vacio`, `sin_tarifas_aplicables` y `sin_hoteles_elegibles` se eliminaron; se añadieron `sin_hoteles_con_precio`, `sin_hoteles_en_radio` y `sin_hoteles_en_presupuesto`.
+- Los errores `CATALOGO_TARIFAS_INVALIDO` y `CATALOGO_TARIFAS_NO_DISPONIBLE` ya no existen. `SERVICIO_NO_CONFIGURADO` pasa de `500` (clave de Geoapify) a `503` (claves de SerpApi o ExchangeRate-API).
+
+### Estancia, moneda y ocupación
+
+- **Una noche por solicitud.** Entrada: `fecha`. Salida: el día calendario siguiente. Se calcula con aritmética de calendario sobre la fecha civil, sin depender de la zona horaria del servidor, e incluye cambios de mes y de año y los 29 de febrero (`2026-12-31` → `2027-01-01`, `2028-02-28` → `2028-02-29`).
+- **Adultos, sin menores.** `ocupacion` se envía como `adults` y siempre se consulta con `children=0`. El backend no infiere edades ni representa menores como adultos. Admitir menores es una ampliación posterior explícita: requeriría un campo nuevo con sus edades (`children` y `children_ages` de SerpApi).
+- **Moneda.** La solicitud y el presupuesto están en quetzales (`GTQ`). SerpApi se consulta en dólares (`currency=USD`) y el precio se convierte a quetzales con la tasa de ExchangeRate-API.
+
+### Precio referencial e impuestos
+
+Solo se procesan las entradas de `properties` con `type: "hotel"`, `property_token` y `name` no vacíos, `gps_coordinates` numéricas dentro de rango (se acepta `0`) y un precio numérico positivo con hasta dos decimales. Los anuncios (`ads`), los alquileres vacacionales (`type: "vacation rental"`) y los registros incompletos se descartan; nunca se reemplaza un precio desconocido por cero.
+
+**Selección del precio de cada hotel** (`seleccionarPrecio` en `src/hoteles/tarifas.ts`):
+
+1. Candidatos: el resumen de la propiedad y cada oferta individual de `prices` (y de `featured_prices`, en la respuesta de una propiedad individual) que tenga `source`.
+2. De cada candidato se lee primero `total_rate.extracted_lowest` y, si no existe o no es utilizable, `rate_per_night.extracted_lowest`. El campo usado se devuelve en `tarifa.campo`. Para una noche ambos representan el mismo periodo.
+3. Se descartan las ofertas cuyo `num_guests` es distinto de los adultos consultados. Si se descartó alguna por ese motivo, tampoco se usa el resumen de la propiedad, porque podría provenir de esa oferta.
+4. Entre los candidatos restantes se elige de forma determinista: primero los que usan `total_rate`; después el menor importe; después el resumen de la propiedad antes que una oferta; después la oferta oficial (`official: true`); después el nombre de la fuente en orden de caracteres; y por último el orden original.
+5. El precio y el desglose de impuestos salen siempre **del mismo bloque del mismo candidato**: nunca se combina el precio de una oferta con los impuestos o condiciones de otra. La fuente se conserva en `tarifa.fuente` (`resumen_propiedad` u `oferta` con su nombre y si es oficial).
+
+**Tratamiento de impuestos** (`tarifa.impuestos`):
+
+| `estado` | Cuándo | Significado |
+| --- | --- | --- |
+| `informado` | El bloque usado trae `extracted_before_taxes_fees` numérico y menor o igual que el importe | El importe publicado incluye impuestos y cargos; se informan `importeAntesImpuestosUsd` e `impuestosYCargosUsd` (la diferencia) |
+| `no_informado` | El bloque no trae un desglose numérico | Se usa el precio publicado como referencia. **No significa que los impuestos estén excluidos**, solo que el proveedor no los desglosó |
+
+Si `extracted_before_taxes_fees` es **mayor** que el importe, el bloque es incoherente y no se usa. El precio antes de impuestos nunca se utiliza como total. No se extraen importes de enlaces de redirección (`link`, `price_displayed_total` y similares), no se hace scraping de páginas de reserva y no se consultan los detalles de cada hotel por separado: todo sale de la respuesta de búsqueda.
+
+Caso observado que orienta las pruebas automáticas:
+
+| Dato del proveedor | Valor | Uso |
+| --- | --- | --- |
+| `total_rate.extracted_lowest` | USD 24 | Importe referencial |
+| `total_rate.extracted_before_taxes_fees` | USD 21 | Solo para informar `impuestos.estado: "informado"` (impuestos y cargos: USD 3) |
+| Importe dentro de un enlace de redirección | USD 24.49 | Se ignora |
+
+### Conversión y regla del 40 %
+
+```
+presupuestoHospedaje = presupuestoDiario × 0.40
+```
+
+El porcentaje es fijo en el backend (`PORCENTAJE_HOSPEDAJE` en `src/hoteles/tarifas.ts`) y no se puede cambiar desde la solicitud. Todo se calcula en centavos enteros:
+
+1. **Presupuesto diario:** se exigen como máximo dos decimales y se convierte a centavos exactos.
+2. **Límite de hospedaje:** `floor(presupuestoDiarioCentavos × 40 / 100)`; la fracción de centavo se redondea **hacia abajo** para no superar el 40 %.
+3. **Precio referencial en dólares:** `extracted_lowest` a centavos exactos (se descarta si tiene fracciones de centavo).
+4. **Conversión:** `importeCentavos = importeUsdCentavos × tasa`, calculado en aritmética decimal exacta con la tasa completa tal como la entrega ExchangeRate-API (sin redondearla antes a dos decimales) y redondeado **una sola vez** al centavo más cercano, con las mitades exactas hacia arriba (`convertirCentavos`).
+5. **Filtro:** se admite el hotel si `importeCentavos <= presupuestoHospedajeCentavos`. El importe comparado es exactamente el que se devuelve en `tarifa.importe` y `tarifa.importeCentavos`. No se añaden márgenes, comisiones ni suplementos.
+
+Ejemplo con datos **ficticios de prueba** (la tasa no es real):
+
+| Presupuesto diario | Límite de hospedaje | Precio referencial | Tasa ficticia | Importe convertido | Resultado |
+| --- | --- | --- | --- | --- | --- |
+| Q500.00 | Q200.00 | USD 24.00 | 7.65 | Q183.60 | Se admite |
+| Q500.00 | Q200.00 | USD 25.00 | 8 | Q200.00 | Se admite (igual al límite) |
+| Q499.99 | Q199.99 | USD 25.00 | 8 | Q200.00 | Se excluye (un centavo por encima) |
+| Q500.00 | Q200.00 | USD 25.00 | 8.0004 | Q200.01 | Se excluye (un centavo por encima) |
+
+### Consulta a SerpApi
+
+Cada búsqueda que no está en caché hace **una sola** petición `GET https://serpapi.com/search.json` (URL construida con `URL` y `URLSearchParams` en `src/hoteles/serpapi.ts`):
+
+| Parámetro | Valor |
+| --- | --- |
+| `engine` | `google_hotels` |
+| `q` | `hoteles en <destino>` |
+| `check_in_date` | `fecha` |
+| `check_out_date` | Día siguiente a `fecha` |
+| `adults` | `ocupacion` |
+| `children` | `0` |
+| `currency` | `USD` |
+| `hl` | `es` |
+| `api_key` | `SERPAPI_API_KEY` |
+
+- No se envían parámetros geográficos: el motor no documenta ninguno. El filtro por `radio` y el orden por cercanía se aplican en el backend con las coordenadas de las paradas.
+- Se consulta **solo la primera página**. Una página no representa todos los hoteles del destino: un hotel cercano y barato que SerpApi entregue en otra página no se recomienda. `busqueda.hayMasPaginas` indica si SerpApi informó `serpapi_pagination.next_page_token`; esas páginas no se consultan automáticamente.
+- Formas de respuesta admitidas: colección (`properties`), propiedad individual (los campos del hotel en la raíz, con `property_token`) y búsqueda legítima sin resultados (`search_metadata.status: "Success"` con un `error` y sin propiedades). Cualquier otra estructura responde `502 PROVEEDOR_RESPUESTA_INVALIDA`; nunca se presenta como una búsqueda vacía.
+- Los errores que SerpApi incluye en el JSON también se interpretan: una cuenta sin búsquedas disponibles o una clave rechazada se tratan igual que los estados HTTP `429` y `401`, y `search_metadata.status: "Error"` es un error del proveedor.
+- Tiempo de espera de 20 segundos (`TIEMPO_ESPERA_SERPAPI_MS`) que cubre también la lectura del cuerpo; al agotarse, la petición se cancela. Respuesta máxima de 5 MB (`MAX_BYTES_SERPAPI`).
+- No se envía `no_cache`: según la documentación de SerpApi, una búsqueda idéntica dentro de su propia caché de 1 hora se sirve sin descontarla de la cuota mensual.
+
+### Tipo de cambio: vigencia y fallos
+
+Se consulta `GET https://v6.exchangerate-api.com/v6/{EXCHANGERATE_API_KEY}/latest/USD` (`src/hoteles/tipoCambio.ts`). La respuesta se acepta solo si:
+
+- `result` es `"success"` y `base_code` es `"USD"`;
+- `conversion_rates.GTQ` es un número finito positivo (se usa `conversion_rates` del endpoint con clave, no `rates` de la modalidad abierta);
+- `time_last_update_unix` y `time_next_update_unix` son enteros positivos, la siguiente actualización es posterior a la última, la última no está en el futuro (con 5 minutos de tolerancia de reloj) y tiene menos de 36 horas.
+
+Los errores documentados en el JSON (`"result": "error"`) se traducen: `invalid-key` e `inactive-account` → credenciales rechazadas; `quota-reached` → cuota agotada; `unsupported-code` y `malformed-request` → error del proveedor.
+
+**Caché en memoria por instancia de la aplicación:**
+
+- La tasa se reutiliza hasta `time_next_update_unix` o, como máximo, hasta 36 horas después de `time_last_update_unix`, lo que ocurra primero. El vencimiento depende solo de las fechas de origen: leer la tasa de la caché no lo prolonga.
+- Las solicitudes concurrentes que necesitan renovar la tasa comparten **una única** consulta.
+- Si la tasa vencida no puede renovarse, la solicitud responde con el error correspondiente (`502`, `503` o `504`). **Nunca** se usa una tasa fija, una conversión 1:1 ni una tasa vencida. Los errores no se guardan en caché.
+- Si el proveedor ya superó su `time_next_update_unix` sin publicar una tasa nueva, la tasa recibida se usa en esa solicitud (si tiene menos de 36 horas), pero no queda vigente en caché y la siguiente solicitud vuelve a consultar.
+- `tipoCambio` en la respuesta informa la tasa, el proveedor, `actualizadoEn` (actualización de origen), `proximaActualizacion` y `consultadoEn` (cuándo la obtuvo el backend).
+- Tiempo de espera de 10 segundos (`TIEMPO_ESPERA_EXCHANGERATE_MS`) y respuesta máxima de 128 KB.
+
+### Cachés y consumo
+
+**Caché de búsquedas de SerpApi** (por instancia, en memoria):
+
+- Guarda solo búsquedas exitosas (también las legítimamente vacías), ya normalizadas: nunca el JSON completo del proveedor ni sus enlaces.
+- Vigencia de **15 minutos** desde el inicio de la consulta (`TTL_CACHE_BUSQUEDAS_MS`) y **100 entradas** como máximo (`MAX_ENTRADAS_CACHE_BUSQUEDAS`); al llenarse se descarta la menos usada recientemente.
+- La clave incluye todos los parámetros que cambian la consulta: motor, `q` (destino), fechas de entrada y salida, adultos, niños, moneda e idioma. No incluye `radio`, `paradas`, `presupuestoDiario` ni `limite`: el radio y el presupuesto se **reaplican** en cada solicitud sobre los resultados guardados.
+- Un resultado reutilizado conserva su fecha original de consulta (`busqueda.consultadoEn`) e indica `busqueda.desdeCache: true`.
+- Las búsquedas idénticas concurrentes comparten una única petición.
+
+**Consumo por solicitud:**
+
+| Caso | SerpApi | ExchangeRate-API |
+| --- | --- | --- |
+| `400`, salidas tempranas o claves ausentes | 0 | 0 |
+| Búsqueda en caché | 0 | 0 o 1 según la vigencia de la tasa |
+| Búsqueda nueva sin hoteles utilizables dentro del radio | 1 | 0 |
+| Búsqueda nueva con candidatos | 1 | 0 o 1 según la vigencia de la tasa |
+
+No hay reintentos automáticos, renovación de planes ni consultas masivas de detalles. Las cachés viven en la memoria de cada proceso: no se comparten entre varias instancias del servidor y se pierden al reiniciarlo, así que **no garantizan el cumplimiento de una cuota global**. No se usa Redis, tablas adicionales ni tareas programadas.
+
+**Centro del día.** Cada parada se convierte en un vector unitario en 3D (latitud y longitud sobre la esfera), se promedian los vectores y el resultado se vuelve a convertir en latitud y longitud. A diferencia de promediar grados, este método funciona junto al antimeridiano: el centro de `179.9` y `-179.9` es `180`, no `0`. Si las paradas se anulan entre sí (puntos opuestos del globo), el centro no está definido y la solicitud se rechaza con `400`.
+
+**Distancia.** `distanciaLineaRectaMetros` es la distancia en línea recta sobre la esfera terrestre (fórmula de Haversine, radio de 6 371 km) entre el centro del día y el hotel, redondeada al metro solo al devolverla; el filtro de radio y el orden usan la distancia sin redondear. **No es una distancia por carretera ni un tiempo de traslado.**
+
+### Límites
+
+| Límite | Valor | Constante |
+| --- | --- | --- |
+| Páginas de SerpApi por búsqueda | 1 | — |
+| Recomendaciones devueltas | `limite` (1 a 20, por defecto 10) | `LIMITE_MAXIMO` en `src/validacion/hoteles.ts` |
+| Radio | 1 a 50000 m, por defecto 5000 | `RADIO_MAXIMO` |
+| Paradas por día | 25 | `MAX_PARADAS_DIA` |
+| Adultos | 1 a 10 | `MAX_ADULTOS` |
+| Destino | 2 a 100 caracteres | `MAX_LARGO_DESTINO` |
+| Presupuesto diario | Hasta Q1 000 000 | `MAX_PRESUPUESTO_DIARIO` |
+| Cuerpo de la solicitud | 32 KB | `LIMITE_CUERPO` en `src/routes/hoteles.ts` |
+
+### Respuesta (200)
+
+Ejemplo ilustrativo del formato con datos **ficticios** (el hotel, el identificador, los precios y la tasa no son reales):
+
+```json
+{
+  "fecha": "2026-11-20",
+  "destino": "Antigua Guatemala",
+  "moneda": "GTQ",
+  "ocupacion": 2,
+  "estancia": { "entrada": "2026-11-20", "salida": "2026-11-21", "noches": 1, "adultos": 2, "ninos": 0 },
+  "presupuestoDiario": 500,
+  "presupuestoDiarioCentavos": 50000,
+  "porcentajeHospedaje": 40,
+  "presupuestoHospedaje": 200,
+  "presupuestoHospedajeCentavos": 20000,
+  "centro": { "lat": 14.5574001, "lng": -90.7317002 },
+  "metodoDistancia": "linea_recta",
+  "busqueda": {
+    "proveedor": "serpapi",
+    "motor": "google_hotels",
+    "consulta": "hoteles en Antigua Guatemala",
+    "monedaProveedor": "USD",
+    "consultadoEn": "2026-11-10T16:05:12.345Z",
+    "desdeCache": false,
+    "radioMetros": 5000,
+    "resultadosRecibidos": 20,
+    "hotelesConPrecio": 18,
+    "hotelesEnRadio": 15,
+    "hayMasPaginas": true
+  },
+  "tipoCambio": {
+    "proveedor": "exchangerate-api",
+    "base": "USD",
+    "destino": "GTQ",
+    "tasa": 7.65,
+    "actualizadoEn": "2026-11-10T00:00:01.000Z",
+    "proximaActualizacion": "2026-11-11T00:00:01.000Z",
+    "consultadoEn": "2026-11-10T16:05:13.010Z"
+  },
+  "hoteles": [
+    {
+      "idExterno": "ChcIficticio...",
+      "proveedor": "serpapi",
+      "nombre": "Hotel de ejemplo",
+      "lat": 14.5581,
+      "lng": -90.7322,
+      "distanciaLineaRectaMetros": 95,
+      "tarifa": {
+        "referencial": true,
+        "importeUsd": 24,
+        "importeUsdCentavos": 2400,
+        "importe": 183.6,
+        "importeCentavos": 18360,
+        "moneda": "GTQ",
+        "unidad": "habitacion_noche",
+        "noches": 1,
+        "campo": "total_rate",
+        "fuente": { "tipo": "resumen_propiedad" },
+        "impuestos": { "estado": "informado", "importeAntesImpuestosUsd": 21, "impuestosYCargosUsd": 3 }
+      }
+    }
+  ],
+  "motivo": null,
+  "mensaje": null
+}
+```
+
+| Campo | Significado |
+| --- | --- |
+| `estancia` | Fechas y ocupación consultadas: una noche, adultos y `ninos: 0` |
+| `presupuestoDiario`, `presupuestoHospedaje` | En quetzales; los campos `...Centavos` son los valores exactos usados en la comparación |
+| `centro` | Centro usado para filtrar y medir, redondeado a 7 decimales; `null` si no se calculó |
+| `busqueda` | Consulta hecha a SerpApi, cuándo se hizo (`consultadoEn`, que se conserva si viene de caché), si viene de caché, cuántos resultados llegaron, cuántos son hoteles con precio utilizable, cuántos quedan dentro del radio y si SerpApi informó más páginas; `null` si no se consultó |
+| `tipoCambio` | Tasa usada, proveedor, fecha de actualización de origen, próxima actualización y cuándo la obtuvo el backend; `null` si no fue necesaria |
+| `hoteles[].tarifa` | Precio referencial en USD y convertido a GTQ (también en centavos), `referencial: true`, campo y fuente de la que se tomó el precio y tratamiento de impuestos |
+| `hoteles` | Recomendaciones ordenadas de la más cercana a la más lejana |
+| `motivo`, `mensaje` | `null` si hay recomendaciones; si la lista está vacía, el motivo explícito |
+
+La respuesta no incluye el JSON del proveedor, enlaces de SerpApi (`serpapi_property_details_link`, `serpapi_pagination.next`) ni URLs con claves.
+
+### Respuestas vacías
+
+Todas responden `200` con `hoteles: []`:
+
+| `motivo` | Cuándo | SerpApi | ExchangeRate-API |
+| --- | --- | --- | --- |
+| `hospedaje_reservado` | `hospedaje: true` (prevalece sobre `sinHotel`) | No | No |
+| `no_necesita_hotel` | `sinHotel: true` | No | No |
+| `itinerario_sin_paradas` | `paradas` vacía; `centro` es `null` | No | No |
+| `sin_hoteles_encontrados` | La búsqueda fue exitosa pero no devolvió resultados | Sí (o caché) | No |
+| `sin_hoteles_con_precio` | Llegaron resultados, pero ninguno es un hotel con identificador, nombre, coordenadas y precio utilizables | Sí (o caché) | No |
+| `sin_hoteles_en_radio` | Hay hoteles con precio, pero ninguno dentro de `radio` | Sí (o caché) | No |
+| `sin_hoteles_en_presupuesto` | Hay hoteles dentro del radio, pero ninguno con importe convertido dentro del presupuesto de hospedaje | Sí (o caché) | Sí (o caché) |
+
+```json
+{ "fecha": "2026-11-20", "destino": "Antigua Guatemala", "moneda": "GTQ", "ocupacion": 2, "estancia": { "entrada": "2026-11-20", "salida": "2026-11-21", "noches": 1, "adultos": 2, "ninos": 0 }, "presupuestoDiario": 500, "presupuestoDiarioCentavos": 50000, "porcentajeHospedaje": 40, "presupuestoHospedaje": 200, "presupuestoHospedajeCentavos": 20000, "centro": null, "metodoDistancia": "linea_recta", "busqueda": null, "tipoCambio": null, "hoteles": [], "motivo": "hospedaje_reservado", "mensaje": "El usuario ya tiene hospedaje reservado; no se generan recomendaciones de hoteles." }
+```
+
+### Errores
+
+Usan el formato común `{ "error": { "codigo", "mensaje", "detalles"? } }`. El mensaje indica qué proveedor falló (SerpApi o ExchangeRate-API) y nunca incluye claves, URLs autenticadas ni el cuerpo de error del proveedor.
+
+| HTTP | Código | Situación |
+| --- | --- | --- |
+| 400 | `PARAMETRO_INVALIDO` | JSON mal formado o de más de 32 KB, campos ausentes, de otro tipo, no finitos o fuera de rango (incluye `detalles` por campo) |
+| 503 | `SERVICIO_NO_CONFIGURADO` | Falta `SERPAPI_API_KEY` o `EXCHANGERATE_API_KEY` y la solicitud necesita consultar hoteles |
+| 502 | `PROVEEDOR_CREDENCIALES_INVALIDAS` | El proveedor rechazó la clave del servidor (SerpApi `401`/`403` o mensaje de clave inválida; ExchangeRate-API `invalid-key` o `inactive-account`). Es un problema de configuración del servidor, **no** de la sesión del usuario |
+| 503 | `PROVEEDOR_LIMITE_SOLICITUDES` | Cuota agotada o límite de solicitudes (SerpApi `429` o «run out of searches»; ExchangeRate-API `quota-reached` o `429`) |
+| 502 | `PROVEEDOR_NO_DISPONIBLE` | Fallo de red al conectar o al leer la respuesta |
+| 502 | `PROVEEDOR_RESPUESTA_INVALIDA` | Respuesta que no es JSON, demasiado grande, con estructura inesperada, sin tasa GTQ válida, con fechas incoherentes o con una tasa de más de 36 horas |
+| 502 | `PROVEEDOR_ERROR` | Otro estado HTTP de error o `search_metadata.status: "Error"` |
+| 504 | `PROVEEDOR_TIEMPO_AGOTADO` | Se agotó el tiempo de espera; la petición se cancela |
+
+Un fallo de un proveedor nunca se presenta como una búsqueda sin resultados ni se sustituye por una tasa fija.
+
+### Cambios respecto a la implementación anterior
+
+La versión anterior de GUI-61 buscaba hoteles en Geoapify (`accommodation.hotel`) y los relacionaba por `place_id` con tarifas cargadas manualmente en `backend/data/tarifas-hoteles.json`, seleccionadas por vigencia y verificación manual. Ese enfoque se **sustituyó por completo**; no hay dos implementaciones activas ni un segundo endpoint.
+
+| Antes | Ahora |
+| --- | --- |
+| Hoteles de Geoapify Places | Hoteles de SerpApi Google Hotels (una página) |
+| Tarifas manuales en GTQ del catálogo JSON, por vigencia | Precio referencial estructurado de Google Hotels en USD, convertido a GTQ con ExchangeRate-API |
+| `impuestosIncluidos: true` obligatorio | `impuestos.estado` `informado` o `no_informado` |
+| `verificadoEn`, `vigencia` y fuente manual | `busqueda.consultadoEn`, `tarifa.campo` y `tarifa.fuente` del proveedor |
+| Radio aplicado por Geoapify | Radio y cercanía aplicados en el backend |
+| Sin caché | Caché de búsquedas (15 min, 100 entradas) y de la tasa (hasta la siguiente actualización, máximo 36 h) |
+| Motivos `catalogo_vacio`, `sin_tarifas_aplicables`, `sin_hoteles_elegibles` | Motivos `sin_hoteles_con_precio`, `sin_hoteles_en_radio`, `sin_hoteles_en_presupuesto` |
+
+Archivos retirados: `backend/data/tarifas-hoteles.json` y `backend/src/hoteles/catalogo.ts` (no tenían otros consumidores). Se conservan y reutilizan `src/hoteles/geografia.ts` (centro y distancia), el cálculo en centavos y la regla del 40 % de `src/hoteles/tarifas.ts`, la validación de `src/validacion/hoteles.ts` y sus pruebas. El cliente, la clave y las categorías de Geoapify siguen igual para las demás rutas.
+
+### Ejemplos en PowerShell
+
+Con el servidor iniciado (`npm run dev` o `npm start`) desde `backend/`. El cuerpo se envía como bytes UTF-8 para que los acentos del destino lleguen bien también en Windows PowerShell 5.1.
+
+**Salida temprana, sin consumo** (no llama a ningún proveedor ni necesita sus claves):
+
+```powershell
+$base = @{
+  fecha = "2026-11-20"
+  destino = "Antigua Guatemala"
+  paradas = @(
+    @{ lat = 14.5586; lng = -90.7295 },
+    @{ lat = 14.5562; lng = -90.7339 }
+  )
+  presupuestoDiario = 500
+  moneda = "GTQ"
+  ocupacion = 2
+  hospedaje = $true
+}
+$cuerpo = [System.Text.Encoding]::UTF8.GetBytes(($base | ConvertTo-Json -Depth 4))
+$r = Invoke-RestMethod -Method Post -Uri "http://localhost:3000/api/hoteles/recomendaciones" -ContentType "application/json; charset=utf-8" -Body $cuerpo
+"motivo: $($r.motivo)  salida: $($r.estancia.salida)  límite de hospedaje: Q$($r.presupuestoHospedaje)"
+```
+
+**Consulta integrada** (consume 1 búsqueda de SerpApi si no está en caché y, como máximo, 1 solicitud de ExchangeRate-API si la tasa no está vigente). Usa una fecha futura:
+
+```powershell
+$base.hospedaje = $false
+$base.limite = 5
+$cuerpo = [System.Text.Encoding]::UTF8.GetBytes(($base | ConvertTo-Json -Depth 4))
+$r = Invoke-RestMethod -Method Post -Uri "http://localhost:3000/api/hoteles/recomendaciones" -ContentType "application/json; charset=utf-8" -Body $cuerpo
+"motivo: $($r.motivo)  límite: Q$($r.presupuestoHospedaje)  tasa: $($r.tipoCambio.tasa) (actualizada $($r.tipoCambio.actualizadoEn))"
+"resultados: $($r.busqueda.resultadosRecibidos)  con precio: $($r.busqueda.hotelesConPrecio)  en radio: $($r.busqueda.hotelesEnRadio)  más páginas: $($r.busqueda.hayMasPaginas)  desde caché: $($r.busqueda.desdeCache)"
+$r.hoteles | Format-Table nombre, distanciaLineaRectaMetros, @{ n = "USD"; e = { $_.tarifa.importeUsd } }, @{ n = "GTQ"; e = { $_.tarifa.importe } }, @{ n = "campo"; e = { $_.tarifa.campo } }, @{ n = "impuestos"; e = { $_.tarifa.impuestos.estado } } -Wrap
+```
+
+Repetir la misma consulta antes de 15 minutos debe mostrar `desde caché: True` con el mismo `consultadoEn` y sin consumir otra búsqueda.
+
+**Comprobación directa de ExchangeRate-API** sin imprimir la clave (consume 1 solicitud de la cuota):
+
+```powershell
+$clave = (Select-String -Path .env -Pattern '^EXCHANGERATE_API_KEY=(.+)$').Matches[0].Groups[1].Value.Trim()
+$t = Invoke-RestMethod -Uri "https://v6.exchangerate-api.com/v6/$clave/latest/USD"
+Remove-Variable clave
+"result: $($t.result)  base: $($t.base_code)  GTQ: $($t.conversion_rates.GTQ)  actualizada: $($t.time_last_update_utc)  siguiente: $($t.time_next_update_utc)"
+```
+
+Para ver el cuerpo de un error (`400`, `502`, `503` o `504`), usa `try { ... } catch { $_.ErrorDetails.Message }`.
+
+### Limitaciones
+
+- **Precio referencial.** Puede estar redondeado, cambiar después de la consulta o diferir del cargo final. No hay disponibilidad, reservas ni pagos.
+- **Una página de resultados.** No representa todos los hoteles del destino; `hayMasPaginas` informa si había más, pero no se consultan.
+- **Solo una noche, una habitación, adultos y GTQ.** Sin menores, combinaciones de habitaciones ni estancias de varias noches.
+- **`destino` lo aporta el cliente.** Si no coincide con la zona de las paradas, la búsqueda puede devolver hoteles fuera del radio (`sin_hoteles_en_radio`).
+- **Impuestos.** Cuando SerpApi no los desglosa, se informa `no_informado`; el backend no puede determinar si están incluidos.
+- **Cachés por proceso.** No se comparten entre instancias, se pierden al reiniciar y no garantizan una cuota global.
+- La cercanía es en línea recta respecto al centro de las paradas del día, no por carretera.
+- El frontend sigue mostrando sus propias recomendaciones de ejemplo y no llama a este endpoint.
+
+### Verificaciones con servicios reales pendientes
+
+Las pruebas automáticas simulan ambos proveedores y no usan claves reales ni consumen cuotas.
+
+- **SerpApi:** una prueba manual previa, fuera de este endpoint, mostró un hotel de Guatemala con precio total e importe antes de impuestos diferenciados. Eso **no** valida el endpoint integrado: falta ejecutar la consulta integrada de arriba con una clave real y revisar la normalización, el radio, el orden y `hayMasPaginas` con datos reales.
+- **ExchangeRate-API:** la consulta real sigue **pendiente**. Falta comprobar con una clave real que la respuesta tenga `result: "success"`, `base_code: "USD"`, `conversion_rates.GTQ` y las fechas Unix esperadas, y que el endpoint la acepte.
+- Falta comprobar con claves reales los errores de clave inválida y de cuota agotada de ambos proveedores (solo se probaron con respuestas simuladas según su documentación).

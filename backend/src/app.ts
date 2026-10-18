@@ -10,6 +10,10 @@ import { crearPriorizadorClima } from "./ai/prioridadClima";
 import { crearClienteOpenWeather } from "./openweather/cliente";
 import { crearServicioClima } from "./clima/servicio";
 import { crearRutaPronosticoClima } from "./routes/pronosticoClima";
+import { crearRecomendadorHoteles } from "./hoteles/recomendaciones";
+import { crearBuscadorHoteles } from "./hoteles/serpapi";
+import { crearObtenedorTipoCambio } from "./hoteles/tipoCambio";
+import { crearRutaHoteles } from "./routes/hoteles";
 import authPlugin from "./plugins/auth.plugin";
 import authRoutes from "./routes/auth.routes";
 import { manejarErrores } from "./errores";
@@ -35,6 +39,14 @@ export interface OpcionesApp {
     tiempoEsperaMs?: number;
     ahora?: () => Date;
   };
+  hoteles?: {
+    serpApiKey?: string;
+    exchangeRateApiKey?: string;
+    fetch?: FuncionFetch;
+    tiempoEsperaMs?: number;
+    tiempoEsperaTipoCambioMs?: number;
+    ahora?: () => Date;
+  };
   chat?: {
     cliente?: ClienteChat;
   };
@@ -46,6 +58,7 @@ export function crearApp({
   tiempoEsperaMs,
   detalles = {},
   clima = {},
+  hoteles = {},
   chat = {},
 }: OpcionesApp = {}): FastifyInstance {
   // Igual que con Express: rutas sin distinguir mayúsculas y con o sin barra final.
@@ -54,6 +67,7 @@ export function crearApp({
     routerOptions: { ignoreTrailingSlash: true, caseSensitive: false },
     frameworkErrors: manejarErrores,
   });
+  app.setErrorHandler(manejarErrores);
   app.register(authPlugin);
   app.register(authRoutes, { prefix: "/api/auth" });
   
@@ -85,6 +99,23 @@ export function crearApp({
   app.register(rutaEta, { prefix: "/api/itinerarios" });
 
   app.register(crearRutaPronosticoClima(consultarClima), { prefix: "/api/clima/pronostico" });
+
+  const ahoraHoteles = hoteles.ahora ?? (() => new Date());
+  const recomendarHoteles = crearRecomendadorHoteles({
+    buscador: crearBuscadorHoteles({
+      apiKey: hoteles.serpApiKey === undefined ? process.env.SERPAPI_API_KEY : hoteles.serpApiKey,
+      fetch: hoteles.fetch ?? fetch,
+      tiempoEsperaMs: hoteles.tiempoEsperaMs,
+      ahora: ahoraHoteles,
+    }),
+    tipoCambio: crearObtenedorTipoCambio({
+      apiKey: hoteles.exchangeRateApiKey === undefined ? process.env.EXCHANGERATE_API_KEY : hoteles.exchangeRateApiKey,
+      fetch: hoteles.fetch ?? fetch,
+      tiempoEsperaMs: hoteles.tiempoEsperaTipoCambioMs ?? hoteles.tiempoEsperaMs,
+      ahora: ahoraHoteles,
+    }),
+  });
+  app.register(crearRutaHoteles(recomendarHoteles, ahoraHoteles), { prefix: "/api/hoteles" });
 
   app.setNotFoundHandler((req, reply) => {
     reply.code(404).send({
