@@ -4,6 +4,7 @@ import { crearClienteDetalles } from "./geoapify/detalles";
 import { crearEnriquecedorHorarios, crearResolvedorLugares } from "./geoapify/enriquecer";
 import { crearRutaLugares } from "./routes/lugares";
 import { crearRutaItinerarios } from "./routes/itinerarios";
+import { crearRutaReoptimizacion } from "./routes/reoptimizacion";
 import { crearValidadorPropuestas } from "./ai/propuesta";
 import { crearPriorizadorClima } from "./ai/prioridadClima";
 import { crearClienteOpenWeather } from "./openweather/cliente";
@@ -77,7 +78,11 @@ export function crearApp({
   const validarPropuesta = crearValidadorPropuestas({ resolverLugares });
   const priorizarPorClima = crearPriorizadorClima({ resolverLugares, consultarClima });
   app.register(crearRutaItinerarios(validarPropuesta, priorizarPorClima), { prefix: "/api/itinerarios" });
+<<<<<<< HEAD
+  app.register(crearRutaReoptimizacion(), { prefix: "/api/itinerarios" });
+=======
   app.register(rutaEta, { prefix: "/api/itinerarios" });
+>>>>>>> origin/main
 
   app.register(crearRutaPronosticoClima(consultarClima), { prefix: "/api/clima/pronostico" });
 

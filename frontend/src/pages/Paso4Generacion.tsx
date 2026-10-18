@@ -11,7 +11,8 @@ import PanelPresupuesto from "../components/PanelPresupuesto";
 import { generarGastosSimulados } from "../services/gastos";
 import CalificacionParada, { ResumenCalificacion } from "../components/CalificacionParada";
 import type { RespuestaClima } from "../../../shared/types";
-import { consultarPronostico, coordenadasDelViaje } from "../services/clima";
+import { consultarPronostico, coordenadasDelViaje, hayLluviaSignificativa } from "../services/clima";
+import { reoptimizarRuta, type TipoEventoRuta } from "../services/reoptimizacion";
 
 import {
   generarItinerario,
@@ -139,6 +140,10 @@ export default function Paso4Generacion() {
 
   const [pronostico, setPronostico] = useState<RespuestaClima | null>(null);
   const [estadoPronostico, setEstadoPronostico] = useState<EstadoPronostico>("cargando");
+  const [reoptimizando, setReoptimizando] = useState(false);
+  const [avisoReoptimizacion, setAvisoReoptimizacion] = useState("");
+  const [paradasVisitadas, setParadasVisitadas] = useState<Record<string, string[]>>({});
+  const diasClimaAplicados = useRef(new Set<string>());
 
   const [codigo] = useState(() =>
     Math.random().toString(36).slice(2, 8).toUpperCase()
@@ -154,6 +159,41 @@ export default function Paso4Generacion() {
       : 500);
   const dias = diasDeViaje(viaje.fechaInicio, viaje.fechaFin);
   const enlace = `https://guiaturistica.example/votar/${codigo}`;
+
+  async function solicitarReoptimizacion(tipo: TipoEventoRuta, paradaCanceladaId?: string, probabilidadLluvia?: number) {
+    const diaSolicitado = itinerarios?.[diaActivo];
+    if (!diaSolicitado || reoptimizando) return;
+    const visitadas = new Set(paradasVisitadas[diaSolicitado.id] ?? []);
+    const paradasPendientes = diaSolicitado.paradas.filter((p) =>
+      !visitadas.has(p.id) && (p as ParadaConHorario).estadoHorario !== "descartada"
+    );
+    if (paradasPendientes.length === 0) {
+      setAvisoReoptimizacion("No hay paradas pendientes para recalcular.");
+      return;
+    }
+    setReoptimizando(true);
+    setAvisoReoptimizacion("Recalculando el orden de las paradas…");
+    try {
+      const paradasReoptimizadas = await reoptimizarRuta({
+        tipo,
+        paradas: paradasPendientes,
+        paradaCanceladaId,
+        probabilidadLluvia,
+      });
+      const paradas = [
+        ...diaSolicitado.paradas.filter((p) => visitadas.has(p.id)),
+        ...paradasReoptimizadas,
+      ];
+      setItinerarios((actuales) => actuales?.map((it) =>
+        it.id === diaSolicitado.id ? { ...it, paradas } : it
+      ) ?? null);
+      setAvisoReoptimizacion("El plan se actualizó con el nuevo orden de paradas.");
+    } catch (err) {
+      setAvisoReoptimizacion(err instanceof Error ? err.message : "No se pudo actualizar la ruta.");
+    } finally {
+      setReoptimizando(false);
+    }
+  }
 
   // Generar itinerario
   useEffect(() => {
@@ -254,6 +294,13 @@ export default function Paso4Generacion() {
     });
   }
 
+  function marcarVisitada(diaId: string, paradaId: string) {
+    setParadasVisitadas((actuales) => ({
+      ...actuales,
+      [diaId]: [...new Set([...(actuales[diaId] ?? []), paradaId])],
+    }));
+  }
+
   // Copiar enlace
   async function copiar() {
     try {
@@ -270,6 +317,17 @@ export default function Paso4Generacion() {
   // Datos del día activo
   const dia = itinerarios?.[diaActivo];
 
+<<<<<<< HEAD
+  useEffect(() => {
+    if (!dia || reoptimizando || estadoPronostico !== "listo") return;
+    const climaDia = pronostico?.dias.find((d) => d.fecha === dia.fecha);
+    if (!climaDia || !hayLluviaSignificativa(climaDia)) return;
+    const clave = `${dia.id}:${dia.fecha}`;
+    if (diasClimaAplicados.current.has(clave)) return;
+    diasClimaAplicados.current.add(clave);
+    void solicitarReoptimizacion("clima", undefined, 100);
+  }, [dia, estadoPronostico, pronostico, reoptimizando]);
+=======
   // GUI-89: tomar el tiempo real del itinerario cuando existe.
   // Si no viene informado, reutilizar la misma estimación visual de GUI-34.
   const tiempoTrasladoActual = dia?.paradas.length && dia.paradas.length > 1
@@ -277,6 +335,7 @@ export default function Paso4Generacion() {
     : null;
   const trasladoDisponible = tiempoTrasladoActual !== null;
   const trasladoEstimado = tiempoTrasladoActual?.estimado ?? false;
+>>>>>>> origin/main
 
   const lugares = useMemo(
     () =>
@@ -405,6 +464,12 @@ export default function Paso4Generacion() {
         <>
           <h2>Tu itinerario para {viaje.destino}</h2>
 
+          {avisoReoptimizacion && (
+            <p className={reoptimizando || avisoReoptimizacion.startsWith("El plan") ? "aviso-plan-actualizado" : "aviso-error"} role="status" aria-live="polite">
+              {reoptimizando ? "Actualizando el plan…" : avisoReoptimizacion}
+            </p>
+          )}
+
           <ul className="datos">
             <li className="dato">
               {dias} {dias === 1 ? "día" : "días"}
@@ -469,6 +534,12 @@ export default function Paso4Generacion() {
               dia={pronostico?.dias.find((d) => d.fecha === dia.fecha)}
             />
           </section>
+          <div className="acciones-ruta">
+            <button type="button" className="btn-secundario" disabled={reoptimizando || dia.paradas.length === 0}
+              onClick={() => void solicitarReoptimizacion("retraso")}>
+              {reoptimizando ? "Actualizando ruta…" : "Reportar retraso y recalcular"}
+            </button>
+          </div>
 
           {/* Presupuesto del día */}
           <PanelPresupuesto
@@ -563,6 +634,7 @@ export default function Paso4Generacion() {
               const alerta = alertasHorario[i];
               const descartada =
                 paradaHorario.estadoHorario === "descartada";
+              const visitada = paradasVisitadas[dia.id]?.includes(p.id) ?? false;
 
               return (
                 <div key={p.id || i}>
@@ -595,6 +667,20 @@ export default function Paso4Generacion() {
                         Estancia{" "}
                         {p.tiempoEstanciaMinutos} min
                       </p>
+
+                      {!descartada && !visitada && (
+                        <button type="button" className="accion-parada" onClick={() => marcarVisitada(dia.id, p.id)}>
+                          Marcar como visitada
+                        </button>
+                      )}
+
+                      {!descartada && !visitada && (
+                        <button type="button" className="accion-parada" disabled={reoptimizando}
+                          onClick={() => void solicitarReoptimizacion("parada_cancelada", p.id)}>
+                          Cancelar parada y recalcular
+                        </button>
+                      )}
+                      {visitada && <p className="estado-parada-visitada">Visita completada</p>}
 
                       {/* GUI-38: alerta de horario */}
                       {alerta && (

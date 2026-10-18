@@ -56,6 +56,7 @@ body {
 /* Mapa de Mapbox con las paradas del día activo (dentro del Paso 4) */
 .mapa-dia { margin-top: 1rem; overflow: hidden; border: 1px solid var(--linea); border-radius: 14px; background: var(--arena); }
 .mapa { width: 100%; height: 280px; }
+.marcador-parada { display: grid; width: 2rem; height: 2rem; place-items: center; border: 2px solid #fff; border-radius: 50%; background: #c04a2a; box-shadow: 0 2px 7px rgba(0, 0, 0, .35); color: #fff; font: 700 .9rem/1 var(--font-ui); }
 @media (min-width: 640px) { .mapa { height: 360px; } }
 .contenedor { width: min(560px, calc(100% - 2rem)); margin-inline: auto; padding-block: 1.6rem 3rem; }
 
@@ -230,6 +231,8 @@ pre { margin: 0 0 1rem; padding: .8rem; overflow: auto; font-size: .85rem; color
   background: var(--arena);
   color: var(--suave);
 }
+<<<<<<< HEAD
+=======
 /* Chat flotante en ruta */
 .solo-lectores { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .chat { position: fixed; right: max(1rem, env(safe-area-inset-right, 0px)); bottom: max(1rem, env(safe-area-inset-bottom, 0px)); z-index: 20; display: flex; flex-direction: column; align-items: flex-end; gap: .7rem; }
@@ -463,3 +466,4 @@ input[type="email"], input[type="password"] {
   font-weight: 700;
   color: var(--ciruela);
 }
+>>>>>>> origin/main
