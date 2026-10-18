@@ -12,12 +12,12 @@ const errorCuerpoInvalido: ErrorRequestHandler = (err, req, res, next) => {
   return next(err);
 };
 
-export function crearRutaHoteles(recomendarHoteles: RecomendarHoteles): Router {
+export function crearRutaHoteles(recomendarHoteles: RecomendarHoteles, ahora: () => Date = () => new Date()): Router {
   const router = express.Router();
   const leerJson = express.json({ limit: LIMITE_CUERPO, strict: true });
 
   router.post("/recomendaciones", leerJson, errorCuerpoInvalido, async (req: Request, res: Response) => {
-    const solicitud = validarSolicitudHoteles(req.body);
+    const solicitud = validarSolicitudHoteles(req.body, ahora());
     res.json(await recomendarHoteles(solicitud));
   });
 

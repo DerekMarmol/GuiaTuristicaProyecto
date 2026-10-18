@@ -1,50 +1,9 @@
-import { test, describe, mock, beforeEach, afterEach } from "node:test";
+import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { ErrorApi } from "../src/errores";
-import { RUTA_CATALOGO_TARIFAS, crearLectorCatalogo, validarCatalogo, type TarifaHotel } from "../src/hoteles/catalogo";
 import { calcularCentro, distanciaMetros } from "../src/hoteles/geografia";
-import { deduplicarLugares, ordenarPorCercania } from "../src/hoteles/recomendaciones";
-import { aCentavos, calcularPresupuestoHospedajeCentavos, seleccionarTarifas, tarifaAplica } from "../src/hoteles/tarifas";
-import type { Lugar } from "../src/geoapify/transformar";
-
-function tarifa(cambios: Partial<TarifaHotel> = {}): TarifaHotel {
-  return {
-    id: "tarifa-ficticia-1",
-    idExterno: "hotel-ficticio-1",
-    importeCentavos: 20000,
-    moneda: "GTQ",
-    unidad: "habitacion_noche",
-    ocupacion: 2,
-    importeTotal: true,
-    impuestosIncluidos: true,
-    vigenciaDesde: "2026-10-01",
-    vigenciaHasta: "2026-10-31",
-    verificadoEn: "2026-09-30",
-    fuente: { tipo: "cotizacion", referencia: "Cotización ficticia de prueba" },
-    ...cambios,
-  };
-}
-
-function lugar(idExterno: string, lat = 14.6, lng = -90.5): Lugar {
-  return {
-    idExterno,
-    proveedor: "geoapify",
-    nombre: `Hotel ${idExterno}`,
-    direccion: null,
-    lat,
-    lng,
-    categorias: ["accommodation", "accommodation.hotel"],
-    tipo_entorno: "indoor",
-    sensibilidad_clima: "baja",
-    regla_clima: "accommodation",
-  };
-}
-
-const CONDICIONES = { fecha: "2026-10-14", moneda: "GTQ", ocupacion: 2, presupuestoHospedajeCentavos: 20000 };
+import { esFechaPasadaEnTodasLasZonas, fechaSalida } from "../src/hoteles/estancia";
+import { deduplicarPorId, ordenarPorCercania } from "../src/hoteles/recomendaciones";
+import { aCentavos, calcularPresupuestoHospedajeCentavos, convertirCentavos, seleccionarPrecio } from "../src/hoteles/tarifas";
 
 describe("calcularCentro", () => {
   test("devuelve null sin paradas en lugar de inventar (0, 0)", () => {
@@ -118,7 +77,7 @@ describe("distanciaMetros", () => {
 });
 
 describe("presupuesto de hospedaje", () => {
-  test("convierte quetzales con hasta dos decimales a centavos exactos", () => {
+  test("convierte importes con hasta dos decimales a centavos exactos", () => {
     assert.equal(aCentavos(500), 50000);
     assert.equal(aCentavos(0.29), 29);
     assert.equal(aCentavos(0.1 + 0.2), 30);
@@ -139,185 +98,229 @@ describe("presupuesto de hospedaje", () => {
     assert.equal(calcularPresupuestoHospedajeCentavos(12346), 4938);
     assert.equal(calcularPresupuestoHospedajeCentavos(12347), 4938);
     assert.equal(calcularPresupuestoHospedajeCentavos(50002), 20000);
+    assert.equal(calcularPresupuestoHospedajeCentavos(49999), 19999);
     assert.equal(calcularPresupuestoHospedajeCentavos(100_000_000), 40_000_000);
   });
 });
 
-describe("seleccionarTarifas", () => {
-  test("admite una tarifa exactamente igual al presupuesto y excluye un centavo por encima", () => {
-    const igual = seleccionarTarifas([tarifa({ importeCentavos: 20000 })], CONDICIONES);
-    assert.equal(igual.get("hotel-ficticio-1")?.importeCentavos, 20000);
-    const encima = seleccionarTarifas([tarifa({ importeCentavos: 20001 })], CONDICIONES);
-    assert.equal(encima.size, 0);
+describe("convertirCentavos (USD a GTQ)", () => {
+  test("fixture de prueba: USD 24 con tasa ficticia 7.65 da Q183.60 y cabe en Q200", () => {
+    const quetzales = convertirCentavos(2400, 7.65);
+    assert.equal(quetzales, 18360);
+    assert.ok(quetzales !== null && quetzales <= calcularPresupuestoHospedajeCentavos(50000));
   });
 
-  test("excluye tarifas no vigentes, de otra moneda, de otra ocupación, sin impuestos confirmados o no totales", () => {
-    const casos: [string, Partial<TarifaHotel>][] = [
-      ["vigencia termina antes", { vigenciaHasta: "2026-10-13" }],
-      ["vigencia empieza después", { vigenciaDesde: "2026-10-15" }],
-      ["otra moneda", { moneda: "USD" }],
-      ["ocupación menor", { ocupacion: 1 }],
-      ["ocupación mayor", { ocupacion: 3 }],
-      ["impuestos desconocidos", { impuestosIncluidos: null }],
-      ["impuestos no incluidos", { impuestosIncluidos: false }],
-      ["importe no total", { importeTotal: false }],
+  test("redondea una sola vez al centavo más cercano y las mitades exactas hacia arriba", () => {
+    assert.equal(convertirCentavos(1, 0.5), 1);
+    assert.equal(convertirCentavos(1, 0.49), 0);
+    assert.equal(convertirCentavos(3, 0.5), 2);
+    assert.equal(convertirCentavos(2449, 7.7531), 18987);
+    assert.equal(convertirCentavos(100, 7.123456789), 712);
+    assert.equal(convertirCentavos(1, 7.125), 7);
+    assert.equal(convertirCentavos(2, 7.125), 14);
+    assert.equal(convertirCentavos(10, 7.125), 71);
+    assert.equal(convertirCentavos(20, 7.125), 143);
+  });
+
+  test("usa la tasa completa sin redondearla antes a dos decimales", () => {
+    assert.equal(convertirCentavos(100_000, 7.6549), 765490);
+    assert.notEqual(convertirCentavos(100_000, 7.6549), convertirCentavos(100_000, 7.65));
+  });
+
+  test("opera en decimal exacto, sin errores de coma flotante", () => {
+    assert.equal(convertirCentavos(1000, 0.1 + 0.2), 300);
+    assert.equal(convertirCentavos(3, 1.005), 3);
+    assert.equal(convertirCentavos(1, 1e-7), 0);
+    assert.equal(convertirCentavos(10_000_000, 1.5e-7), 2);
+    assert.equal(convertirCentavos(100, 1e21), null);
+  });
+
+  test("límite exacto: igual al límite se admite y un centavo por encima no", () => {
+    const limite = calcularPresupuestoHospedajeCentavos(50000);
+    assert.equal(convertirCentavos(2500, 8), limite);
+    assert.equal(convertirCentavos(2500, 8.0004), limite + 1);
+    assert.equal(calcularPresupuestoHospedajeCentavos(49999), limite - 1);
+  });
+
+  test("rechaza tasas o importes no válidos en lugar de suponer 1:1", () => {
+    for (const tasa of [0, -7.65, Number.NaN, Number.POSITIVE_INFINITY]) {
+      assert.equal(convertirCentavos(2400, tasa), null, String(tasa));
+    }
+    assert.equal(convertirCentavos(24.5, 7.65), null);
+    assert.equal(convertirCentavos(-1, 7.65), null);
+  });
+});
+
+describe("fechaSalida", () => {
+  test("la salida es el día calendario siguiente", () => {
+    assert.equal(fechaSalida("2026-10-14"), "2026-10-15");
+  });
+
+  test("calcula fin de mes, fin de año y años bisiestos", () => {
+    assert.equal(fechaSalida("2026-04-30"), "2026-05-01");
+    assert.equal(fechaSalida("2026-10-31"), "2026-11-01");
+    assert.equal(fechaSalida("2026-12-31"), "2027-01-01");
+    assert.equal(fechaSalida("2026-02-28"), "2026-03-01");
+    assert.equal(fechaSalida("2028-02-28"), "2028-02-29");
+    assert.equal(fechaSalida("2028-02-29"), "2028-03-01");
+    assert.equal(fechaSalida("2100-02-28"), "2100-03-01");
+    assert.equal(fechaSalida("2000-02-28"), "2000-02-29");
+  });
+
+  test("devuelve null para fechas irreales o sin día siguiente representable", () => {
+    assert.equal(fechaSalida("2026-02-29"), null);
+    assert.equal(fechaSalida("2026-13-01"), null);
+    assert.equal(fechaSalida("14/10/2026"), null);
+    assert.equal(fechaSalida("9999-12-31"), null);
+  });
+
+  test("solo rechaza como pasada una fecha anterior al día actual en todas las zonas horarias", () => {
+    const ahora = new Date("2026-10-10T02:00:00Z");
+    assert.equal(esFechaPasadaEnTodasLasZonas("2026-10-09", ahora), false);
+    assert.equal(esFechaPasadaEnTodasLasZonas("2026-10-08", ahora), true);
+    assert.equal(esFechaPasadaEnTodasLasZonas("2026-10-10", ahora), false);
+    const finDelDiaUtc = new Date("2026-10-10T23:59:59Z");
+    assert.equal(esFechaPasadaEnTodasLasZonas("2026-10-09", finDelDiaUtc), false);
+  });
+});
+
+describe("seleccionarPrecio", () => {
+  const bloque = (total: number, antes?: number) => ({
+    lowest: `$${total}`,
+    extracted_lowest: total,
+    ...(antes === undefined ? {} : { before_taxes_fees: `$${antes}`, extracted_before_taxes_fees: antes }),
+  });
+
+  test("caso observado: usa el total estructurado de USD 24 con impuestos informados y no el de USD 21 antes de impuestos", () => {
+    const precio = seleccionarPrecio(
+      {
+        rate_per_night: bloque(24, 21),
+        total_rate: bloque(24, 21),
+        prices: [{ source: "Agencia", link: "https://www.google.com/travel/clk?price_displayed_total=24.49" }],
+      },
+      2,
+    );
+    assert.deepEqual(precio, {
+      importeUsdCentavos: 2400,
+      campo: "total_rate",
+      impuestos: { estado: "informado", antesImpuestosUsdCentavos: 2100 },
+      fuente: { tipo: "resumen_propiedad" },
+    });
+  });
+
+  test("prioriza total_rate y solo usa rate_per_night si no existe un total utilizable", () => {
+    assert.equal(seleccionarPrecio({ rate_per_night: bloque(20), total_rate: bloque(30) }, 2)?.campo, "total_rate");
+    const porNoche = seleccionarPrecio({ rate_per_night: bloque(20) }, 2);
+    assert.equal(porNoche?.campo, "rate_per_night");
+    assert.equal(porNoche?.importeUsdCentavos, 2000);
+    assert.equal(seleccionarPrecio({ rate_per_night: bloque(20), total_rate: { lowest: "$30" } }, 2)?.campo, "rate_per_night");
+  });
+
+  test("sin desglose informa impuestos no informados en lugar de suponerlos excluidos", () => {
+    assert.deepEqual(seleccionarPrecio({ total_rate: bloque(24) }, 2)?.impuestos, { estado: "no_informado" });
+    assert.deepEqual(seleccionarPrecio({ total_rate: { extracted_lowest: 24, extracted_before_taxes_fees: "21" } }, 2)?.impuestos, {
+      estado: "no_informado",
+    });
+  });
+
+  test("nunca usa el precio antes de impuestos como total ni un bloque incoherente", () => {
+    assert.equal(seleccionarPrecio({ total_rate: { extracted_before_taxes_fees: 21 } }, 2), null);
+    assert.equal(seleccionarPrecio({ total_rate: bloque(21, 24) }, 2), null);
+    assert.equal(seleccionarPrecio({ total_rate: bloque(21, 24), rate_per_night: bloque(25) }, 2)?.campo, "rate_per_night");
+  });
+
+  test("descarta precios no numéricos, no positivos, no finitos o con fracciones de centavo y no lee importes de textos o enlaces", () => {
+    const invalidos: unknown[] = [
+      { lowest: "$24", extracted_lowest: "24" },
+      { lowest: "$0", extracted_lowest: 0 },
+      { extracted_lowest: -24 },
+      { extracted_lowest: Number.POSITIVE_INFINITY },
+      { extracted_lowest: 24.001 },
+      { lowest: "$24.49", price_displayed_total: 24.49 },
+      null,
+      "24",
     ];
-    for (const [nombre, cambios] of casos) {
-      assert.equal(tarifaAplica(tarifa(cambios), CONDICIONES), false, nombre);
-      assert.equal(seleccionarTarifas([tarifa(cambios)], CONDICIONES).size, 0, nombre);
+    for (const total_rate of invalidos) {
+      assert.equal(seleccionarPrecio({ total_rate, link: "https://ejemplo.invalid/?price_displayed_total=24.49" }, 2), null, JSON.stringify(total_rate));
     }
   });
 
-  test("la vigencia incluye sus fechas inicial y final", () => {
-    assert.equal(tarifaAplica(tarifa({ vigenciaDesde: "2026-10-14", vigenciaHasta: "2026-10-14" }), CONDICIONES), true);
-  });
-
-  test("elige la tarifa aplicable más económica y desempata por id sin depender del orden", () => {
-    const tarifas = [
-      tarifa({ id: "t-cara", importeCentavos: 18000 }),
-      tarifa({ id: "t-c", importeCentavos: 15000 }),
-      tarifa({ id: "t-a", importeCentavos: 15000 }),
-      tarifa({ id: "t-0-otra-ocupacion", importeCentavos: 100, ocupacion: 1 }),
-    ];
-    assert.equal(seleccionarTarifas(tarifas, CONDICIONES).get("hotel-ficticio-1")?.id, "t-a");
-    assert.equal(seleccionarTarifas([...tarifas].reverse(), CONDICIONES).get("hotel-ficticio-1")?.id, "t-a");
-  });
-
-  test("agrupa por idExterno exacto", () => {
-    const seleccion = seleccionarTarifas(
-      [tarifa({ id: "a", idExterno: "hotel-1" }), tarifa({ id: "b", idExterno: "HOTEL-1" })],
-      CONDICIONES,
+  test("conserva la fuente de la oferta y no combina su precio con impuestos de otra", () => {
+    const precio = seleccionarPrecio(
+      {
+        rate_per_night: bloque(40, 30),
+        prices: [
+          { source: "Agencia B", num_guests: 2, rate_per_night: bloque(22) },
+          { source: "Agencia A", num_guests: 2, rate_per_night: bloque(23, 19) },
+        ],
+      },
+      2,
     );
-    assert.deepEqual([...seleccion.keys()].sort(), ["HOTEL-1", "hotel-1"]);
+    assert.deepEqual(precio, {
+      importeUsdCentavos: 2200,
+      campo: "rate_per_night",
+      impuestos: { estado: "no_informado" },
+      fuente: { tipo: "oferta", nombre: "Agencia B", oficial: false },
+    });
+  });
+
+  test("excluye ofertas con otra ocupación y, si las hay, no usa el resumen de la propiedad", () => {
+    const propiedad = {
+      total_rate: bloque(20),
+      prices: [
+        { source: "Para dos", num_guests: 2, rate_per_night: bloque(15) },
+        { source: "Para tres", num_guests: 3, rate_per_night: bloque(30) },
+      ],
+    };
+    assert.deepEqual(seleccionarPrecio(propiedad, 3)?.fuente, { tipo: "oferta", nombre: "Para tres", oficial: false });
+    assert.equal(seleccionarPrecio({ total_rate: bloque(20), prices: [{ source: "Para dos", num_guests: 2, rate_per_night: bloque(15) }] }, 3), null);
+    assert.equal(seleccionarPrecio({ total_rate: bloque(20), prices: [{ source: "Sin ocupación", rate_per_night: bloque(15) }] }, 3)?.importeUsdCentavos, 2000);
+  });
+
+  test("elige de forma determinista entre alternativas comparables, sin depender del orden", () => {
+    const ofertas = [
+      { source: "Zeta", num_guests: 2, total_rate: bloque(25) },
+      { source: "Alfa", num_guests: 2, total_rate: bloque(25) },
+      { source: "Oficial", official: true, num_guests: 2, total_rate: bloque(25) },
+      { source: "Barata por noche", num_guests: 2, rate_per_night: bloque(10) },
+    ];
+    const esperado = { tipo: "oferta", nombre: "Oficial", oficial: true };
+    assert.deepEqual(seleccionarPrecio({ prices: ofertas }, 2)?.fuente, esperado);
+    assert.deepEqual(seleccionarPrecio({ prices: [...ofertas].reverse() }, 2)?.fuente, esperado);
+    assert.deepEqual(seleccionarPrecio({ total_rate: bloque(25), prices: ofertas }, 2)?.fuente, { tipo: "resumen_propiedad" });
+    assert.deepEqual(seleccionarPrecio({ prices: ofertas.filter((o) => !o.official) }, 2)?.fuente, { tipo: "oferta", nombre: "Alfa", oficial: false });
+  });
+
+  test("considera también featured_prices de la respuesta de una propiedad individual", () => {
+    const precio = seleccionarPrecio({ featured_prices: [{ source: "Destacada", num_guests: 2, total_rate: bloque(18, 15) }] }, 2);
+    assert.equal(precio?.importeUsdCentavos, 1800);
+    assert.deepEqual(precio?.fuente, { tipo: "oferta", nombre: "Destacada", oficial: false });
+  });
+
+  test("ignora ofertas sin fuente identificable", () => {
+    assert.equal(seleccionarPrecio({ prices: [{ num_guests: 2, total_rate: bloque(18) }, { source: "  ", total_rate: bloque(17) }] }, 2), null);
   });
 });
 
 describe("orden y deduplicación de candidatos", () => {
   test("ordena por distancia sin redondear y desempata por idExterno", () => {
     const candidatos = [
-      { distancia: 100.4, lugar: { idExterno: "c" } },
-      { distancia: 100.2, lugar: { idExterno: "z" } },
-      { distancia: 50, lugar: { idExterno: "b" } },
-      { distancia: 50, lugar: { idExterno: "a" } },
+      { distancia: 100.4, idExterno: "c" },
+      { distancia: 100.2, idExterno: "z" },
+      { distancia: 50, idExterno: "b" },
+      { distancia: 50, idExterno: "a" },
     ];
-    assert.deepEqual(ordenarPorCercania(candidatos).map((c) => c.lugar.idExterno), ["a", "b", "z", "c"]);
-    assert.deepEqual(ordenarPorCercania([...candidatos].reverse()).map((c) => c.lugar.idExterno), ["a", "b", "z", "c"]);
-    assert.equal(candidatos[0].lugar.idExterno, "c");
+    assert.deepEqual(ordenarPorCercania(candidatos).map((c) => c.idExterno), ["a", "b", "z", "c"]);
+    assert.deepEqual(ordenarPorCercania([...candidatos].reverse()).map((c) => c.idExterno), ["a", "b", "z", "c"]);
+    assert.equal(candidatos[0].idExterno, "c");
   });
 
-  test("elimina hoteles repetidos por idExterno conservando el primero", () => {
-    const resultado = deduplicarLugares([lugar("h1", 1, 1), lugar("h2"), lugar("h1", 2, 2)]);
+  test("elimina elementos repetidos por idExterno conservando el primero", () => {
+    const resultado = deduplicarPorId([
+      { idExterno: "h1", lat: 1 },
+      { idExterno: "h2", lat: 14.6 },
+      { idExterno: "h1", lat: 2 },
+    ]);
     assert.deepEqual(resultado.map((l) => [l.idExterno, l.lat]), [["h1", 1], ["h2", 14.6]]);
-  });
-});
-
-describe("validarCatalogo", () => {
-  beforeEach(() => {
-    mock.method(console, "error", () => {});
-  });
-
-  afterEach(() => {
-    mock.restoreAll();
-  });
-
-  function esInvalido(datos: unknown): void {
-    assert.throws(
-      () => validarCatalogo(datos),
-      (error: unknown) => error instanceof ErrorApi && error.estado === 500 && error.codigo === "CATALOGO_TARIFAS_INVALIDO",
-    );
-  }
-
-  test("acepta un catálogo vacío", () => {
-    assert.deepEqual(validarCatalogo({ tarifas: [] }), []);
-  });
-
-  test("acepta tarifas completas con fuente URL o cotización y otra moneda", () => {
-    const tarifas = validarCatalogo({
-      tarifas: [
-        tarifa(),
-        tarifa({ id: "t2", fuente: { tipo: "url", referencia: "https://ejemplo.invalid/tarifas" } }),
-        tarifa({ id: "t3", moneda: "USD", impuestosIncluidos: null, nombreReferencia: "Solo para mantenimiento" }),
-      ],
-    });
-    assert.equal(tarifas.length, 3);
-  });
-
-  test("rechaza estructuras e incoherencias", () => {
-    const { fuente: _fuente, ...sinFuente } = tarifa();
-    const casos: unknown[] = [
-      null,
-      [],
-      {},
-      { tarifas: {} },
-      { tarifas: [], extra: true },
-      { tarifas: [sinFuente] },
-      { tarifas: [tarifa(), tarifa()] },
-      { tarifas: [tarifa({ vigenciaDesde: "2026-11-01", vigenciaHasta: "2026-10-01" })] },
-      { tarifas: [tarifa({ vigenciaDesde: "2026-02-30" })] },
-      { tarifas: [tarifa({ verificadoEn: "30/09/2026" })] },
-      { tarifas: [tarifa({ importeCentavos: 0 })] },
-      { tarifas: [tarifa({ importeCentavos: -100 })] },
-      { tarifas: [tarifa({ importeCentavos: 199.5 })] },
-      { tarifas: [tarifa({ moneda: "gtq" })] },
-      { tarifas: [tarifa({ unidad: "persona_noche" as "habitacion_noche" })] },
-      { tarifas: [tarifa({ ocupacion: 0 })] },
-      { tarifas: [tarifa({ ocupacion: 1.5 })] },
-      { tarifas: [tarifa({ idExterno: " " })] },
-      { tarifas: [tarifa({ fuente: { tipo: "url", referencia: "ftp://ejemplo.invalid/tarifa" } })] },
-      { tarifas: [tarifa({ fuente: { tipo: "url", referencia: "no es una url" } })] },
-      { tarifas: [tarifa({ fuente: { tipo: "cotizacion", referencia: "" } })] },
-      { tarifas: [{ ...tarifa(), precioDesde: true }] },
-      { tarifas: [{ ...tarifa(), importeTotal: undefined }] },
-    ];
-    for (const caso of casos) {
-      esInvalido(caso);
-    }
-  });
-
-  test("no incluye el contenido del catálogo en el error", () => {
-    try {
-      validarCatalogo({ tarifas: [tarifa({ fuente: { tipo: "cotizacion", referencia: "SECRETO-INTERNO" }, importeCentavos: 0 })] });
-      assert.fail("debía lanzar un error");
-    } catch (error) {
-      assert.ok(error instanceof ErrorApi);
-      assert.ok(!error.message.includes("SECRETO-INTERNO"));
-      assert.equal(error.detalles, undefined);
-    }
-  });
-});
-
-describe("crearLectorCatalogo", () => {
-  beforeEach(() => {
-    mock.method(console, "error", () => {});
-  });
-
-  afterEach(() => {
-    mock.restoreAll();
-  });
-
-  test("el catálogo de producción existe, es válido y está vacío", async () => {
-    assert.ok(existsSync(RUTA_CATALOGO_TARIFAS));
-    assert.equal(path.basename(path.dirname(RUTA_CATALOGO_TARIFAS)), "data");
-    assert.deepEqual(validarCatalogo(await crearLectorCatalogo()()), []);
-  });
-
-  test("lee un archivo con BOM y distingue JSON inválido de archivo ausente", async () => {
-    const carpeta = await mkdtemp(path.join(os.tmpdir(), "catalogo-hoteles-"));
-    try {
-      const valido = path.join(carpeta, "valido.json");
-      await writeFile(valido, `\uFEFF${JSON.stringify({ tarifas: [tarifa()] })}`, "utf8");
-      assert.equal(validarCatalogo(await crearLectorCatalogo(valido)()).length, 1);
-
-      const roto = path.join(carpeta, "roto.json");
-      await writeFile(roto, "{ tarifas: [", "utf8");
-      await assert.rejects(crearLectorCatalogo(roto)(), (error: unknown) => error instanceof ErrorApi && error.codigo === "CATALOGO_TARIFAS_INVALIDO");
-
-      await assert.rejects(
-        crearLectorCatalogo(path.join(carpeta, "no-existe.json"))(),
-        (error: unknown) => error instanceof ErrorApi && error.estado === 500 && error.codigo === "CATALOGO_TARIFAS_NO_DISPONIBLE",
-      );
-    } finally {
-      await rm(carpeta, { recursive: true, force: true });
-    }
   });
 });

@@ -9,8 +9,9 @@ import { crearPriorizadorClima } from "./ai/prioridadClima";
 import { crearClienteOpenWeather } from "./openweather/cliente";
 import { crearServicioClima } from "./clima/servicio";
 import { crearRutaPronosticoClima } from "./routes/pronosticoClima";
-import { crearLectorCatalogo, type LeerCatalogo } from "./hoteles/catalogo";
 import { crearRecomendadorHoteles } from "./hoteles/recomendaciones";
+import { crearBuscadorHoteles } from "./hoteles/serpapi";
+import { crearObtenedorTipoCambio } from "./hoteles/tipoCambio";
 import { crearRutaHoteles } from "./routes/hoteles";
 import { manejarErrores } from "./errores";
 import type { FuncionFetch } from "./tipos";
@@ -32,8 +33,12 @@ export interface OpcionesApp {
     ahora?: () => Date;
   };
   hoteles?: {
-    leerCatalogo?: LeerCatalogo;
-    rutaCatalogo?: string;
+    serpApiKey?: string;
+    exchangeRateApiKey?: string;
+    fetch?: FuncionFetch;
+    tiempoEsperaMs?: number;
+    tiempoEsperaTipoCambioMs?: number;
+    ahora?: () => Date;
   };
 }
 
@@ -73,11 +78,22 @@ export function crearApp({
 
   app.use("/api/clima/pronostico", crearRutaPronosticoClima(consultarClima));
 
+  const ahoraHoteles = hoteles.ahora ?? (() => new Date());
   const recomendarHoteles = crearRecomendadorHoteles({
-    buscarLugares,
-    leerCatalogo: hoteles.leerCatalogo ?? crearLectorCatalogo(hoteles.rutaCatalogo),
+    buscador: crearBuscadorHoteles({
+      apiKey: hoteles.serpApiKey === undefined ? process.env.SERPAPI_API_KEY : hoteles.serpApiKey,
+      fetch: hoteles.fetch ?? fetch,
+      tiempoEsperaMs: hoteles.tiempoEsperaMs,
+      ahora: ahoraHoteles,
+    }),
+    tipoCambio: crearObtenedorTipoCambio({
+      apiKey: hoteles.exchangeRateApiKey === undefined ? process.env.EXCHANGERATE_API_KEY : hoteles.exchangeRateApiKey,
+      fetch: hoteles.fetch ?? fetch,
+      tiempoEsperaMs: hoteles.tiempoEsperaTipoCambioMs ?? hoteles.tiempoEsperaMs,
+      ahora: ahoraHoteles,
+    }),
   });
-  app.use("/api/hoteles", crearRutaHoteles(recomendarHoteles));
+  app.use("/api/hoteles", crearRutaHoteles(recomendarHoteles, ahoraHoteles));
 
   app.use((req, res) => {
     res.status(404).json({

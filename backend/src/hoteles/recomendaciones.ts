@@ -1,35 +1,41 @@
 import type {
+  BusquedaHoteles,
+  EstanciaHotel,
   HotelRecomendado,
+  ImpuestosTarifaHotel,
   MotivoSinRecomendacionesHotel,
   RespuestaRecomendacionesHoteles,
-  TarifaHotelAplicada,
+  TarifaReferencialHotel,
+  TipoCambioHoteles,
 } from "../../../shared/types";
-import type { BuscarLugares } from "../geoapify/cliente";
-import type { Lugar } from "../geoapify/transformar";
 import type { SolicitudHoteles } from "../validacion/hoteles";
-import { validarCatalogo, type LeerCatalogo, type TarifaHotel } from "./catalogo";
+import { NINOS_POR_SOLICITUD, NOCHES_POR_SOLICITUD } from "./estancia";
 import { calcularCentro, distanciaMetros, type Coordenada } from "./geografia";
-import { PORCENTAJE_HOSPEDAJE, calcularPresupuestoHospedajeCentavos, seleccionarTarifas } from "./tarifas";
-
-export const CATEGORIA_HOTEL = "accommodation.hotel";
-export const MAX_CANDIDATOS_HOTELES = 100;
+import { errorNoConfigurado } from "./http";
+import { SERVICIO_SERPAPI, type BuscadorHoteles, type HotelProveedor } from "./serpapi";
+import { PORCENTAJE_HOSPEDAJE, calcularPresupuestoHospedajeCentavos, convertirCentavos, type PrecioReferencialUsd } from "./tarifas";
+import { SERVICIO_EXCHANGERATE, type ObtenedorTipoCambio } from "./tipoCambio";
 
 export const MENSAJES_SIN_RECOMENDACIONES: Record<MotivoSinRecomendacionesHotel, string> = {
   hospedaje_reservado: "El usuario ya tiene hospedaje reservado; no se generan recomendaciones de hoteles.",
   no_necesita_hotel: "El usuario indicó que no necesita hotel; no se generan recomendaciones.",
   itinerario_sin_paradas: "El itinerario del día no tiene paradas; no es posible calcular su centro.",
-  catalogo_vacio: "El catálogo de tarifas verificadas no tiene tarifas registradas.",
-  sin_tarifas_aplicables: "No hay tarifas verificadas para la fecha, moneda y ocupación indicadas dentro del presupuesto de hospedaje.",
-  sin_hoteles_encontrados: "Geoapify no encontró hoteles dentro del radio de búsqueda.",
-  sin_hoteles_elegibles: "Ninguno de los hoteles encontrados tiene una tarifa verificada aplicable dentro del presupuesto de hospedaje.",
+  sin_hoteles_encontrados: "La búsqueda de hoteles para el destino y las fechas indicadas no devolvió resultados.",
+  sin_hoteles_con_precio: "La búsqueda devolvió resultados, pero ninguno es un hotel con identificador, coordenadas y precio referencial utilizables.",
+  sin_hoteles_en_radio: "Ningún hotel con precio referencial está dentro del radio de búsqueda alrededor del centro del día.",
+  sin_hoteles_en_presupuesto: "Ningún hotel dentro del radio tiene un precio referencial convertido dentro del presupuesto de hospedaje.",
 };
 
 export type RecomendarHoteles = (solicitud: SolicitudHoteles) => Promise<RespuestaRecomendacionesHoteles>;
 
 interface Candidato {
-  lugar: Lugar;
-  tarifa: TarifaHotel;
+  hotel: HotelProveedor;
+  idExterno: string;
   distancia: number;
+}
+
+interface CandidatoConvertido extends Candidato {
+  importeCentavos: number;
 }
 
 const redondear = (valor: number, decimales: number) => {
@@ -37,73 +43,95 @@ const redondear = (valor: number, decimales: number) => {
   return Math.round(valor * factor) / factor + 0;
 };
 
-export function deduplicarLugares(lugares: readonly Lugar[]): Lugar[] {
+export function deduplicarPorId<T extends { idExterno: string }>(elementos: readonly T[]): T[] {
   const vistos = new Set<string>();
-  return lugares.filter((lugar) => {
-    if (vistos.has(lugar.idExterno)) {
+  return elementos.filter((elemento) => {
+    if (vistos.has(elemento.idExterno)) {
       return false;
     }
-    vistos.add(lugar.idExterno);
+    vistos.add(elemento.idExterno);
     return true;
   });
 }
 
-export function ordenarPorCercania<T extends { distancia: number; lugar: { idExterno: string } }>(candidatos: readonly T[]): T[] {
+export function ordenarPorCercania<T extends { distancia: number; idExterno: string }>(candidatos: readonly T[]): T[] {
   return [...candidatos].sort((a, b) => {
     if (a.distancia !== b.distancia) {
       return a.distancia - b.distancia;
     }
-    if (a.lugar.idExterno === b.lugar.idExterno) {
+    if (a.idExterno === b.idExterno) {
       return 0;
     }
-    return a.lugar.idExterno < b.lugar.idExterno ? -1 : 1;
+    return a.idExterno < b.idExterno ? -1 : 1;
   });
 }
 
-function aTarifaAplicada(tarifa: TarifaHotel): TarifaHotelAplicada {
+function aImpuestos(precio: PrecioReferencialUsd): ImpuestosTarifaHotel {
+  if (precio.impuestos.estado === "no_informado") {
+    return { estado: "no_informado" };
+  }
+  const antes = precio.impuestos.antesImpuestosUsdCentavos;
   return {
-    id: tarifa.id,
-    importe: tarifa.importeCentavos / 100,
-    importeCentavos: tarifa.importeCentavos,
-    moneda: "GTQ",
-    unidad: tarifa.unidad,
-    ocupacion: tarifa.ocupacion,
-    impuestosIncluidos: true,
-    vigencia: { desde: tarifa.vigenciaDesde, hasta: tarifa.vigenciaHasta },
-    verificadoEn: tarifa.verificadoEn,
-    fuente: tarifa.fuente,
+    estado: "informado",
+    importeAntesImpuestosUsd: antes / 100,
+    impuestosYCargosUsd: (precio.importeUsdCentavos - antes) / 100,
   };
 }
 
-function aHotelRecomendado({ lugar, tarifa, distancia }: Candidato): HotelRecomendado {
+function aTarifa(precio: PrecioReferencialUsd, importeCentavos: number): TarifaReferencialHotel {
   return {
-    idExterno: lugar.idExterno,
-    proveedor: lugar.proveedor,
-    nombre: lugar.nombre,
-    direccion: lugar.direccion,
-    lat: lugar.lat,
-    lng: lugar.lng,
+    referencial: true,
+    importeUsd: precio.importeUsdCentavos / 100,
+    importeUsdCentavos: precio.importeUsdCentavos,
+    importe: importeCentavos / 100,
+    importeCentavos,
+    moneda: "GTQ",
+    unidad: "habitacion_noche",
+    noches: NOCHES_POR_SOLICITUD,
+    campo: precio.campo,
+    fuente: precio.fuente.tipo === "oferta" ? { ...precio.fuente } : { tipo: "resumen_propiedad" },
+    impuestos: aImpuestos(precio),
+  };
+}
+
+function aHotelRecomendado({ hotel, distancia, importeCentavos }: CandidatoConvertido): HotelRecomendado {
+  return {
+    idExterno: hotel.idExterno,
+    proveedor: "serpapi",
+    nombre: hotel.nombre,
+    lat: hotel.lat,
+    lng: hotel.lng,
     distanciaLineaRectaMetros: Math.round(distancia),
-    tarifa: aTarifaAplicada(tarifa),
+    tarifa: aTarifa(hotel.precio, importeCentavos),
   };
 }
 
 export function crearRecomendadorHoteles({
-  buscarLugares,
-  leerCatalogo,
+  buscador,
+  tipoCambio,
 }: {
-  buscarLugares: BuscarLugares;
-  leerCatalogo: LeerCatalogo;
+  buscador: BuscadorHoteles;
+  tipoCambio: ObtenedorTipoCambio;
 }): RecomendarHoteles {
   return async function recomendarHoteles(solicitud) {
     const presupuestoHospedajeCentavos = calcularPresupuestoHospedajeCentavos(solicitud.presupuestoDiarioCentavos);
+    const estancia: EstanciaHotel = {
+      entrada: solicitud.fecha,
+      salida: solicitud.fechaSalida,
+      noches: NOCHES_POR_SOLICITUD,
+      adultos: solicitud.ocupacion,
+      ninos: NINOS_POR_SOLICITUD,
+    };
     let centro: Coordenada | null = null;
-    let busqueda: RespuestaRecomendacionesHoteles["busqueda"] = null;
+    let busqueda: BusquedaHoteles | null = null;
+    let tasa: TipoCambioHoteles | null = null;
 
     const responder = (hoteles: HotelRecomendado[], motivo: MotivoSinRecomendacionesHotel | null): RespuestaRecomendacionesHoteles => ({
       fecha: solicitud.fecha,
+      destino: solicitud.destino,
       moneda: solicitud.moneda,
       ocupacion: solicitud.ocupacion,
+      estancia,
       presupuestoDiario: solicitud.presupuestoDiarioCentavos / 100,
       presupuestoDiarioCentavos: solicitud.presupuestoDiarioCentavos,
       porcentajeHospedaje: PORCENTAJE_HOSPEDAJE,
@@ -112,6 +140,7 @@ export function crearRecomendadorHoteles({
       centro: centro && { lat: redondear(centro.lat, 7), lng: redondear(centro.lng, 7) },
       metodoDistancia: "linea_recta",
       busqueda,
+      tipoCambio: tasa,
       hoteles,
       motivo,
       mensaje: motivo && MENSAJES_SIN_RECOMENDACIONES[motivo],
@@ -129,50 +158,64 @@ export function crearRecomendadorHoteles({
       return responder([], "itinerario_sin_paradas");
     }
 
-    const tarifas = validarCatalogo(await leerCatalogo());
-    if (tarifas.length === 0) {
-      return responder([], "catalogo_vacio");
+    if (!buscador.configurado) {
+      throw errorNoConfigurado(SERVICIO_SERPAPI);
+    }
+    if (!tipoCambio.configurado) {
+      throw errorNoConfigurado(SERVICIO_EXCHANGERATE);
     }
 
-    const tarifasPorHotel = seleccionarTarifas(tarifas, {
-      fecha: solicitud.fecha,
-      moneda: solicitud.moneda,
-      ocupacion: solicitud.ocupacion,
-      presupuestoHospedajeCentavos,
+    const resultado = await buscador.buscar({
+      destino: solicitud.destino,
+      entrada: estancia.entrada,
+      salida: estancia.salida,
+      adultos: estancia.adultos,
     });
-    if (tarifasPorHotel.size === 0) {
-      return responder([], "sin_tarifas_aplicables");
-    }
-
-    const encontrados = deduplicarLugares(
-      await buscarLugares({
-        lat: centro.lat,
-        lng: centro.lng,
-        categorias: [CATEGORIA_HOTEL],
-        radio: solicitud.radio,
-        limite: MAX_CANDIDATOS_HOTELES,
-      }),
-    );
-    busqueda = {
-      categoria: CATEGORIA_HOTEL,
-      radioMetros: solicitud.radio,
-      maxCandidatos: MAX_CANDIDATOS_HOTELES,
-      candidatosEncontrados: encontrados.length,
-    };
-    if (encontrados.length === 0) {
-      return responder([], "sin_hoteles_encontrados");
-    }
 
     const origen = centro;
-    const elegibles: Candidato[] = [];
-    for (const lugar of encontrados) {
-      const tarifa = tarifasPorHotel.get(lugar.idExterno);
-      if (tarifa) {
-        elegibles.push({ lugar, tarifa, distancia: distanciaMetros(origen, lugar) });
+    const hoteles = deduplicarPorId(resultado.hoteles);
+    const enRadio: Candidato[] = [];
+    for (const hotel of hoteles) {
+      const distancia = distanciaMetros(origen, hotel);
+      if (distancia <= solicitud.radio) {
+        enRadio.push({ hotel, idExterno: hotel.idExterno, distancia });
+      }
+    }
+    busqueda = {
+      proveedor: "serpapi",
+      motor: "google_hotels",
+      consulta: resultado.consulta,
+      monedaProveedor: "USD",
+      consultadoEn: resultado.consultadoEn,
+      desdeCache: resultado.desdeCache,
+      radioMetros: solicitud.radio,
+      resultadosRecibidos: resultado.resultadosRecibidos,
+      hotelesConPrecio: hoteles.length,
+      hotelesEnRadio: enRadio.length,
+      hayMasPaginas: resultado.hayMasPaginas,
+    };
+
+    if (resultado.resultadosRecibidos === 0) {
+      return responder([], "sin_hoteles_encontrados");
+    }
+    if (hoteles.length === 0) {
+      return responder([], "sin_hoteles_con_precio");
+    }
+    if (enRadio.length === 0) {
+      return responder([], "sin_hoteles_en_radio");
+    }
+
+    tasa = await tipoCambio.obtener();
+    const tasaAplicada = tasa.tasa;
+    const elegibles: CandidatoConvertido[] = [];
+    for (const candidato of enRadio) {
+      const importeCentavos = convertirCentavos(candidato.hotel.precio.importeUsdCentavos, tasaAplicada);
+      if (importeCentavos !== null && importeCentavos <= presupuestoHospedajeCentavos) {
+        elegibles.push({ ...candidato, importeCentavos });
       }
     }
 
-    const hoteles = ordenarPorCercania(elegibles).slice(0, solicitud.limite).map(aHotelRecomendado);
-    return responder(hoteles, hoteles.length === 0 ? "sin_hoteles_elegibles" : null);
+    const recomendados = ordenarPorCercania(elegibles).slice(0, solicitud.limite).map(aHotelRecomendado);
+    return responder(recomendados, recomendados.length === 0 ? "sin_hoteles_en_presupuesto" : null);
   };
 }

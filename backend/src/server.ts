@@ -18,6 +18,14 @@ if (!process.env.OPENWEATHER_API_KEY?.trim()) {
   console.warn("Falta la variable de entorno OPENWEATHER_API_KEY. GET /api/clima/pronostico responderá 503 hasta que se defina en backend/.env.");
 }
 
+for (const variable of ["SERPAPI_API_KEY", "EXCHANGERATE_API_KEY"]) {
+  if (!process.env[variable]?.trim()) {
+    console.warn(
+      `Falta la variable de entorno ${variable}. POST /api/hoteles/recomendaciones responderá 503 cuando necesite consultar hoteles hasta que se defina en backend/.env.`,
+    );
+  }
+}
+
 const puerto = Number(process.env.PORT) || 3000;
 
 crearApp({ apiKey }).listen(puerto, () => {

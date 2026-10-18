@@ -1,13 +1,11 @@
-import { test, describe, before, after, beforeEach, afterEach, mock } from "node:test";
+import { test, describe, beforeEach, afterEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import os from "node:os";
-import path from "node:path";
 import type { RespuestaRecomendacionesHoteles } from "../../shared/types";
-import { crearApp } from "../src/app";
-import type { TarifaHotel } from "../src/hoteles/catalogo";
+import { crearApp, type OpcionesApp } from "../src/app";
+import { TTL_CACHE_BUSQUEDAS_MS } from "../src/hoteles/serpapi";
 
 interface CuerpoError {
   error: { codigo: string; mensaje: string; detalles?: { parametro: string; mensaje: string }[] };
@@ -20,80 +18,78 @@ interface Resultado<T> {
 }
 
 interface HotelSimulado {
-  id: string;
+  token: string;
   lat: number;
-  lon: number;
+  lng: number;
+  usd?: number;
+  antes?: number;
   nombre?: string;
-  direccion?: string;
+  tipo?: string;
 }
 
 type Simulador = (url: URL, opciones: RequestInit | undefined) => Response | Promise<Response>;
 
-const CLAVE = "clave-de-prueba-no-real-hoteles";
+const CLAVE_SERP = "clave-serp-de-prueba-no-real";
+const CLAVE_TASA = "clave-tasa-de-prueba-no-real";
 const RUTA = "/api/hoteles/recomendaciones";
+const INICIO = Date.parse("2026-10-10T18:00:00Z");
+const ULTIMA_ACTUALIZACION = Date.parse("2026-10-10T00:00:01Z") / 1000;
 const PARADAS = [
   { lat: 14.6, lng: -90.5 },
   { lat: 14.62, lng: -90.52 },
 ];
 
-let simulador: Simulador;
-let llamadas: URL[] = [];
-let lecturasCatalogo = 0;
-let catalogo: unknown = { tarifas: [] };
-let servidor: Server;
+let serpapi: Simulador;
+let exchangeRate: Simulador;
+let llamadas: URL[];
+let instante: number;
+let servidores: Server[];
 let baseUrl: string;
 
 function respuestaJson(cuerpo: unknown, estado = 200): Response {
   return new Response(JSON.stringify(cuerpo), { status: estado, headers: { "Content-Type": "application/json" } });
 }
 
-function coleccionHoteles(hoteles: HotelSimulado[]) {
+function propiedad({ token, lat, lng, usd = 24, antes, nombre, tipo = "hotel" }: HotelSimulado): Record<string, unknown> {
+  const bloque = { lowest: `$${usd}`, extracted_lowest: usd, ...(antes === undefined ? {} : { before_taxes_fees: `$${antes}`, extracted_before_taxes_fees: antes }) };
   return {
-    type: "FeatureCollection",
-    features: hoteles.map(({ id, lat, lon, nombre, direccion }) => ({
-      type: "Feature",
-      properties: {
-        place_id: id,
-        name: nombre ?? `Hotel ${id}`,
-        ...(direccion ? { formatted: direccion } : {}),
-        lat,
-        lon,
-        categories: ["accommodation", "accommodation.hotel"],
-      },
-      geometry: { type: "Point", coordinates: [lon, lat] },
-    })),
+    type: tipo,
+    name: nombre ?? `Hotel ${token}`,
+    property_token: token,
+    gps_coordinates: { latitude: lat, longitude: lng },
+    rate_per_night: bloque,
+    total_rate: bloque,
+    serpapi_property_details_link: `https://serpapi.com/search.json?engine=google_hotels&property_token=${token}`,
   };
 }
 
-function devolverHoteles(hoteles: HotelSimulado[]): void {
-  simulador = () => respuestaJson(coleccionHoteles(hoteles));
+function devolverHoteles(hoteles: HotelSimulado[], extra: Record<string, unknown> = {}): void {
+  serpapi = () =>
+    respuestaJson({
+      search_metadata: { status: "Success", json_endpoint: "https://serpapi.com/searches/ficticio.json" },
+      search_parameters: { engine: "google_hotels", q: "consulta" },
+      properties: hoteles.map(propiedad),
+      ...extra,
+    });
 }
 
-function tarifa(idExterno: string, cambios: Partial<TarifaHotel> = {}): TarifaHotel {
-  return {
-    id: `tarifa-${idExterno}`,
-    idExterno,
-    importeCentavos: 15000,
-    moneda: "GTQ",
-    unidad: "habitacion_noche",
-    ocupacion: 2,
-    importeTotal: true,
-    impuestosIncluidos: true,
-    vigenciaDesde: "2026-10-01",
-    vigenciaHasta: "2026-10-31",
-    verificadoEn: "2026-09-30",
-    fuente: { tipo: "cotizacion", referencia: `Cotización ficticia ${idExterno}` },
-    ...cambios,
-  };
-}
-
-function usarTarifas(...tarifas: TarifaHotel[]): void {
-  catalogo = { tarifas };
+function usarTasa(tasa: number, cambios: Record<string, unknown> = {}): void {
+  exchangeRate = () =>
+    respuestaJson({
+      result: "success",
+      documentation: "https://www.exchangerate-api.com/docs",
+      time_last_update_unix: ULTIMA_ACTUALIZACION,
+      time_next_update_unix: ULTIMA_ACTUALIZACION + 86400,
+      base_code: "USD",
+      conversion_rates: { USD: 1, GTQ: tasa },
+      ...cambios,
+    });
 }
 
 function solicitud(cambios: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     fecha: "2026-10-14",
+    destino: "Ciudad de prueba",
     paradas: PARADAS,
     presupuestoDiario: 500,
     moneda: "GTQ",
@@ -101,6 +97,28 @@ function solicitud(cambios: Record<string, unknown> = {}): Record<string, unknow
     hospedaje: false,
     ...cambios,
   };
+}
+
+async function iniciar(opciones: OpcionesApp["hoteles"] = {}): Promise<string> {
+  const app = crearApp({
+    apiKey: "",
+    fetch: async (url, init) => {
+      const direccion = new URL(url);
+      llamadas.push(direccion);
+      if (direccion.hostname === "serpapi.com") {
+        return serpapi(direccion, init);
+      }
+      if (direccion.hostname === "v6.exchangerate-api.com") {
+        return exchangeRate(direccion, init);
+      }
+      throw new Error(`Host no simulado: ${direccion.hostname}`);
+    },
+    hoteles: { serpApiKey: CLAVE_SERP, exchangeRateApiKey: CLAVE_TASA, tiempoEsperaMs: 50, ahora: () => new Date(instante), ...opciones },
+  });
+  const servidor = app.listen(0, "127.0.0.1");
+  await once(servidor, "listening");
+  servidores.push(servidor);
+  return `http://127.0.0.1:${(servidor.address() as AddressInfo).port}`;
 }
 
 async function enviarA<T>(url: string, datos: unknown): Promise<Resultado<T>> {
@@ -117,455 +135,394 @@ function enviar<T = RespuestaRecomendacionesHoteles>(datos: unknown): Promise<Re
   return enviarA<T>(baseUrl, datos);
 }
 
+function sinSecretos(texto: string): void {
+  for (const secreto of [CLAVE_SERP, CLAVE_TASA, "api_key", "serpapi.com/search", "v6.exchangerate-api.com", "serpapi_property_details_link"]) {
+    assert.ok(!texto.includes(secreto), `la respuesta no debe incluir ${secreto}`);
+  }
+}
+
 function verificarError(resultado: Resultado<CuerpoError>, estado: number, codigo: string): void {
   assert.equal(resultado.estado, estado);
   assert.equal(resultado.cuerpo.error.codigo, codigo);
   assert.equal(typeof resultado.cuerpo.error.mensaje, "string");
-  assert.ok(!resultado.texto.includes(CLAVE));
-  assert.ok(!resultado.texto.includes("apiKey"));
+  assert.ok(!/sesi[oó]n expirada|inicia sesi[oó]n|login/i.test(resultado.cuerpo.error.mensaje));
+  sinSecretos(resultado.texto);
 }
 
-function filtroDe(url: URL): { lng: number; lat: number; radio: number } {
-  const coincidencia = /^circle:(-?[\d.]+),(-?[\d.]+),(\d+)$/.exec(url.searchParams.get("filter") ?? "");
-  assert.ok(coincidencia, "la consulta debe usar un filtro circular");
-  return { lng: Number(coincidencia[1]), lat: Number(coincidencia[2]), radio: Number(coincidencia[3]) };
-}
+const llamadasA = (host: string) => llamadas.filter((url) => url.hostname === host);
 
-async function iniciar(app: ReturnType<typeof crearApp>): Promise<{ instancia: Server; url: string }> {
-  const instancia = app.listen(0, "127.0.0.1");
-  await once(instancia, "listening");
-  return { instancia, url: `http://127.0.0.1:${(instancia.address() as AddressInfo).port}` };
-}
-
-before(async () => {
-  const app = crearApp({
-    apiKey: CLAVE,
-    tiempoEsperaMs: 50,
-    fetch: async (url, opciones) => {
-      const direccion = new URL(url);
-      llamadas.push(direccion);
-      return simulador(direccion, opciones);
-    },
-    hoteles: {
-      leerCatalogo: async () => {
-        lecturasCatalogo++;
-        return catalogo;
-      },
-    },
-  });
-  ({ instancia: servidor, url: baseUrl } = await iniciar(app));
-});
-
-after(() => {
-  servidor.closeAllConnections();
-  servidor.close();
-});
-
-beforeEach(() => {
+beforeEach(async () => {
   llamadas = [];
-  lecturasCatalogo = 0;
-  catalogo = { tarifas: [] };
+  servidores = [];
+  instante = INICIO;
   devolverHoteles([]);
+  usarTasa(7.65);
   mock.method(console, "error", () => {});
+  baseUrl = await iniciar();
 });
 
 afterEach(() => {
+  for (const servidor of servidores) {
+    servidor.closeAllConnections();
+    servidor.close();
+  }
   mock.restoreAll();
 });
 
 describe("POST /api/hoteles/recomendaciones - recomendaciones", () => {
-  test("ordena por cercanía al centro del día aunque Geoapify entregue otro orden", async () => {
-    usarTarifas(tarifa("geo-lejano"), tarifa("geo-cercano"), tarifa("geo-medio"));
-    devolverHoteles([
-      { id: "geo-lejano", lat: 14.66, lon: -90.51, direccion: "Zona lejana" },
-      { id: "geo-cercano", lat: 14.611, lon: -90.51 },
-      { id: "geo-medio", lat: 14.63, lon: -90.51 },
-    ]);
+  test("fixture de prueba: USD 24 con tasa ficticia 7.65 se convierte en Q183.60 y entra en Q200", async () => {
+    serpapi = () =>
+      respuestaJson({
+        search_metadata: { status: "Success" },
+        properties: [
+          {
+            ...propiedad({ token: "tok-uno", lat: 14.61, lng: -90.51, usd: 24, antes: 21, nombre: "Hotel Uno" }),
+            prices: [{ source: "Agencia", link: "https://www.google.com/travel/clk?pcurl=x%26price_displayed_total%3D24.49" }],
+          },
+        ],
+        serpapi_pagination: { next_page_token: "CBI=", next: `https://serpapi.com/search.json?api_key=${CLAVE_SERP}` },
+      });
 
-    const { estado, cuerpo } = await enviar(solicitud());
+    const { estado, cuerpo, texto } = await enviar(solicitud());
 
     assert.equal(estado, 200);
-    assert.deepEqual(cuerpo.hoteles.map((h) => h.idExterno), ["geo-cercano", "geo-medio", "geo-lejano"]);
-    const distancias = cuerpo.hoteles.map((h) => h.distanciaLineaRectaMetros);
-    assert.deepEqual(distancias, [...distancias].sort((a, b) => a - b));
     assert.equal(cuerpo.motivo, null);
     assert.equal(cuerpo.mensaje, null);
-    assert.equal(cuerpo.metodoDistancia, "linea_recta");
-    assert.deepEqual(cuerpo.busqueda, { categoria: "accommodation.hotel", radioMetros: 5000, maxCandidatos: 100, candidatosEncontrados: 3 });
-
-    assert.equal(llamadas.length, 1);
-    const consulta = llamadas[0];
-    assert.equal(consulta.pathname, "/v2/places");
-    assert.equal(consulta.searchParams.get("categories"), "accommodation.hotel");
-    assert.equal(consulta.searchParams.get("limit"), "100");
-    const filtro = filtroDe(consulta);
-    assert.ok(Math.abs(filtro.lat - 14.61) < 1e-4);
-    assert.ok(Math.abs(filtro.lng + 90.51) < 1e-4);
-    assert.equal(filtro.radio, 5000);
-  });
-
-  test("devuelve el contrato completo de cada hotel y de la respuesta", async () => {
-    usarTarifas(tarifa("geo-uno", { importeCentavos: 19999, fuente: { tipo: "url", referencia: "https://ejemplo.invalid/tarifa" } }));
-    devolverHoteles([{ id: "geo-uno", lat: 14.61, lon: -90.51, nombre: "Hotel Uno", direccion: "Calle ficticia 1" }]);
-
-    const { cuerpo } = await enviar(solicitud({ presupuestoDiario: 500.5 }));
-
-    assert.equal(cuerpo.fecha, "2026-10-14");
-    assert.equal(cuerpo.moneda, "GTQ");
-    assert.equal(cuerpo.ocupacion, 2);
-    assert.equal(cuerpo.presupuestoDiario, 500.5);
-    assert.equal(cuerpo.presupuestoDiarioCentavos, 50050);
+    assert.equal(cuerpo.destino, "Ciudad de prueba");
+    assert.deepEqual(cuerpo.estancia, { entrada: "2026-10-14", salida: "2026-10-15", noches: 1, adultos: 2, ninos: 0 });
+    assert.equal(cuerpo.presupuestoHospedaje, 200);
+    assert.equal(cuerpo.presupuestoHospedajeCentavos, 20000);
     assert.equal(cuerpo.porcentajeHospedaje, 40);
-    assert.equal(cuerpo.presupuestoHospedaje, 200.2);
-    assert.equal(cuerpo.presupuestoHospedajeCentavos, 20020);
-    assert.ok(cuerpo.centro);
     assert.deepEqual(cuerpo.hoteles, [
       {
-        idExterno: "geo-uno",
-        proveedor: "geoapify",
+        idExterno: "tok-uno",
+        proveedor: "serpapi",
         nombre: "Hotel Uno",
-        direccion: "Calle ficticia 1",
         lat: 14.61,
         lng: -90.51,
         distanciaLineaRectaMetros: cuerpo.hoteles[0].distanciaLineaRectaMetros,
         tarifa: {
-          id: "tarifa-geo-uno",
-          importe: 199.99,
-          importeCentavos: 19999,
+          referencial: true,
+          importeUsd: 24,
+          importeUsdCentavos: 2400,
+          importe: 183.6,
+          importeCentavos: 18360,
           moneda: "GTQ",
           unidad: "habitacion_noche",
-          ocupacion: 2,
-          impuestosIncluidos: true,
-          vigencia: { desde: "2026-10-01", hasta: "2026-10-31" },
-          verificadoEn: "2026-09-30",
-          fuente: { tipo: "url", referencia: "https://ejemplo.invalid/tarifa" },
+          noches: 1,
+          campo: "total_rate",
+          fuente: { tipo: "resumen_propiedad" },
+          impuestos: { estado: "informado", importeAntesImpuestosUsd: 21, impuestosYCargosUsd: 3 },
         },
       },
     ]);
-    assert.ok(Number.isInteger(cuerpo.hoteles[0].distanciaLineaRectaMetros));
+    assert.deepEqual(cuerpo.busqueda, {
+      proveedor: "serpapi",
+      motor: "google_hotels",
+      consulta: "hoteles en Ciudad de prueba",
+      monedaProveedor: "USD",
+      consultadoEn: "2026-10-10T18:00:00.000Z",
+      desdeCache: false,
+      radioMetros: 5000,
+      resultadosRecibidos: 1,
+      hotelesConPrecio: 1,
+      hotelesEnRadio: 1,
+      hayMasPaginas: true,
+    });
+    assert.deepEqual(cuerpo.tipoCambio, {
+      proveedor: "exchangerate-api",
+      base: "USD",
+      destino: "GTQ",
+      tasa: 7.65,
+      actualizadoEn: "2026-10-10T00:00:01.000Z",
+      proximaActualizacion: "2026-10-11T00:00:01.000Z",
+      consultadoEn: "2026-10-10T18:00:00.000Z",
+    });
+    assert.ok(!texto.includes("24.49"));
+    sinSecretos(texto);
+
+    const [busqueda] = llamadasA("serpapi.com");
+    assert.equal(busqueda.pathname, "/search.json");
+    assert.deepEqual(Object.fromEntries(busqueda.searchParams), {
+      engine: "google_hotels",
+      q: "hoteles en Ciudad de prueba",
+      check_in_date: "2026-10-14",
+      check_out_date: "2026-10-15",
+      adults: "2",
+      children: "0",
+      currency: "USD",
+      hl: "es",
+      api_key: CLAVE_SERP,
+    });
+    assert.equal(llamadasA("v6.exchangerate-api.com")[0].pathname, `/v6/${CLAVE_TASA}/latest/USD`);
+    assert.equal(llamadas.length, 2);
   });
 
-  test("calcula el centro solo con las paradas recibidas e ignora otros campos", async () => {
-    usarTarifas(tarifa("geo-uno"));
-    devolverHoteles([{ id: "geo-uno", lat: 14.61, lon: -90.51 }]);
+  test("sin desglose informa impuestos no informados y usa rate_per_night solo si falta el total", async () => {
+    serpapi = () =>
+      respuestaJson({
+        search_metadata: { status: "Success" },
+        properties: [{ ...propiedad({ token: "tok-noche", lat: 14.61, lng: -90.51, usd: 20 }), total_rate: undefined }],
+      });
+    const { cuerpo } = await enviar(solicitud());
+    assert.equal(cuerpo.hoteles[0].tarifa.campo, "rate_per_night");
+    assert.deepEqual(cuerpo.hoteles[0].tarifa.impuestos, { estado: "no_informado" });
+    assert.equal(cuerpo.hoteles[0].tarifa.importeCentavos, 15300);
+  });
 
-    const { cuerpo } = await enviar(
-      solicitud({
-        centro: { lat: 0, lng: 0 },
-        destino: { lat: 40, lng: 3 },
-        porcentajeHospedaje: 100,
-        paradas: PARADAS.map((p, i) => ({ ...p, placeId: `p${i}`, nombre: "Parada" })),
-      }),
-    );
+  test("ordena por cercanía al centro del día aunque el proveedor entregue otro orden", async () => {
+    devolverHoteles([
+      { token: "tok-lejano", lat: 14.65, lng: -90.51 },
+      { token: "tok-cercano", lat: 14.611, lng: -90.51 },
+      { token: "tok-medio", lat: 14.63, lng: -90.51 },
+    ]);
+    const { cuerpo } = await enviar(solicitud());
+    assert.deepEqual(cuerpo.hoteles.map((h) => h.idExterno), ["tok-cercano", "tok-medio", "tok-lejano"]);
+    assert.ok(cuerpo.centro && Math.abs(cuerpo.centro.lat - 14.61) < 1e-3 && Math.abs(cuerpo.centro.lng + 90.51) < 1e-3);
+    assert.equal(cuerpo.metodoDistancia, "linea_recta");
+  });
 
+  test("resuelve empates de distancia por idExterno y elimina duplicados", async () => {
+    devolverHoteles([
+      { token: "tok-c", lat: 14.612, lng: -90.51 },
+      { token: "tok-b", lat: 14.611, lng: -90.51 },
+      { token: "tok-a", lat: 14.611, lng: -90.51 },
+      { token: "tok-b", lat: 14.611, lng: -90.51, usd: 10 },
+    ]);
+    const { cuerpo } = await enviar(solicitud());
+    assert.deepEqual(cuerpo.hoteles.map((h) => h.idExterno), ["tok-a", "tok-b", "tok-c"]);
+    assert.equal(cuerpo.hoteles[1].tarifa.importeUsd, 24);
+    assert.equal(cuerpo.busqueda?.resultadosRecibidos, 4);
+    assert.equal(cuerpo.busqueda?.hotelesConPrecio, 3);
+  });
+
+  test("filtra por radio en el backend con la distancia sin redondear", async () => {
+    devolverHoteles([
+      { token: "tok-dentro", lat: 14.62, lng: -90.51 },
+      { token: "tok-fuera", lat: 14.7, lng: -90.51 },
+    ]);
+    const { cuerpo } = await enviar(solicitud({ radio: 2000 }));
+    assert.deepEqual(cuerpo.hoteles.map((h) => h.idExterno), ["tok-dentro"]);
+    assert.equal(cuerpo.busqueda?.hotelesEnRadio, 1);
+    assert.equal(cuerpo.busqueda?.radioMetros, 2000);
+  });
+
+  test("calcula el centro y las distancias junto al antimeridiano", async () => {
+    devolverHoteles([
+      { token: "tok-oeste", lat: 0, lng: -179.97 },
+      { token: "tok-este", lat: 0, lng: 179.99 },
+    ]);
+    const { cuerpo } = await enviar(solicitud({ paradas: [{ lat: 0, lng: 179.9 }, { lat: 0, lng: -179.9 }] }));
     assert.ok(cuerpo.centro);
-    assert.ok(Math.abs(cuerpo.centro.lat - 14.61) < 1e-3);
-    assert.ok(Math.abs(cuerpo.centro.lng + 90.51) < 1e-3);
-    assert.equal(cuerpo.porcentajeHospedaje, 40);
-    assert.equal(cuerpo.presupuestoHospedajeCentavos, 20000);
-    const filtro = filtroDe(llamadas[0]);
-    assert.ok(Math.abs(filtro.lat - cuerpo.centro.lat) < 1e-6);
-    assert.ok(Math.abs(filtro.lng - cuerpo.centro.lng) < 1e-6);
+    assert.equal(Math.abs(cuerpo.centro.lng), 180);
+    assert.deepEqual(cuerpo.hoteles.map((h) => h.idExterno), ["tok-este", "tok-oeste"]);
   });
 
-  test("resuelve empates de distancia por idExterno de forma estable", async () => {
-    usarTarifas(tarifa("geo-b"), tarifa("geo-a"), tarifa("geo-c"));
-    devolverHoteles([
-      { id: "geo-c", lat: 14.612, lon: -90.51 },
-      { id: "geo-b", lat: 14.611, lon: -90.51 },
-      { id: "geo-a", lat: 14.611, lon: -90.51 },
-    ]);
-
-    const primera = await enviar(solicitud());
-    devolverHoteles([
-      { id: "geo-a", lat: 14.611, lon: -90.51 },
-      { id: "geo-c", lat: 14.612, lon: -90.51 },
-      { id: "geo-b", lat: 14.611, lon: -90.51 },
-    ]);
-    const segunda = await enviar(solicitud());
-
-    assert.deepEqual(primera.cuerpo.hoteles.map((h) => h.idExterno), ["geo-a", "geo-b", "geo-c"]);
-    assert.deepEqual(segunda.cuerpo.hoteles.map((h) => h.idExterno), ["geo-a", "geo-b", "geo-c"]);
-  });
-
-  test("acepta coordenadas cero y consulta alrededor de (0, 0)", async () => {
-    usarTarifas(tarifa("geo-cero"));
-    devolverHoteles([{ id: "geo-cero", lat: 0.001, lon: 0 }]);
-
+  test("acepta coordenadas cero", async () => {
+    devolverHoteles([{ token: "tok-cero", lat: 0.001, lng: 0 }]);
     const { estado, cuerpo } = await enviar(solicitud({ paradas: [{ lat: 0, lng: 0 }] }));
-
     assert.equal(estado, 200);
     assert.deepEqual(cuerpo.centro, { lat: 0, lng: 0 });
-    assert.equal(llamadas[0].searchParams.get("filter"), "circle:0,0,5000");
     assert.equal(cuerpo.hoteles[0].distanciaLineaRectaMetros, 111);
   });
 
-  test("calcula el centro y las distancias correctamente junto al antimeridiano", async () => {
-    usarTarifas(tarifa("geo-este"), tarifa("geo-oeste"));
-    devolverHoteles([
-      { id: "geo-oeste", lat: 0, lon: -179.95 },
-      { id: "geo-este", lat: 0, lon: 179.99 },
-    ]);
+  test("con Q500 admite un hotel convertido a Q200.00 y con Q499.99 lo excluye por un centavo", async () => {
+    usarTasa(8);
+    devolverHoteles([{ token: "tok-200", lat: 14.61, lng: -90.51, usd: 25 }]);
+    const igual = await enviar(solicitud({ presupuestoDiario: 500 }));
+    assert.deepEqual(igual.cuerpo.hoteles.map((h) => [h.idExterno, h.tarifa.importeCentavos]), [["tok-200", 20000]]);
 
-    const { cuerpo } = await enviar(solicitud({ paradas: [{ lat: 0, lng: 179.9 }, { lat: 0, lng: -179.9 }] }));
-
-    assert.ok(cuerpo.centro);
-    assert.equal(Math.abs(cuerpo.centro.lng), 180);
-    assert.deepEqual(cuerpo.hoteles.map((h) => h.idExterno), ["geo-este", "geo-oeste"]);
-    assert.ok(cuerpo.hoteles[0].distanciaLineaRectaMetros < 1200);
-    assert.ok(cuerpo.hoteles[1].distanciaLineaRectaMetros < 6000);
+    const encima = await enviar(solicitud({ presupuestoDiario: 499.99 }));
+    assert.equal(encima.cuerpo.presupuestoHospedajeCentavos, 19999);
+    assert.deepEqual(encima.cuerpo.hoteles, []);
+    assert.equal(encima.cuerpo.motivo, "sin_hoteles_en_presupuesto");
+    assert.ok(encima.cuerpo.tipoCambio);
   });
 
-  test("con presupuesto diario de Q500 admite una tarifa de Q200 y excluye una de Q200.01", async () => {
-    usarTarifas(tarifa("geo-200", { importeCentavos: 20000 }), tarifa("geo-200-01", { importeCentavos: 20001 }));
-    devolverHoteles([
-      { id: "geo-200-01", lat: 14.6105, lon: -90.51 },
-      { id: "geo-200", lat: 14.62, lon: -90.51 },
-    ]);
-
-    const { cuerpo } = await enviar(solicitud({ presupuestoDiario: 500 }));
-
-    assert.equal(cuerpo.presupuestoHospedaje, 200);
-    assert.equal(cuerpo.presupuestoHospedajeCentavos, 20000);
-    assert.deepEqual(cuerpo.hoteles.map((h) => [h.idExterno, h.tarifa.importe]), [["geo-200", 200]]);
-  });
-
-  test("redondea hacia abajo la fracción de centavo para no superar el 40 %", async () => {
-    usarTarifas(tarifa("geo-200", { importeCentavos: 20000 }), tarifa("geo-200-01", { importeCentavos: 20001 }));
-    devolverHoteles([
-      { id: "geo-200-01", lat: 14.6105, lon: -90.51 },
-      { id: "geo-200", lat: 14.62, lon: -90.51 },
-    ]);
-
-    const { cuerpo } = await enviar(solicitud({ presupuestoDiario: 500.02 }));
-
-    assert.equal(cuerpo.presupuestoHospedajeCentavos, 20000);
-    assert.deepEqual(cuerpo.hoteles.map((h) => h.idExterno), ["geo-200"]);
-  });
-
-  test("excluye hoteles sin tarifa o con tarifas no aplicables", async () => {
-    usarTarifas(
-      tarifa("geo-valido"),
-      tarifa("geo-vencido", { vigenciaHasta: "2026-10-13" }),
-      tarifa("geo-futuro", { vigenciaDesde: "2026-10-15" }),
-      tarifa("geo-usd", { moneda: "USD", importeCentavos: 1000 }),
-      tarifa("geo-ocupacion", { ocupacion: 3 }),
-      tarifa("geo-impuestos", { impuestosIncluidos: null }),
-      tarifa("geo-sin-impuestos", { impuestosIncluidos: false }),
-      tarifa("geo-desde", { importeTotal: false }),
-    );
-    const ids = ["geo-sin-tarifa", "geo-vencido", "geo-futuro", "geo-usd", "geo-ocupacion", "geo-impuestos", "geo-sin-impuestos", "geo-desde"];
-    devolverHoteles([...ids.map((id) => ({ id, lat: 14.6101, lon: -90.51 })), { id: "geo-valido", lat: 14.64, lon: -90.51 }]);
-
+  test("compara el mismo importe convertido que devuelve, sin redondear la tasa", async () => {
+    usarTasa(8.0004);
+    devolverHoteles([{ token: "tok-limite", lat: 14.61, lng: -90.51, usd: 25 }]);
     const { cuerpo } = await enviar(solicitud());
-
-    assert.deepEqual(cuerpo.hoteles.map((h) => h.idExterno), ["geo-valido"]);
+    assert.equal(cuerpo.tipoCambio?.tasa, 8.0004);
+    assert.deepEqual(cuerpo.hoteles, []);
+    assert.equal(cuerpo.motivo, "sin_hoteles_en_presupuesto");
   });
 
-  test("elige de forma determinista la tarifa más económica aplicable de cada hotel", async () => {
-    usarTarifas(
-      tarifa("geo-uno", { id: "t-cara", importeCentavos: 18000 }),
-      tarifa("geo-uno", { id: "t-z", importeCentavos: 12000 }),
-      tarifa("geo-uno", { id: "t-m", importeCentavos: 12000 }),
-      tarifa("geo-uno", { id: "t-barata-otra-ocupacion", importeCentavos: 5000, ocupacion: 1 }),
-    );
-    devolverHoteles([{ id: "geo-uno", lat: 14.61, lon: -90.51 }]);
-
-    const { cuerpo } = await enviar(solicitud());
-
-    assert.equal(cuerpo.hoteles[0].tarifa.id, "t-m");
-    assert.equal(cuerpo.hoteles[0].tarifa.importeCentavos, 12000);
-  });
-
-  test("elimina hoteles duplicados entregados por el proveedor", async () => {
-    usarTarifas(tarifa("geo-uno"), tarifa("geo-dos"));
+  test("aplica el límite después de filtrar por radio y presupuesto y de ordenar", async () => {
     devolverHoteles([
-      { id: "geo-uno", lat: 14.61, lon: -90.51 },
-      { id: "geo-dos", lat: 14.62, lon: -90.51 },
-      { id: "geo-uno", lat: 14.61, lon: -90.51 },
+      { token: "tok-5", lat: 14.65, lng: -90.51 },
+      { token: "tok-caro", lat: 14.6101, lng: -90.51, usd: 30 },
+      { token: "tok-fuera", lat: 14.9, lng: -90.51 },
+      { token: "tok-4", lat: 14.64, lng: -90.51 },
+      { token: "tok-3", lat: 14.63, lng: -90.51 },
     ]);
-
-    const { cuerpo } = await enviar(solicitud());
-
-    assert.deepEqual(cuerpo.hoteles.map((h) => h.idExterno), ["geo-uno", "geo-dos"]);
-    assert.equal(cuerpo.busqueda?.candidatosEncontrados, 2);
-  });
-
-  test("aplica el límite después de filtrar y ordenar, y consulta hasta 100 candidatos", async () => {
-    usarTarifas(tarifa("geo-3"), tarifa("geo-4"), tarifa("geo-5"), tarifa("geo-caro", { importeCentavos: 50000 }));
-    devolverHoteles([
-      { id: "geo-5", lat: 14.65, lon: -90.51 },
-      { id: "geo-caro", lat: 14.6101, lon: -90.51 },
-      { id: "geo-sin-tarifa", lat: 14.6102, lon: -90.51 },
-      { id: "geo-4", lat: 14.64, lon: -90.51 },
-      { id: "geo-3", lat: 14.63, lon: -90.51 },
-    ]);
-
     const { cuerpo } = await enviar(solicitud({ limite: 2, radio: 8000 }));
-
-    assert.deepEqual(cuerpo.hoteles.map((h) => h.idExterno), ["geo-3", "geo-4"]);
-    assert.equal(llamadas[0].searchParams.get("limit"), "100");
-    assert.equal(filtroDe(llamadas[0]).radio, 8000);
-    assert.equal(cuerpo.busqueda?.radioMetros, 8000);
+    assert.deepEqual(cuerpo.hoteles.map((h) => h.idExterno), ["tok-3", "tok-4"]);
   });
 
   test("aplica el límite predeterminado de 10 recomendaciones", async () => {
-    const ids = Array.from({ length: 12 }, (_, i) => `geo-${String(i).padStart(2, "0")}`);
-    usarTarifas(...ids.map((id) => tarifa(id)));
-    devolverHoteles(ids.map((id, i) => ({ id, lat: 14.61 + i * 0.001, lon: -90.51 })));
-
+    const tokens = Array.from({ length: 12 }, (_, i) => `tok-${String(i).padStart(2, "0")}`);
+    devolverHoteles(tokens.map((token, i) => ({ token, lat: 14.61 + i * 0.001, lng: -90.51 })));
     const { cuerpo } = await enviar(solicitud());
+    assert.deepEqual(cuerpo.hoteles.map((h) => h.idExterno), tokens.slice(0, 10));
+  });
 
-    assert.equal(cuerpo.hoteles.length, 10);
-    assert.deepEqual(cuerpo.hoteles.map((h) => h.idExterno), ids.slice(0, 10));
+  test("consulta con la ocupación indicada como adultos y sin niños", async () => {
+    devolverHoteles([{ token: "tok-uno", lat: 14.61, lng: -90.51 }]);
+    const { cuerpo } = await enviar(solicitud({ ocupacion: 3 }));
+    assert.equal(llamadasA("serpapi.com")[0].searchParams.get("adults"), "3");
+    assert.equal(llamadasA("serpapi.com")[0].searchParams.get("children"), "0");
+    assert.deepEqual(cuerpo.estancia, { entrada: "2026-10-14", salida: "2026-10-15", noches: 1, adultos: 3, ninos: 0 });
+    assert.equal(cuerpo.ocupacion, 3);
+  });
+
+  test("calcula la salida al día siguiente también en fin de año y en año bisiesto", async () => {
+    devolverHoteles([{ token: "tok-uno", lat: 14.61, lng: -90.51 }]);
+    await enviar(solicitud({ fecha: "2026-12-31" }));
+    await enviar(solicitud({ fecha: "2028-02-28" }));
+    await enviar(solicitud({ fecha: "2028-02-29" }));
+    assert.deepEqual(
+      llamadasA("serpapi.com").map((u) => [u.searchParams.get("check_in_date"), u.searchParams.get("check_out_date")]),
+      [
+        ["2026-12-31", "2027-01-01"],
+        ["2028-02-28", "2028-02-29"],
+        ["2028-02-29", "2028-03-01"],
+      ],
+    );
+  });
+
+  test("excluye alquileres vacacionales, anuncios y hoteles incompletos", async () => {
+    serpapi = () =>
+      respuestaJson({
+        search_metadata: { status: "Success" },
+        ads: [{ name: "Anuncio", property_token: "tok-anuncio", gps_coordinates: { latitude: 14.61, longitude: -90.51 }, extracted_price: 5 }],
+        properties: [
+          propiedad({ token: "tok-valido", lat: 14.63, lng: -90.51 }),
+          propiedad({ token: "tok-alquiler", lat: 14.61, lng: -90.51, tipo: "vacation rental" }),
+          { ...propiedad({ token: "tok-sin-precio", lat: 14.61, lng: -90.51 }), total_rate: undefined, rate_per_night: { lowest: "$5" } },
+          { ...propiedad({ token: "tok-sin-coordenadas", lat: 14.61, lng: -90.51 }), gps_coordinates: undefined },
+          { ...propiedad({ token: "tok-sin-nombre", lat: 14.61, lng: -90.51 }), name: "" },
+          { ...propiedad({ token: "", lat: 14.61, lng: -90.51 }) },
+        ],
+      });
+    const { cuerpo } = await enviar(solicitud());
+    assert.deepEqual(cuerpo.hoteles.map((h) => h.idExterno), ["tok-valido"]);
+    assert.equal(cuerpo.busqueda?.resultadosRecibidos, 6);
+    assert.equal(cuerpo.busqueda?.hotelesConPrecio, 1);
+  });
+
+  test("ignora campos no admitidos como un porcentaje enviado por el cliente", async () => {
+    devolverHoteles([{ token: "tok-uno", lat: 14.61, lng: -90.51 }]);
+    const { cuerpo } = await enviar(solicitud({ porcentajeHospedaje: 100, centro: { lat: 0, lng: 0 } }));
+    assert.equal(cuerpo.porcentajeHospedaje, 40);
+    assert.equal(cuerpo.presupuestoHospedajeCentavos, 20000);
+    assert.ok(cuerpo.centro && Math.abs(cuerpo.centro.lat - 14.61) < 1e-3);
+  });
+
+  test("no consulta Geoapify ni requiere su clave ni un catálogo local", async () => {
+    devolverHoteles([{ token: "tok-uno", lat: 14.61, lng: -90.51 }]);
+    const { estado } = await enviar(solicitud());
+    assert.equal(estado, 200);
+    assert.ok(llamadas.every((url) => url.hostname === "serpapi.com" || url.hostname === "v6.exchangerate-api.com"));
+    assert.equal(llamadas.some((url) => url.hostname.includes("geoapify")), false);
   });
 });
 
-describe("POST /api/hoteles/recomendaciones - respuestas vacías", () => {
-  test("hospedaje: true devuelve vacío sin leer el catálogo ni consultar a Geoapify", async () => {
-    usarTarifas(tarifa("geo-uno"));
+describe("POST /api/hoteles/recomendaciones - respuestas vacías y salidas tempranas", () => {
+  test("hospedaje: true devuelve vacío sin llamadas externas", async () => {
     const { estado, cuerpo } = await enviar(solicitud({ hospedaje: true }));
-
     assert.equal(estado, 200);
-    assert.deepEqual(cuerpo.hoteles, []);
     assert.equal(cuerpo.motivo, "hospedaje_reservado");
-    assert.equal(typeof cuerpo.mensaje, "string");
+    assert.deepEqual(cuerpo.hoteles, []);
     assert.equal(cuerpo.centro, null);
     assert.equal(cuerpo.busqueda, null);
+    assert.equal(cuerpo.tipoCambio, null);
     assert.equal(cuerpo.presupuestoHospedajeCentavos, 20000);
-    assert.equal(llamadas.length, 0);
-    assert.equal(lecturasCatalogo, 0);
-  });
-
-  test("sinHotel: true devuelve vacío sin leer el catálogo ni consultar a Geoapify", async () => {
-    usarTarifas(tarifa("geo-uno"));
-    const { estado, cuerpo } = await enviar(solicitud({ sinHotel: true }));
-
-    assert.equal(estado, 200);
-    assert.equal(cuerpo.motivo, "no_necesita_hotel");
-    assert.deepEqual(cuerpo.hoteles, []);
-    assert.equal(llamadas.length, 0);
-    assert.equal(lecturasCatalogo, 0);
-  });
-
-  test("si ambos indicadores son verdaderos prevalece el hospedaje reservado", async () => {
-    const { cuerpo } = await enviar(solicitud({ hospedaje: true, sinHotel: true }));
-
-    assert.equal(cuerpo.motivo, "hospedaje_reservado");
+    assert.deepEqual(cuerpo.estancia, { entrada: "2026-10-14", salida: "2026-10-15", noches: 1, adultos: 2, ninos: 0 });
     assert.equal(llamadas.length, 0);
   });
 
-  test("hospedaje: true responde 200 aunque el servidor no tenga clave de Geoapify", async () => {
-    const { instancia, url } = await iniciar(crearApp({ apiKey: "", hoteles: { leerCatalogo: async () => ({ tarifas: [] }) } }));
-    try {
-      const { estado, cuerpo } = await enviarA<RespuestaRecomendacionesHoteles>(url, solicitud({ hospedaje: true }));
-      assert.equal(estado, 200);
-      assert.equal(cuerpo.motivo, "hospedaje_reservado");
-    } finally {
-      instancia.closeAllConnections();
-      instancia.close();
-    }
+  test("sinHotel: true devuelve vacío sin llamadas externas y hospedaje prevalece si ambos son verdaderos", async () => {
+    const sinHotel = await enviar(solicitud({ sinHotel: true }));
+    assert.equal(sinHotel.cuerpo.motivo, "no_necesita_hotel");
+    const ambos = await enviar(solicitud({ hospedaje: true, sinHotel: true }));
+    assert.equal(ambos.cuerpo.motivo, "hospedaje_reservado");
+    assert.equal(llamadas.length, 0);
   });
 
-  test("un itinerario sin paradas devuelve vacío con centro null", async () => {
-    usarTarifas(tarifa("geo-uno"));
-    const { estado, cuerpo } = await enviar(solicitud({ paradas: [] }));
-
-    assert.equal(estado, 200);
+  test("un itinerario sin paradas devuelve vacío con centro null sin llamadas externas", async () => {
+    const { cuerpo } = await enviar(solicitud({ paradas: [] }));
     assert.equal(cuerpo.motivo, "itinerario_sin_paradas");
     assert.equal(cuerpo.centro, null);
-    assert.deepEqual(cuerpo.hoteles, []);
-    assert.equal(llamadas.length, 0);
-    assert.equal(lecturasCatalogo, 0);
-  });
-
-  test("un catálogo vacío devuelve una respuesta vacía explícita sin consultar a Geoapify", async () => {
-    const { estado, cuerpo } = await enviar(solicitud());
-
-    assert.equal(estado, 200);
-    assert.equal(cuerpo.motivo, "catalogo_vacio");
-    assert.deepEqual(cuerpo.hoteles, []);
-    assert.ok(cuerpo.centro);
-    assert.equal(llamadas.length, 0);
-    assert.equal(lecturasCatalogo, 1);
-  });
-
-  test("sin tarifas aplicables dentro del presupuesto no consulta a Geoapify", async () => {
-    usarTarifas(tarifa("geo-caro", { importeCentavos: 20001 }), tarifa("geo-otra-fecha", { vigenciaDesde: "2026-11-01", vigenciaHasta: "2026-11-30" }));
-    const { estado, cuerpo } = await enviar(solicitud());
-
-    assert.equal(estado, 200);
-    assert.equal(cuerpo.motivo, "sin_tarifas_aplicables");
-    assert.equal(cuerpo.busqueda, null);
     assert.equal(llamadas.length, 0);
   });
 
-  test("una búsqueda sin resultados devuelve vacío con el motivo correspondiente", async () => {
-    usarTarifas(tarifa("geo-uno"));
-    devolverHoteles([]);
-    const { estado, cuerpo } = await enviar(solicitud());
+  test("las salidas tempranas responden 200 aunque falten las claves de los proveedores", async () => {
+    const url = await iniciar({ serpApiKey: "", exchangeRateApiKey: "" });
+    for (const cambios of [{ hospedaje: true }, { sinHotel: true }, { paradas: [] }]) {
+      const { estado } = await enviarA<RespuestaRecomendacionesHoteles>(url, solicitud(cambios));
+      assert.equal(estado, 200);
+    }
+    assert.equal(llamadas.length, 0);
+  });
 
+  test("una búsqueda legítima sin resultados responde vacío sin consultar el tipo de cambio", async () => {
+    serpapi = () => respuestaJson({ search_metadata: { status: "Success" }, error: "Google Hotels hasn't returned any results for this query." });
+    const { estado, cuerpo } = await enviar(solicitud());
     assert.equal(estado, 200);
     assert.equal(cuerpo.motivo, "sin_hoteles_encontrados");
-    assert.equal(cuerpo.busqueda?.candidatosEncontrados, 0);
-    assert.equal(llamadas.length, 1);
+    assert.equal(cuerpo.busqueda?.resultadosRecibidos, 0);
+    assert.equal(cuerpo.tipoCambio, null);
+    assert.equal(llamadasA("v6.exchangerate-api.com").length, 0);
   });
 
-  test("candidatos sin tarifa aplicable devuelven vacío con motivo de hoteles no elegibles", async () => {
-    usarTarifas(tarifa("geo-registrado"));
-    devolverHoteles([{ id: "geo-otro", lat: 14.61, lon: -90.51 }]);
-    const { estado, cuerpo } = await enviar(solicitud());
+  test("sin hoteles con precio utilizable responde vacío sin consultar el tipo de cambio", async () => {
+    devolverHoteles([{ token: "tok-alquiler", lat: 14.61, lng: -90.51, tipo: "vacation rental" }]);
+    const { cuerpo } = await enviar(solicitud());
+    assert.equal(cuerpo.motivo, "sin_hoteles_con_precio");
+    assert.equal(llamadasA("v6.exchangerate-api.com").length, 0);
+  });
 
-    assert.equal(estado, 200);
-    assert.equal(cuerpo.motivo, "sin_hoteles_elegibles");
-    assert.deepEqual(cuerpo.hoteles, []);
-    assert.equal(cuerpo.busqueda?.candidatosEncontrados, 1);
+  test("sin hoteles dentro del radio responde vacío sin consultar el tipo de cambio", async () => {
+    devolverHoteles([{ token: "tok-lejos", lat: 15.5, lng: -90.51 }]);
+    const { cuerpo } = await enviar(solicitud());
+    assert.equal(cuerpo.motivo, "sin_hoteles_en_radio");
+    assert.equal(cuerpo.tipoCambio, null);
+    assert.equal(llamadasA("v6.exchangerate-api.com").length, 0);
   });
 });
 
-describe("POST /api/hoteles/recomendaciones - catálogo inválido", () => {
-  test("responde 500 CATALOGO_TARIFAS_INVALIDO sin revelar el catálogo ni consultar a Geoapify", async () => {
-    usarTarifas(tarifa("geo-uno", { importeCentavos: 0, fuente: { tipo: "cotizacion", referencia: "REFERENCIA-INTERNA-123" } }));
-    const resultado = await enviar<CuerpoError>(solicitud());
+describe("POST /api/hoteles/recomendaciones - cachés", () => {
+  test("reutiliza la búsqueda y la tasa, conserva la fecha original y reaplica radio y presupuesto", async () => {
+    devolverHoteles([
+      { token: "tok-cerca", lat: 14.611, lng: -90.51, usd: 24 },
+      { token: "tok-lejos", lat: 14.65, lng: -90.51, usd: 20 },
+    ]);
+    const primera = await enviar(solicitud());
+    instante += 5 * 60 * 1000;
+    const segunda = await enviar(solicitud({ radio: 1000, presupuestoDiario: 450 }));
 
-    verificarError(resultado, 500, "CATALOGO_TARIFAS_INVALIDO");
-    assert.equal(resultado.cuerpo.error.detalles, undefined);
-    assert.ok(!resultado.texto.includes("REFERENCIA-INTERNA-123"));
-    assert.ok(!resultado.texto.includes("geo-uno"));
-    assert.equal(llamadas.length, 0);
+    assert.deepEqual(primera.cuerpo.hoteles.map((h) => h.idExterno), ["tok-cerca", "tok-lejos"]);
+    assert.deepEqual(segunda.cuerpo.hoteles, []);
+    assert.equal(segunda.cuerpo.motivo, "sin_hoteles_en_presupuesto");
+    assert.equal(segunda.cuerpo.busqueda?.desdeCache, true);
+    assert.equal(segunda.cuerpo.busqueda?.consultadoEn, "2026-10-10T18:00:00.000Z");
+    assert.equal(segunda.cuerpo.tipoCambio?.consultadoEn, "2026-10-10T18:00:00.000Z");
+    assert.equal(llamadasA("serpapi.com").length, 1);
+    assert.equal(llamadasA("v6.exchangerate-api.com").length, 1);
   });
 
-  test("un catálogo sin la lista de tarifas también es un error de configuración", async () => {
-    catalogo = { hoteles: [] };
-    verificarError(await enviar<CuerpoError>(solicitud()), 500, "CATALOGO_TARIFAS_INVALIDO");
-  });
-
-  test("un catálogo ilegible responde 500 CATALOGO_TARIFAS_NO_DISPONIBLE", async () => {
-    const { instancia, url } = await iniciar(
-      crearApp({
-        apiKey: CLAVE,
-        fetch: async () => respuestaJson(coleccionHoteles([])),
-        hoteles: { rutaCatalogo: path.join(os.tmpdir(), "catalogo-hoteles-inexistente", "tarifas.json") },
-      }),
-    );
-    try {
-      verificarError(await enviarA<CuerpoError>(url, solicitud()), 500, "CATALOGO_TARIFAS_NO_DISPONIBLE");
-    } finally {
-      instancia.closeAllConnections();
-      instancia.close();
-    }
-  });
-
-  test("sin inyección usa el catálogo de producción, que está vacío", async () => {
-    const { instancia, url } = await iniciar(crearApp({ apiKey: CLAVE, fetch: async () => respuestaJson(coleccionHoteles([])) }));
-    try {
-      const { estado, cuerpo } = await enviarA<RespuestaRecomendacionesHoteles>(url, solicitud());
-      assert.equal(estado, 200);
-      assert.equal(cuerpo.motivo, "catalogo_vacio");
-    } finally {
-      instancia.closeAllConnections();
-      instancia.close();
-    }
+  test("separa las búsquedas por destino, fecha y ocupación y expira a los 15 minutos", async () => {
+    devolverHoteles([{ token: "tok-uno", lat: 14.61, lng: -90.51 }]);
+    await enviar(solicitud());
+    await enviar(solicitud({ destino: "Otra ciudad" }));
+    await enviar(solicitud({ fecha: "2026-10-15" }));
+    await enviar(solicitud({ ocupacion: 1 }));
+    await enviar(solicitud({ destino: "  Ciudad   de prueba " }));
+    assert.equal(llamadasA("serpapi.com").length, 4);
+    instante += TTL_CACHE_BUSQUEDAS_MS;
+    await enviar(solicitud());
+    assert.equal(llamadasA("serpapi.com").length, 5);
   });
 });
 
@@ -574,7 +531,17 @@ describe("POST /api/hoteles/recomendaciones - solicitudes inválidas", () => {
   const casos: [string, unknown, string][] = [
     ["sin fecha", solicitud({ fecha: undefined }), "fecha"],
     ["fecha irreal", solicitud({ fecha: "2026-02-30" }), "fecha"],
+    ["29 de febrero no bisiesto", solicitud({ fecha: "2027-02-29" }), "fecha"],
     ["fecha con otro formato", solicitud({ fecha: "14/10/2026" }), "fecha"],
+    ["fecha con hora", solicitud({ fecha: "2026-10-14T00:00:00Z" }), "fecha"],
+    ["fecha pasada", solicitud({ fecha: "2026-10-08" }), "fecha"],
+    ["fecha sin día siguiente", solicitud({ fecha: "9999-12-31" }), "fecha"],
+    ["sin destino", solicitud({ destino: undefined }), "destino"],
+    ["destino no texto", solicitud({ destino: 14 }), "destino"],
+    ["destino vacío", solicitud({ destino: "   " }), "destino"],
+    ["destino de un carácter", solicitud({ destino: "A" }), "destino"],
+    ["destino demasiado largo", solicitud({ destino: "x".repeat(101) }), "destino"],
+    ["destino con caracteres de control", solicitud({ destino: "Antigua\u0000" }), "destino"],
     ["sin paradas", solicitud({ paradas: undefined }), "paradas"],
     ["paradas no lista", solicitud({ paradas: { lat: 1, lng: 1 } }), "paradas"],
     ["latitud fuera de rango", solicitud({ paradas: [{ lat: 91, lng: 0 }] }), "paradas.0.lat"],
@@ -590,6 +557,7 @@ describe("POST /api/hoteles/recomendaciones - solicitudes inválidas", () => {
     ["presupuesto con tres decimales", solicitud({ presupuestoDiario: 500.001 }), "presupuestoDiario"],
     ["presupuesto como texto", solicitud({ presupuestoDiario: "500" }), "presupuestoDiario"],
     ["presupuesto excesivo", solicitud({ presupuestoDiario: 1_000_000.01 }), "presupuestoDiario"],
+    ["presupuesto no finito", JSON.stringify(solicitud({ presupuestoDiario: 0 })).replace('"presupuestoDiario":0', '"presupuestoDiario":1e999'), "presupuestoDiario"],
     ["otra moneda", solicitud({ moneda: "USD" }), "moneda"],
     ["sin moneda", solicitud({ moneda: undefined }), "moneda"],
     ["sin ocupación", solicitud({ ocupacion: undefined }), "ocupacion"],
@@ -608,20 +576,22 @@ describe("POST /api/hoteles/recomendaciones - solicitudes inválidas", () => {
   ];
 
   for (const [nombre, cuerpo, parametro] of casos) {
-    test(`responde 400 sin consultar al proveedor: ${nombre}`, async () => {
-      usarTarifas(tarifa("geo-uno"));
+    test(`responde 400 sin consultar a los proveedores: ${nombre}`, async () => {
       const resultado = await enviar<CuerpoError>(cuerpo);
-
       verificarError(resultado, 400, "PARAMETRO_INVALIDO");
       assert.ok(resultado.cuerpo.error.detalles?.some((d) => d.parametro === parametro), JSON.stringify(resultado.cuerpo.error.detalles));
       assert.equal(llamadas.length, 0);
-      assert.equal(lecturasCatalogo, 0);
     });
   }
 
+  test("acepta la fecha del día anterior en UTC porque aún es hoy en otras zonas horarias", async () => {
+    const { estado } = await enviar(solicitud({ fecha: "2026-10-09", hospedaje: true }));
+    assert.equal(estado, 200);
+  });
+
   test("valida aunque hospedaje sea verdadero", async () => {
-    const resultado = await enviar<CuerpoError>(solicitud({ hospedaje: true, presupuestoDiario: -1 }));
-    verificarError(resultado, 400, "PARAMETRO_INVALIDO");
+    verificarError(await enviar<CuerpoError>(solicitud({ hospedaje: true, presupuestoDiario: -1 })), 400, "PARAMETRO_INVALIDO");
+    verificarError(await enviar<CuerpoError>(solicitud({ hospedaje: true, destino: undefined })), 400, "PARAMETRO_INVALIDO");
   });
 
   test("rechaza JSON mal formado, cuerpos vacíos y cuerpos de más de 32 KB", async () => {
@@ -637,12 +607,26 @@ describe("POST /api/hoteles/recomendaciones - solicitudes inválidas", () => {
   });
 });
 
-describe("POST /api/hoteles/recomendaciones - errores del proveedor", () => {
-  const casos: [string, Simulador, number, string][] = [
-    ["credenciales rechazadas", () => respuestaJson({ message: `Invalid apiKey ${CLAVE}` }, 401), 502, "PROVEEDOR_CREDENCIALES_INVALIDAS"],
+describe("POST /api/hoteles/recomendaciones - configuración y errores de proveedores", () => {
+  test("sin clave de SerpApi responde 503 SERVICIO_NO_CONFIGURADO sin llamadas externas", async () => {
+    const url = await iniciar({ serpApiKey: "" });
+    verificarError(await enviarA<CuerpoError>(url, solicitud()), 503, "SERVICIO_NO_CONFIGURADO");
+    assert.equal(llamadas.length, 0);
+  });
+
+  test("sin clave de ExchangeRate-API responde 503 sin gastar una búsqueda de SerpApi", async () => {
+    const url = await iniciar({ exchangeRateApiKey: "" });
+    devolverHoteles([{ token: "tok-uno", lat: 14.61, lng: -90.51 }]);
+    verificarError(await enviarA<CuerpoError>(url, solicitud()), 503, "SERVICIO_NO_CONFIGURADO");
+    assert.equal(llamadas.length, 0);
+  });
+
+  const erroresSerpApi: [string, Simulador, number, string][] = [
+    ["credenciales rechazadas", () => respuestaJson({ error: `Invalid API key ${CLAVE_SERP}` }, 401), 502, "PROVEEDOR_CREDENCIALES_INVALIDAS"],
     ["acceso prohibido", () => respuestaJson({}, 403), 502, "PROVEEDOR_CREDENCIALES_INVALIDAS"],
-    ["límite de solicitudes", () => respuestaJson({}, 429), 503, "PROVEEDOR_LIMITE_SOLICITUDES"],
-    ["error del proveedor", () => respuestaJson({}, 500), 502, "PROVEEDOR_ERROR"],
+    ["cuota agotada", () => respuestaJson({ error: "Your account has run out of searches." }, 429), 503, "PROVEEDOR_LIMITE_SOLICITUDES"],
+    ["cuota agotada dentro de un 200", () => respuestaJson({ error: "Your account has run out of searches." }), 503, "PROVEEDOR_LIMITE_SOLICITUDES"],
+    ["error del proveedor", () => respuestaJson({ search_metadata: { status: "Error" }, error: "We couldn't get valid results." }, 503), 502, "PROVEEDOR_ERROR"],
     [
       "fallo de red",
       () => {
@@ -655,7 +639,7 @@ describe("POST /api/hoteles/recomendaciones - errores del proveedor", () => {
     ["estructura inesperada", () => respuestaJson({ resultados: [] }), 502, "PROVEEDOR_RESPUESTA_INVALIDA"],
     [
       "tiempo agotado",
-      (url, opciones) =>
+      (_url, opciones) =>
         new Promise<Response>((_, rechazar) => {
           opciones?.signal?.addEventListener("abort", () => rechazar(new Error("abortado")));
         }),
@@ -664,25 +648,64 @@ describe("POST /api/hoteles/recomendaciones - errores del proveedor", () => {
     ],
   ];
 
-  for (const [nombre, simular, estado, codigo] of casos) {
-    test(`conserva el error de Geoapify: ${nombre}`, async () => {
-      usarTarifas(tarifa("geo-uno"));
-      simulador = simular;
+  for (const [nombre, simular, estado, codigo] of erroresSerpApi) {
+    test(`traduce el error de SerpApi: ${nombre}`, async () => {
+      serpapi = simular;
       const resultado = await enviar<CuerpoError>(solicitud());
-
       verificarError(resultado, estado, codigo);
+      assert.match(resultado.cuerpo.error.mensaje, /SerpApi/);
       assert.equal((resultado.cuerpo as unknown as Record<string, unknown>).hoteles, undefined);
-      assert.equal(llamadas.length, 1);
+      assert.equal(llamadasA("v6.exchangerate-api.com").length, 0);
     });
   }
 
-  test("sin clave de Geoapify responde 500 SERVICIO_NO_CONFIGURADO en lugar de una lista vacía", async () => {
-    const { instancia, url } = await iniciar(crearApp({ apiKey: "", hoteles: { leerCatalogo: async () => ({ tarifas: [tarifa("geo-uno")] }) } }));
-    try {
-      verificarError(await enviarA<CuerpoError>(url, solicitud()), 500, "SERVICIO_NO_CONFIGURADO");
-    } finally {
-      instancia.closeAllConnections();
-      instancia.close();
-    }
+  const erroresTasa: [string, Simulador, number, string][] = [
+    ["clave inválida", () => respuestaJson({ result: "error", "error-type": "invalid-key" }, 403), 502, "PROVEEDOR_CREDENCIALES_INVALIDAS"],
+    ["cuenta inactiva", () => respuestaJson({ result: "error", "error-type": "inactive-account" }), 502, "PROVEEDOR_CREDENCIALES_INVALIDAS"],
+    ["cuota agotada", () => respuestaJson({ result: "error", "error-type": "quota-reached" }), 503, "PROVEEDOR_LIMITE_SOLICITUDES"],
+    ["límite HTTP", () => new Response("", { status: 429 }), 503, "PROVEEDOR_LIMITE_SOLICITUDES"],
+    ["error del proveedor", () => new Response("", { status: 500 }), 502, "PROVEEDOR_ERROR"],
+    ["formato de la modalidad abierta", () => respuestaJson({ result: "success", base_code: "USD", rates: { GTQ: 7.65 } }), 502, "PROVEEDOR_RESPUESTA_INVALIDA"],
+    [
+      "tasa vencida",
+      () =>
+        respuestaJson({
+          result: "success",
+          base_code: "USD",
+          time_last_update_unix: ULTIMA_ACTUALIZACION - 3 * 86400,
+          time_next_update_unix: ULTIMA_ACTUALIZACION - 2 * 86400,
+          conversion_rates: { GTQ: 7.65 },
+        }),
+      502,
+      "PROVEEDOR_RESPUESTA_INVALIDA",
+    ],
+    [
+      "tiempo agotado",
+      (_url, opciones) =>
+        new Promise<Response>((_, rechazar) => {
+          opciones?.signal?.addEventListener("abort", () => rechazar(new Error("abortado")));
+        }),
+      504,
+      "PROVEEDOR_TIEMPO_AGOTADO",
+    ],
+  ];
+
+  for (const [nombre, simular, estado, codigo] of erroresTasa) {
+    test(`traduce el error de ExchangeRate-API sin usar una tasa fija: ${nombre}`, async () => {
+      devolverHoteles([{ token: "tok-uno", lat: 14.61, lng: -90.51 }]);
+      exchangeRate = simular;
+      const resultado = await enviar<CuerpoError>(solicitud());
+      verificarError(resultado, estado, codigo);
+      assert.match(resultado.cuerpo.error.mensaje, /ExchangeRate-API/);
+      assert.equal(llamadasA("serpapi.com").length, 1);
+    });
+  }
+
+  test("una tasa vencida en caché no se usa si la actualización falla", async () => {
+    devolverHoteles([{ token: "tok-uno", lat: 14.61, lng: -90.51 }]);
+    assert.equal((await enviar(solicitud())).estado, 200);
+    instante = (ULTIMA_ACTUALIZACION + 86400) * 1000;
+    exchangeRate = () => respuestaJson({ result: "error", "error-type": "quota-reached" });
+    verificarError(await enviar<CuerpoError>(solicitud({ destino: "Otra ciudad" })), 503, "PROVEEDOR_LIMITE_SOLICITUDES");
   });
 });
