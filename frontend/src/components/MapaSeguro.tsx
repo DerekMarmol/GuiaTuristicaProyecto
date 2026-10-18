@@ -1,6 +1,7 @@
 import { Component, useEffect, useState, type ReactNode } from "react";
-import type { Parada } from "../../../shared/types";
+import type { Parada, PronosticoDiario } from "../../../shared/types";
 import { Mapa } from "./Mapa";
+import type { RespuestaEta } from "../services/eta";
 
 // Sin token de Mapbox el mapa no puede cargar: se muestra un aviso en lugar de romper toda la app.
 const hayToken = Boolean(import.meta.env.VITE_MAPBOX_TOKEN);
@@ -53,13 +54,18 @@ function useEnLinea() {
   return enLinea;
 }
 
-export function MapaSeguro({ paradas, paradasCompletadas }: { paradas?: Parada[]; paradasCompletadas?: string[] }) {
+export function MapaSeguro({ paradas, paradasCompletadas, pronostico, eta }: {
+  paradas?: Parada[];
+  paradasCompletadas?: string[];
+  pronostico?: PronosticoDiario;
+  eta?: RespuestaEta | null;
+}) {
   const enLinea = useEnLinea();
   if (!hayToken) return <Aviso />;
   if (!enLinea) return <Aviso sinConexion />;
   return (
     <LimiteDeError>
-      <Mapa paradas={paradas} paradasCompletadas={paradasCompletadas} />
+      <Mapa paradas={paradas} paradasCompletadas={paradasCompletadas} pronostico={pronostico} eta={eta} />
     </LimiteDeError>
   );
 }
