@@ -67,6 +67,7 @@ export function crearApp({
     routerOptions: { ignoreTrailingSlash: true, caseSensitive: false },
     frameworkErrors: manejarErrores,
   });
+  app.setErrorHandler(manejarErrores);
   app.register(authPlugin);
   app.register(authRoutes, { prefix: "/api/auth" });
   
