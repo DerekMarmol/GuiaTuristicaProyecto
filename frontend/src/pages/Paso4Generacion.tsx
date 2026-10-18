@@ -13,6 +13,7 @@ import CalificacionParada, { ResumenCalificacion } from "../components/Calificac
 import type { RespuestaClima } from "../../../shared/types";
 import { consultarPronostico, coordenadasDelViaje, hayLluviaSignificativa } from "../services/clima";
 import { reoptimizarRuta, type TipoEventoRuta } from "../services/reoptimizacion";
+import type { RespuestaEta } from "../services/eta";
 
 import {
   generarItinerario,
@@ -132,6 +133,7 @@ export default function Paso4Generacion() {
   // El seguimiento comienza únicamente cuando el usuario inicia el traslado.
   const [inicioSeguimiento, setInicioSeguimiento] = useState<number | null>(null);
   const [tiempoActual, setTiempoActual] = useState(() => Date.now());
+  const [etaMapa, setEtaMapa] = useState<RespuestaEta | null>(null);
 
   useEffect(() => {
     const intervalo = window.setInterval(() => setTiempoActual(Date.now()), 60_000);
@@ -192,6 +194,7 @@ export default function Paso4Generacion() {
       setItinerarios((actuales) => actuales?.map((it) =>
         it.id === diaSolicitado.id ? { ...it, paradas } : it
       ) ?? null);
+      setEtaMapa(null);
       setAvisoReoptimizacion("El plan se actualizó con el nuevo orden de paradas.");
     } catch (err) {
       setAvisoReoptimizacion(err instanceof Error ? err.message : "No se pudo actualizar la ruta.");
@@ -532,7 +535,7 @@ export default function Paso4Generacion() {
                 aria-selected={i === diaActivo}
                 aria-controls="panel-dia"
                 className="dia"
-                onClick={() => { setDiaActivo(i); setInicioSeguimiento(null); }}
+                onClick={() => { setDiaActivo(i); setInicioSeguimiento(null); setEtaMapa(null); }}
               >
                 Día {it.numeroDia} · {fechaCorta(it.fecha)}
               </button>
@@ -570,7 +573,12 @@ export default function Paso4Generacion() {
             role="region"
             aria-label={`Mapa de las paradas del día ${dia.numeroDia}`}
           >
-            <MapaSeguro paradas={dia.paradas} paradasCompletadas={idsParadasCompletadas} />
+            <MapaSeguro
+              paradas={dia.paradas}
+              paradasCompletadas={idsParadasCompletadas}
+              pronostico={pronostico?.dias.find((d) => d.fecha === dia.fecha)}
+              eta={etaMapa}
+            />
           </div>
           <div className="leyenda-ruta" aria-label="Leyenda del progreso de la ruta">
             <span><i className="leyenda-ruta-completada" /> Recorrido completado</span>
@@ -609,6 +617,8 @@ export default function Paso4Generacion() {
                   </p>
                 )}
                 <PanelEta
+                  key={dia.id}
+                  onResultado={setEtaMapa}
                   solicitud={{
                     horaActual: new Date(tiempoActual).toISOString(),
                     tiempoTranscurridoMinutos: Math.max(
