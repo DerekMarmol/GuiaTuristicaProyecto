@@ -2,9 +2,8 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { crearApp } from "./app";
 
-// Compilado, este archivo queda en dist/backend/src (rootDir ".." en tsconfig.build.json).
-const RAIZ_BACKEND = path.resolve(__dirname, path.extname(__filename) === ".ts" ? ".." : "../../..");
-dotenv.config({ path: path.join(RAIZ_BACKEND, ".env"), quiet: true });
+// Carga directa del archivo .env desde la raíz de backend
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
 const apiKey = process.env.GEOAPIFY_API_KEY?.trim();
 if (!apiKey) {
