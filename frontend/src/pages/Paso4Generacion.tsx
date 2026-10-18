@@ -3,8 +3,13 @@ import { useViaje } from "../context/ViajeContext";
 import Stepper from "../components/Stepper";
 import Recomendaciones from "../components/Recomendaciones";
 import { MapaSeguro } from "../components/MapaSeguro";
+import { PanelTelemetria } from "../components/PanelTelemetria";
+import PanelEta from "../components/PanelEta";
 import IndicadorClima, { type EstadoPronostico } from "../components/IndicadorClima";
 import AlertaHorario from "../components/AlertaHorario";
+import PanelPresupuesto from "../components/PanelPresupuesto";
+import { generarGastosSimulados } from "../services/gastos";
+import CalificacionParada, { ResumenCalificacion } from "../components/CalificacionParada";
 import type { RespuestaClima } from "../../../shared/types";
 import { consultarPronostico, coordenadasDelViaje, hayLluviaSignificativa } from "../services/clima";
 import { reoptimizarRuta, type TipoEventoRuta } from "../services/reoptimizacion";
@@ -44,6 +49,43 @@ const TRANSPORTE_CONFIG: Record<
   aereo: { etiquetaEstacionamiento: "Check-in, seguridad y abordaje" },
 };
 
+function obtenerTiempoTraslado(
+  parada: ParadaConHorario,
+  indice: number,
+  transporte: string | undefined
+): { minutos: number; estimado: boolean } | null {
+  const p = parada as ParadaConHorario & {
+    tiempoTrasladoMinutos?: number;
+    tipoTraslado?: string;
+    holgura?: { tiempoBaseMinutos?: number; tipoTraslado?: string };
+    desgloseHolgura?: { tiempoBaseMinutos?: number; tipoTraslado?: string };
+    traslado?: { holgura?: { tiempoBaseMinutos?: number; tipoTraslado?: string } };
+  };
+  const h = p.holgura || p.desgloseHolgura || p.traslado?.holgura;
+  const registrado = h?.tiempoBaseMinutos ?? p.tiempoTrasladoMinutos;
+  if (typeof registrado === "number" && Number.isFinite(registrado) && registrado > 0) {
+    return { minutos: registrado, estimado: false };
+  }
+  const tipo = String(h?.tipoTraslado || p.tipoTraslado || transporte || "").toLowerCase();
+  const modo = tipo.includes("pie") || tipo.includes("camin") ? "pie"
+    : tipo.includes("bus") || tipo.includes("colectivo") ? "bus"
+    : tipo.includes("moto") ? "moto"
+    : tipo.includes("aereo") || tipo.includes("avion") || tipo.includes("vuelo") ? "aereo"
+    : "auto";
+  const tiempos: Record<string, number[]> = {
+    pie: [10, 15, 8, 12, 20],
+    moto: [12, 18, 15, 22, 10],
+    auto: [15, 25, 18, 30, 20],
+    bus: [20, 35, 25, 40, 30],
+    aereo: [45, 60, 50, 90, 75],
+  };
+  const semillaId = parada.id
+    ? parada.id.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0)
+    : 0;
+  const lista = tiempos[modo];
+  return { minutos: lista[(indice + semillaId) % lista.length], estimado: true };
+}
+
 function obtenerAlertaHorario(parada: ParadaConHorario) {
   if (
     parada.estadoHorario === "ajustada" ||
@@ -67,6 +109,12 @@ export default function Paso4Generacion() {
     setItinerarios,
     irAPaso,
     reiniciar,
+    calificaciones,
+    guardarCalificacion,
+    gastos,
+    setGastos,
+    agregarGasto,
+    eliminarGasto,
   } = useViaje();
 
   // Estados
@@ -79,6 +127,17 @@ export default function Paso4Generacion() {
   const [diaActivo, setDiaActivo] = useState(0);
   const [votos, setVotos] = useState<Record<string, Voto>>({});
   const [copiado, setCopiado] = useState("");
+  const [calificando, setCalificando] = useState<string | null>(null);
+  const [visitadas, setVisitadas] = useState<Record<string, boolean>>({});
+  // El seguimiento comienza únicamente cuando el usuario inicia el traslado.
+  const [inicioSeguimiento, setInicioSeguimiento] = useState<number | null>(null);
+  const [tiempoActual, setTiempoActual] = useState(() => Date.now());
+
+  useEffect(() => {
+    const intervalo = window.setInterval(() => setTiempoActual(Date.now()), 60_000);
+    return () => window.clearInterval(intervalo);
+  }, []);
+
   const [pronostico, setPronostico] = useState<RespuestaClima | null>(null);
   const [estadoPronostico, setEstadoPronostico] = useState<EstadoPronostico>("cargando");
   const [reoptimizando, setReoptimizando] = useState(false);
@@ -93,6 +152,11 @@ export default function Paso4Generacion() {
   const enlaceRef = useRef<HTMLInputElement>(null);
 
   const esGrupo = viaje.tipoViaje === "amigos";
+  const presupuestoDiario =
+    viaje.presupuestoDiario ??
+    (viaje.presupuesto !== undefined
+      ? Math.round(viaje.presupuesto / Math.max(1, diasDeViaje(viaje.fechaInicio, viaje.fechaFin)))
+      : 500);
   const dias = diasDeViaje(viaje.fechaInicio, viaje.fechaFin);
   const enlace = `https://guiaturistica.example/votar/${codigo}`;
 
@@ -153,6 +217,8 @@ export default function Paso4Generacion() {
         if (cancelado) return;
 
         setItinerarios(resultado);
+        // TODO(backend): cargar los gastos reales (Lucía) en lugar de simularlos.
+        setGastos(generarGastosSimulados(resultado, presupuestoDiario));
         setDiaActivo(0);
         setVotos({});
         setFase("listo");
@@ -208,6 +274,7 @@ export default function Paso4Generacion() {
   }, [itinerarios]);
 
   function regenerar() {
+    setInicioSeguimiento(null);
     setItinerarios(null);
     setIntento((n) => n + 1);
   }
@@ -250,6 +317,7 @@ export default function Paso4Generacion() {
   // Datos del día activo
   const dia = itinerarios?.[diaActivo];
 
+<<<<<<< HEAD
   useEffect(() => {
     if (!dia || reoptimizando || estadoPronostico !== "listo") return;
     const climaDia = pronostico?.dias.find((d) => d.fecha === dia.fecha);
@@ -259,6 +327,15 @@ export default function Paso4Generacion() {
     diasClimaAplicados.current.add(clave);
     void solicitarReoptimizacion("clima", undefined, 100);
   }, [dia, estadoPronostico, pronostico, reoptimizando]);
+=======
+  // GUI-89: tomar el tiempo real del itinerario cuando existe.
+  // Si no viene informado, reutilizar la misma estimación visual de GUI-34.
+  const tiempoTrasladoActual = dia?.paradas.length && dia.paradas.length > 1
+    ? obtenerTiempoTraslado(dia.paradas[0], 0, viaje.transporte)
+    : null;
+  const trasladoDisponible = tiempoTrasladoActual !== null;
+  const trasladoEstimado = tiempoTrasladoActual?.estimado ?? false;
+>>>>>>> origin/main
 
   const lugares = useMemo(
     () =>
@@ -443,7 +520,7 @@ export default function Paso4Generacion() {
                 aria-selected={i === diaActivo}
                 aria-controls="panel-dia"
                 className="dia"
-                onClick={() => setDiaActivo(i)}
+                onClick={() => { setDiaActivo(i); setInicioSeguimiento(null); }}
               >
                 Día {it.numeroDia} · {fechaCorta(it.fecha)}
               </button>
@@ -464,6 +541,17 @@ export default function Paso4Generacion() {
             </button>
           </div>
 
+          {/* Presupuesto del día */}
+          <PanelPresupuesto
+            numeroDia={dia.numeroDia}
+            presupuestoDiario={presupuestoDiario}
+            gastosDelDia={gastos.filter((g) => g.numeroDia === dia.numeroDia)}
+            totalGastadoViaje={gastos.reduce((s, g) => s + g.monto, 0)}
+            presupuestoTotal={viaje.presupuesto}
+            onAgregar={agregarGasto}
+            onEliminar={eliminarGasto}
+          />
+
           {/* Mapa */}
           <div
             className="mapa-dia"
@@ -472,6 +560,66 @@ export default function Paso4Generacion() {
           >
             <MapaSeguro paradas={dia.paradas} />
           </div>
+
+          {/* Telemetría GPS del recorrido */}
+          <PanelTelemetria />
+
+          {/* GUI-89: seguimiento manual del traslado y recálculo de ETA */}
+          {dia.paradas.length > 1 && (
+            <section aria-label="Seguimiento del traslado">
+              <button
+                type="button"
+                className="btn-secundario"
+                onClick={() => {
+                  setInicioSeguimiento(Date.now());
+                  setTiempoActual(Date.now());
+                }}
+              >
+                {inicioSeguimiento === null ? "Iniciar traslado" : "Reiniciar traslado"}
+              </button>
+
+              {inicioSeguimiento === null ? (
+                <p className="nota">Inicia el traslado para calcular el tiempo transcurrido.</p>
+              ) : !trasladoDisponible ? (
+                <p className="nota">
+                  No hay un tiempo de traslado previsto válido para calcular la ETA.
+                </p>
+              ) : (
+                <>
+                {trasladoEstimado && (
+                  <p className="nota">
+                    ETA aproximada: el itinerario no proporcionó un tiempo de traslado real.
+                    Se utiliza la estimación que aparece en «Traslado y margen de seguridad».
+                  </p>
+                )}
+                <PanelEta
+                  solicitud={{
+                    horaActual: new Date(tiempoActual).toISOString(),
+                    tiempoTranscurridoMinutos: Math.max(
+                      0,
+                      Math.floor((tiempoActual - inicioSeguimiento) / 60_000)
+                    ),
+                    tiempoTrasladoPrevistoMinutos: tiempoTrasladoActual!.minutos,
+                    // La primera ETA corresponde a la segunda parada.
+                    // Los siguientes tramos incluyen traslado desde la parada anterior.
+                    tramos: dia.paradas.slice(1).map((parada, indice) => {
+                      const origen = indice > 0 ? dia.paradas[indice] : null;
+                      const traslado = origen
+                        ? obtenerTiempoTraslado(origen, indice, viaje.transporte)
+                        : null;
+                      return {
+                        paradaId: parada.id,
+                        tiempoTrasladoMinutos: indice === 0 ? 0 : traslado?.minutos ?? 0,
+                        tiempoEstanciaMinutos: parada.tiempoEstanciaMinutos,
+                      };
+                    }),
+                  }}
+                />
+                </>
+              )}
+            </section>
+          )}
+
 
           {/* Paradas */}
           <ol
@@ -490,7 +638,7 @@ export default function Paso4Generacion() {
 
               return (
                 <div key={p.id || i}>
-                  <li className="parada">
+                  <li className={`parada${visitadas[p.id] || calificaciones[p.id] ? " visitada" : ""}`}>
                     {/* Hora */}
                     <div className="hora">
                       {descartada
@@ -506,7 +654,12 @@ export default function Paso4Generacion() {
 
                     {/* Información del lugar */}
                     <div>
-                      <h3>{p.nombre}</h3>
+                      <h3>
+                        {p.nombre}
+                        {(visitadas[p.id] || calificaciones[p.id]) && (
+                          <span className="sello-visitada">Visitada</span>
+                        )}
+                      </h3>
 
                       <p>
                         Abre {p.horaApertura} ·
@@ -536,6 +689,38 @@ export default function Paso4Generacion() {
                           estado={alerta.estado}
                           mensaje={alerta.mensaje}
                         />
+                      )}
+
+                      {/* Calificación post-actividad */}
+                      {!descartada && (
+                        <div className="visita-acciones">
+                          {calificando === p.id ? (
+                            <CalificacionParada
+                              paradaId={p.id}
+                              nombre={p.nombre}
+                              inicial={calificaciones[p.id]}
+                              onCancelar={() => setCalificando(null)}
+                              onGuardar={(c) => {
+                                guardarCalificacion(c);
+                                setVisitadas((v) => ({ ...v, [p.id]: true }));
+                                setCalificando(null);
+                              }}
+                            />
+                          ) : calificaciones[p.id] ? (
+                            <ResumenCalificacion
+                              c={calificaciones[p.id]}
+                              onEditar={() => setCalificando(p.id)}
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn-visita"
+                              onClick={() => setCalificando(p.id)}
+                            >
+                              Ya visité este lugar · Calificar
+                            </button>
+                          )}
+                        </div>
                       )}
 
                       {/* Votaciones */}
@@ -651,8 +836,8 @@ export default function Paso4Generacion() {
 
                       const tiempoBase =
                         h?.tiempoBaseMinutos ??
-                        (p as any)
-                          .tiempoTrasladoMinutos ??
+                        (p as any).tiempoTrasladoMinutos ??
+                        obtenerTiempoTraslado(p, i, viaje.transporte)?.minutos ??
                         baseSugerida;
 
                       const tiempoAdicionalDefault =
