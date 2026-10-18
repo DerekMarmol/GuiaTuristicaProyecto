@@ -23,7 +23,6 @@ class Parada(BaseModel):
     hora_cierre: str
     tiempo_estancia_minutos: int
 
-    # Información para evaluar el clima
     tipo_entorno: str = "desconocido"
     sensibilidad_clima: float = 0.0
     probabilidad_lluvia: float | None = None
@@ -32,6 +31,11 @@ class Parada(BaseModel):
 
 class OptimizeRequest(BaseModel):
     paradas: list[Parada]
+
+
+class ReoptimizeRequest(BaseModel):
+    paradas: list[Parada]
+    hora_actual_minutos: int
 
 
 class OptimizeResponse(BaseModel):
@@ -297,10 +301,7 @@ def seleccionar_mejor_ruta(
     return mejor_ruta
 
 
-@router.post("/optimize", response_model=OptimizeResponse)
-def optimize(request: OptimizeRequest):
-    paradas = request.paradas
-
+def validar_paradas(paradas: list[Parada]) -> None:
     if not paradas:
         raise HTTPException(
             status_code=422,
@@ -334,6 +335,11 @@ def optimize(request: OptimizeRequest):
                 detail=f"Horario inválido en la parada {parada.id}."
             )
 
+
+def resolver_ruta(
+    paradas: list[Parada],
+    hora_inicio_minutos: int | None = None
+) -> OptimizeResponse:
     matriz_tiempos = calcular_matriz_tiempos(paradas)
 
     manager = pywrapcp.RoutingIndexManager(
@@ -345,8 +351,6 @@ def optimize(request: OptimizeRequest):
         origen = manager.IndexToNode(from_index)
         destino = manager.IndexToNode(to_index)
 
-        # El regreso al depósito no forma parte
-        # del itinerario mostrado.
         if routing.IsEnd(to_index):
             return 0
 
@@ -377,7 +381,6 @@ def optimize(request: OptimizeRequest):
         apertura = hora_a_minutos(parada.hora_apertura)
         cierre = hora_a_minutos(parada.hora_cierre)
 
-        # La visita debe terminar antes del cierre.
         ultimo_inicio = cierre - parada.tiempo_estancia_minutos
 
         if ultimo_inicio < apertura:
@@ -385,6 +388,15 @@ def optimize(request: OptimizeRequest):
                 status_code=422,
                 detail=f"No hay tiempo suficiente para visitar {parada.id}."
             )
+
+        if i == 0 and hora_inicio_minutos is not None:
+            apertura = max(apertura, hora_inicio_minutos)
+
+            if apertura > ultimo_inicio:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Ya no se alcanza a llegar a tiempo a {parada.id} desde la hora actual."
+                )
 
         dimension.CumulVar(indice).SetRange(
             apertura,
@@ -405,7 +417,6 @@ def optimize(request: OptimizeRequest):
             detail="No se encontró un itinerario válido con los horarios proporcionados."
         )
 
-    # Ruta base encontrada por OR-Tools
     orden_original = []
     indice = routing.Start(0)
 
@@ -421,16 +432,10 @@ def optimize(request: OptimizeRequest):
         or bool(p.pronostico_horario)
         for p in paradas
     )
-
-    # Usamos el horario de inicio de OR-Tools
-    # para comparar las rutas con la misma referencia.
     minuto_inicio = solution.Value(
         dimension.CumulVar(routing.Start(0))
     )
 
-    # Hasta 8 paradas: comparar todas las alternativas.
-    # Para más paradas: evaluar intercambios locales,
-    # evitando el crecimiento factorial.
     if hay_clima and len(paradas) > 1:
         if len(paradas) <= 8:
             rutas_candidatas = (
@@ -472,3 +477,22 @@ def optimize(request: OptimizeRequest):
         orden_optimo=orden_ids,
         distancia_total_km=round(distancia_total, 2)
     )
+
+
+@router.post("/optimize", response_model=OptimizeResponse)
+def optimize(request: OptimizeRequest):
+    validar_paradas(request.paradas)
+    return resolver_ruta(request.paradas)
+
+
+@router.post("/reoptimize", response_model=OptimizeResponse)
+def reoptimize(request: ReoptimizeRequest):
+    validar_paradas(request.paradas)
+
+    if request.hora_actual_minutos < 0 or request.hora_actual_minutos > 24 * 60:
+        raise HTTPException(
+            status_code=422,
+            detail="hora_actual_minutos debe estar entre 0 y 1440."
+        )
+
+    return resolver_ruta(request.paradas, hora_inicio_minutos=request.hora_actual_minutos)

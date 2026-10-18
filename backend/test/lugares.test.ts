@@ -1,6 +1,5 @@
 import { test, describe, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { once } from "node:events";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { crearApp } from "../src/app";
@@ -150,8 +149,8 @@ before(async () => {
       return simulador(url, opciones);
     },
   });
-  servidor = app.listen(0, "127.0.0.1");
-  await once(servidor, "listening");
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  servidor = app.server;
   baseUrl = `http://127.0.0.1:${puertoDe(servidor)}`;
 });
 
@@ -715,8 +714,8 @@ describe("GET /api/lugares - errores del proveedor", () => {
 describe("configuración y rutas", () => {
   test("sin clave configurada responde un error controlado sin consultar al proveedor", async () => {
     const app = crearApp({ apiKey: "  ", fetch: async () => assert.fail("no debe consultar al proveedor") });
-    const servidorSinClave: Server = app.listen(0, "127.0.0.1");
-    await once(servidorSinClave, "listening");
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const servidorSinClave: Server = app.server;
     try {
       const respuesta = await fetch(`http://127.0.0.1:${puertoDe(servidorSinClave)}/api/lugares?lat=1&lng=1&categoria=catering.cafe`);
       const cuerpo = (await respuesta.json()) as CuerpoError;

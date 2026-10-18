@@ -1,6 +1,5 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { once } from "node:events";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { crearApp } from "../src/app";
@@ -155,8 +154,8 @@ describe("clasificación en lugares de Geoapify", () => {
         return new Response(JSON.stringify(cuerpo), { status: 200, headers: { "Content-Type": "application/json" } });
       },
     });
-    const servidor: Server = app.listen(0, "127.0.0.1");
-    await once(servidor, "listening");
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const servidor: Server = app.server;
     try {
       const respuesta = await fetch(`http://127.0.0.1:${(servidor.address() as AddressInfo).port}/api/lugares?lat=14.6&lng=-90.5&intereses=Cultura,Naturaleza`);
       const cuerpo = (await respuesta.json()) as { lugares: Record<string, unknown>[] };

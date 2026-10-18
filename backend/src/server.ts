@@ -19,7 +19,15 @@ if (!process.env.OPENWEATHER_API_KEY?.trim()) {
 }
 
 const puerto = Number(process.env.PORT) || 3000;
+// "::" escucha en todas las interfaces (IPv6 e IPv4), como hacía Express; Fastify por defecto solo usa localhost.
+const host = process.env.HOST?.trim() || "::";
 
-crearApp({ apiKey }).listen(puerto, () => {
-  console.log(`Backend escuchando en http://localhost:${puerto}`);
-});
+crearApp({ apiKey })
+  .listen({ port: puerto, host })
+  .then(() => {
+    console.log(`Backend escuchando en http://localhost:${puerto}`);
+  })
+  .catch((error: unknown) => {
+    console.error("No fue posible iniciar el servidor:", error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
