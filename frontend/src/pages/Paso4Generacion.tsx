@@ -163,9 +163,14 @@ export default function Paso4Generacion() {
   async function solicitarReoptimizacion(tipo: TipoEventoRuta, paradaCanceladaId?: string, probabilidadLluvia?: number) {
     const diaSolicitado = itinerarios?.[diaActivo];
     if (!diaSolicitado || reoptimizando) return;
-    const visitadas = new Set(paradasVisitadas[diaSolicitado.id] ?? []);
+    const completadas = new Set([
+      ...(paradasVisitadas[diaSolicitado.id] ?? []),
+      ...diaSolicitado.paradas
+        .filter((parada) => visitadas[parada.id] || Boolean(calificaciones[parada.id]))
+        .map((parada) => parada.id),
+    ]);
     const paradasPendientes = diaSolicitado.paradas.filter((p) =>
-      !visitadas.has(p.id) && (p as ParadaConHorario).estadoHorario !== "descartada"
+      !completadas.has(p.id) && (p as ParadaConHorario).estadoHorario !== "descartada"
     );
     if (paradasPendientes.length === 0) {
       setAvisoReoptimizacion("No hay paradas pendientes para recalcular.");
@@ -181,7 +186,7 @@ export default function Paso4Generacion() {
         probabilidadLluvia,
       });
       const paradas = [
-        ...diaSolicitado.paradas.filter((p) => visitadas.has(p.id)),
+        ...diaSolicitado.paradas.filter((p) => completadas.has(p.id)),
         ...paradasReoptimizadas,
       ];
       setItinerarios((actuales) => actuales?.map((it) =>
@@ -317,7 +322,6 @@ export default function Paso4Generacion() {
   // Datos del día activo
   const dia = itinerarios?.[diaActivo];
 
-<<<<<<< HEAD
   useEffect(() => {
     if (!dia || reoptimizando || estadoPronostico !== "listo") return;
     const climaDia = pronostico?.dias.find((d) => d.fecha === dia.fecha);
@@ -327,7 +331,7 @@ export default function Paso4Generacion() {
     diasClimaAplicados.current.add(clave);
     void solicitarReoptimizacion("clima", undefined, 100);
   }, [dia, estadoPronostico, pronostico, reoptimizando]);
-=======
+
   // GUI-89: tomar el tiempo real del itinerario cuando existe.
   // Si no viene informado, reutilizar la misma estimación visual de GUI-34.
   const tiempoTrasladoActual = dia?.paradas.length && dia.paradas.length > 1
@@ -335,7 +339,6 @@ export default function Paso4Generacion() {
     : null;
   const trasladoDisponible = tiempoTrasladoActual !== null;
   const trasladoEstimado = tiempoTrasladoActual?.estimado ?? false;
->>>>>>> origin/main
 
   const lugares = useMemo(
     () =>
@@ -343,6 +346,15 @@ export default function Paso4Generacion() {
         ? construirRecomendaciones(viaje, itinerarios)
         : [],
     [itinerarios]
+  );
+
+  const idsParadasCompletadas = useMemo(
+    () => dia
+      ? dia.paradas
+        .filter((parada) => visitadas[parada.id] || Boolean(calificaciones[parada.id]) || paradasVisitadas[dia.id]?.includes(parada.id))
+        .map((parada) => parada.id)
+      : [],
+    [dia?.id, dia?.paradas, visitadas, calificaciones, paradasVisitadas]
   );
 
   const mostrarHoteles =
@@ -558,7 +570,11 @@ export default function Paso4Generacion() {
             role="region"
             aria-label={`Mapa de las paradas del día ${dia.numeroDia}`}
           >
-            <MapaSeguro paradas={dia.paradas} />
+            <MapaSeguro paradas={dia.paradas} paradasCompletadas={idsParadasCompletadas} />
+          </div>
+          <div className="leyenda-ruta" aria-label="Leyenda del progreso de la ruta">
+            <span><i className="leyenda-ruta-completada" /> Recorrido completado</span>
+            <span><i className="leyenda-ruta-pendiente" /> Recorrido pendiente</span>
           </div>
 
           {/* Telemetría GPS del recorrido */}

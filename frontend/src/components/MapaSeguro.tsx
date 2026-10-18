@@ -53,13 +53,13 @@ function useEnLinea() {
   return enLinea;
 }
 
-export function MapaSeguro({ paradas }: { paradas?: Parada[] }) {
+export function MapaSeguro({ paradas, paradasCompletadas }: { paradas?: Parada[]; paradasCompletadas?: string[] }) {
   const enLinea = useEnLinea();
   if (!hayToken) return <Aviso />;
   if (!enLinea) return <Aviso sinConexion />;
   return (
     <LimiteDeError>
-      <Mapa paradas={paradas} />
+      <Mapa paradas={paradas} paradasCompletadas={paradasCompletadas} />
     </LimiteDeError>
   );
 }
