@@ -78,11 +78,8 @@ export function crearApp({
   const validarPropuesta = crearValidadorPropuestas({ resolverLugares });
   const priorizarPorClima = crearPriorizadorClima({ resolverLugares, consultarClima });
   app.register(crearRutaItinerarios(validarPropuesta, priorizarPorClima), { prefix: "/api/itinerarios" });
-<<<<<<< HEAD
   app.register(crearRutaReoptimizacion(), { prefix: "/api/itinerarios" });
-=======
   app.register(rutaEta, { prefix: "/api/itinerarios" });
->>>>>>> origin/main
 
   app.register(crearRutaPronosticoClima(consultarClima), { prefix: "/api/clima/pronostico" });
 
