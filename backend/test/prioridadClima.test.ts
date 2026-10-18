@@ -1,6 +1,5 @@
 import { test, describe, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { once } from "node:events";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { crearApp } from "../src/app";
@@ -170,8 +169,8 @@ describe("POST /api/itinerarios/priorizar-clima", () => {
         },
       },
     });
-    servidor = app.listen(0, "127.0.0.1");
-    await once(servidor, "listening");
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    servidor = app.server;
     baseUrl = `http://127.0.0.1:${(servidor.address() as AddressInfo).port}`;
   });
 
@@ -379,8 +378,8 @@ describe("POST /api/itinerarios/priorizar-clima", () => {
       fetch: async (url) => respuestaJson(detalles(new URL(url).searchParams.get("id") ?? "")),
       clima: { apiKey: "", fetch: async () => assert.fail("no debe consultar OpenWeather sin clave") },
     });
-    const otro: Server = app.listen(0, "127.0.0.1");
-    await once(otro, "listening");
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const otro: Server = app.server;
     try {
       const respuesta = await fetch(`http://127.0.0.1:${(otro.address() as AddressInfo).port}${RUTA}`, {
         method: "POST",

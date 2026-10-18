@@ -1,6 +1,5 @@
 import { test, describe, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { once } from "node:events";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { crearApp } from "../src/app";
@@ -434,8 +433,8 @@ describe("GET /api/lugares - horarios de Geoapify", () => {
         return simularBusqueda(direccion, opciones);
       },
     });
-    servidor = app.listen(0, "127.0.0.1");
-    await once(servidor, "listening");
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    servidor = app.server;
     baseUrl = `http://127.0.0.1:${puertoDe(servidor)}`;
   });
 
@@ -634,8 +633,8 @@ describe("GET /api/lugares - horarios de Geoapify", () => {
         return respuestaJson(coleccion(["p1", "p2", "p3", "p4", "p5"].map((id) => lugarBusqueda(id))));
       },
     });
-    const servidorPresupuesto: Server = app.listen(0, "127.0.0.1");
-    await once(servidorPresupuesto, "listening");
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const servidorPresupuesto: Server = app.server;
     try {
       const inicio = Date.now();
       const respuesta = await fetch(`http://127.0.0.1:${puertoDe(servidorPresupuesto)}${RUTA}`);

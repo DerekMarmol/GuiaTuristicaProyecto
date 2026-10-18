@@ -1,6 +1,5 @@
 import { test, describe, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { once } from "node:events";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { crearApp } from "../src/app";
@@ -204,8 +203,8 @@ function resumenes(cuerpo: CuerpoPronostico) {
 }
 
 async function iniciar(app: ReturnType<typeof crearApp>): Promise<{ instancia: Server; base: string }> {
-  const instancia: Server = app.listen(0, "127.0.0.1");
-  await once(instancia, "listening");
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const instancia: Server = app.server;
   const direccion = instancia.address() as AddressInfo;
   return { instancia, base: `http://127.0.0.1:${direccion.port}` };
 }

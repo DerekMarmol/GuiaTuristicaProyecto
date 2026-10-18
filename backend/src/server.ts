@@ -2,9 +2,8 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { crearApp } from "./app";
 
-// Compilado, este archivo queda en dist/backend/src (rootDir ".." en tsconfig.build.json).
-const RAIZ_BACKEND = path.resolve(__dirname, path.extname(__filename) === ".ts" ? ".." : "../../..");
-dotenv.config({ path: path.join(RAIZ_BACKEND, ".env"), quiet: true });
+// Carga directa del archivo .env desde la raíz de backend
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
 const apiKey = process.env.GEOAPIFY_API_KEY?.trim();
 if (!apiKey) {
@@ -27,7 +26,15 @@ for (const variable of ["SERPAPI_API_KEY", "EXCHANGERATE_API_KEY"]) {
 }
 
 const puerto = Number(process.env.PORT) || 3000;
+// "::" escucha en todas las interfaces (IPv6 e IPv4), como hacía Express; Fastify por defecto solo usa localhost.
+const host = process.env.HOST?.trim() || "::";
 
-crearApp({ apiKey }).listen(puerto, () => {
-  console.log(`Backend escuchando en http://localhost:${puerto}`);
-});
+crearApp({ apiKey })
+  .listen({ port: puerto, host })
+  .then(() => {
+    console.log(`Backend escuchando en http://localhost:${puerto}`);
+  })
+  .catch((error: unknown) => {
+    console.error("No fue posible iniciar el servidor:", error instanceof Error ? error.message : error);
+    process.exit(1);
+  });

@@ -6,4 +6,7 @@ export interface Parada {
   horaApertura: string;
   horaCierre: string;
   tiempoEstanciaMinutos: number;
+  placeId?: string;
+  tipo_entorno?: "indoor" | "outdoor";
+  sensibilidad_clima?: "baja" | "media" | "alta";
 }

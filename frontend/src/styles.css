@@ -56,6 +56,25 @@ body {
 /* Mapa de Mapbox con las paradas del día activo (dentro del Paso 4) */
 .mapa-dia { margin-top: 1rem; overflow: hidden; border: 1px solid var(--linea); border-radius: 14px; background: var(--arena); }
 .mapa { width: 100%; height: 280px; }
+.marcador-parada { display: block; width: 2.25rem; height: 2.75rem; overflow: visible; border: 0; background: transparent; }
+.marcador-svg { display: block; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .4)); }
+.marcador-svg-pin { fill: #2786a8; stroke: #fff; stroke-width: 1.5; }
+.marcador-svg-centro { fill: #fff; opacity: .96; }
+.marcador-svg-numero { fill: #382b43; font: 700 11px var(--font-ui); dominant-baseline: middle; }
+@keyframes pulso-parada-activa { 50% { box-shadow: 0 0 0 7px rgba(242, 165, 65, .35), 0 2px 7px rgba(0, 0, 0, .35); } }
+.marcador-parada-activa .marcador-svg { animation: pulso-parada-activa 1.5s ease-in-out infinite; }
+.marcador-parada-activa .marcador-svg-pin { fill: #f2a541; }
+.marcador-parada-completada .marcador-svg-pin { fill: #43b581; }
+.popup-parada { display: grid; gap: .3rem; width: min(16rem, calc(100vw - 5rem)); color: var(--ciruela); }
+.popup-parada h3 { margin: 0 0 .2rem; font: 700 1rem/1.2 var(--font-ui); }
+.popup-parada p { margin: 0; font: 400 .8rem/1.4 var(--font-body); }
+.popup-parada small { margin-top: .15rem; color: var(--suave); font-size: .68rem; line-height: 1.35; }
+.leyenda-ruta { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin: .5rem .2rem 0; color: var(--suave); font-size: .78rem; }
+.leyenda-ruta span { display: inline-flex; align-items: center; gap: .4rem; }
+.leyenda-ruta i { display: inline-block; width: 1.25rem; height: .25rem; border-radius: 99px; }
+.leyenda-ruta-completada { background: #43b581; }
+.leyenda-ruta-pendiente { background: linear-gradient(90deg, #f2a541, #2786a8); }
+@media (prefers-reduced-motion: reduce) { .marcador-parada-activa { animation: none; } }
 @media (min-width: 640px) { .mapa { height: 360px; } }
 .contenedor { width: min(560px, calc(100% - 2rem)); margin-inline: auto; padding-block: 1.6rem 3rem; }
 
@@ -229,4 +248,237 @@ pre { margin: 0 0 1rem; padding: .8rem; overflow: auto; font-size: .85rem; color
 .sin-datos {
   background: var(--arena);
   color: var(--suave);
+}
+/* Chat flotante en ruta */
+.solo-lectores { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.chat { position: fixed; right: max(1rem, env(safe-area-inset-right, 0px)); bottom: max(1rem, env(safe-area-inset-bottom, 0px)); z-index: 20; display: flex; flex-direction: column; align-items: flex-end; gap: .7rem; }
+.chat-boton { position: relative; width: 3.5rem; height: 3.5rem; border: 2px solid var(--ciruela); border-radius: 50%; background: var(--coral); color: var(--ciruela); font-size: 1.5rem; line-height: 1; cursor: pointer; box-shadow: 0 4px 0 var(--ciruela); transition: transform .15s; }
+.chat-boton:hover { transform: translateY(-2px); }
+.chat-boton:focus-visible, .chat-cerrar:focus-visible, .chat-form input:focus-visible { outline: 3px solid var(--agua-osc); outline-offset: 2px; }
+.chat-punto { position: absolute; top: -.35rem; right: -.35rem; min-width: 1.4rem; height: 1.4rem; padding: 0 .3rem; border: 2px solid var(--ciruela); border-radius: 99px; background: var(--naranja); font: 700 .75rem/1.1rem var(--font-ui); box-sizing: border-box; }
+.chat-panel { width: min(22rem, calc(100vw - 2rem)); max-height: min(30rem, calc(100vh - 7rem)); display: flex; flex-direction: column; border: 2px solid var(--ciruela); border-radius: 16px; background: var(--papel); box-shadow: 0 6px 0 var(--ciruela); overflow: hidden; }
+.chat-cab { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .7rem .9rem; background: var(--agua); border-bottom: 2px solid var(--ciruela); }
+.chat-cab strong { display: block; font: 700 1rem var(--font-ui); letter-spacing: .06em; text-transform: uppercase; }
+.chat-cab small { color: var(--ciruela); font-size: .75rem; }
+.chat-cerrar { width: 2rem; height: 2rem; border: 1.5px solid var(--ciruela); border-radius: 50%; background: #fff; color: var(--ciruela); font-size: 1.2rem; line-height: 1; cursor: pointer; }
+.chat-mensajes { flex: 1; min-height: 8rem; overflow-y: auto; padding: .8rem; display: flex; flex-direction: column; gap: .5rem; }
+.burbuja { margin: 0; max-width: 85%; padding: .55rem .75rem; border-radius: 14px; font-size: .9rem; line-height: 1.35; }
+.burbuja.asistente { align-self: flex-start; background: #fff; border: 1px solid var(--linea-fuerte); border-bottom-left-radius: 4px; }
+.burbuja.usuario { align-self: flex-end; background: var(--verde); border: 1px solid var(--ciruela); border-bottom-right-radius: 4px; }
+.burbuja.escribiendo { letter-spacing: .2em; color: var(--suave); }
+.chat-sugerencias { display: flex; flex-wrap: wrap; gap: .4rem; padding: 0 .8rem .6rem; }
+.chat-form { display: flex; gap: .5rem; padding: .7rem; border-top: 2px dashed var(--linea-fuerte); background: var(--arena); }
+.chat-form input { flex: 1; min-width: 0; padding: .6rem; border: 1.5px solid var(--linea-fuerte); border-radius: 10px; background: #fff; font: .9rem var(--font-body); color: var(--ciruela); }
+.chat-form .btn-primario { width: auto; margin-top: 0; padding: .6rem 1rem; }
+.chat-form .btn-primario:disabled { opacity: .5; cursor: not-allowed; }
+
+.telemetria {
+  margin: 1.2rem 0;
+  padding: 1.2rem;
+  background: var(--papel);
+  border: 1px solid var(--linea-fuerte);
+  border-left: 6px solid var(--coral);
+  border-radius: 16px;
+  box-shadow: 0 4px 12px -4px rgba(74, 53, 96, .15);
+}
+
+.telemetria-encabezado {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.telemetria-etiqueta {
+  display: block;
+  margin-bottom: .4rem;
+  font: 700 .72rem/1.2 var(--font-ui);
+  letter-spacing: .14em;
+  color: var(--coral-osc);
+}
+
+.telemetria h3 {
+  margin: 0;
+  font: 700 1.25rem/1.2 var(--font-ui);
+  color: var(--ciruela);
+}
+
+.telemetria-indicador {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  margin-top: .35rem;
+  border-radius: 50%;
+  background: var(--linea-fuerte);
+}
+
+.telemetria-indicador.activo {
+  background: var(--verde);
+  box-shadow: 0 0 0 4px rgba(168, 208, 140, .25);
+}
+
+.telemetria-indicador.solicitando {
+  background: var(--naranja);
+}
+
+.telemetria-indicador.error {
+  background: var(--error);
+}
+
+.telemetria-contenido {
+  margin-top: 1rem;
+  padding: 1.1rem;
+  background: var(--arena);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.telemetria-velocidad {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: .5rem;
+  color: var(--ciruela);
+  font-variant-numeric: tabular-nums;
+}
+
+.telemetria-velocidad strong,
+.telemetria-sin-datos {
+  font: 700 clamp(2.8rem, 9vw, 4rem)/1 var(--font-ui);
+  letter-spacing: -.04em;
+}
+
+.telemetria-unidad {
+  font: 700 1.1rem var(--font-ui);
+  color: var(--suave);
+}
+
+.telemetria-descripcion {
+  margin: .6rem 0 0;
+  font: 400 .85rem/1.5 var(--font-body);
+  color: var(--suave);
+}
+
+.telemetria-estado {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  margin-top: 1rem;
+  padding: .4rem .8rem;
+  background: var(--papel);
+  border: 1px solid var(--linea);
+  border-radius: 99px;
+  font: 600 .8rem var(--font-ui);
+  color: var(--ciruela);
+}
+
+.telemetria-punto {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--linea-fuerte);
+}
+
+.telemetria-punto.activo {
+  background: var(--verde);
+}
+
+.telemetria-punto.solicitando {
+  background: var(--naranja);
+}
+
+.telemetria-punto.error {
+  background: var(--error);
+}
+
+.telemetria-error {
+  margin: .8rem 0 0;
+  padding: .7rem .9rem;
+  background: #fde8e2;
+  border: 1px solid var(--error);
+  border-radius: 10px;
+  color: var(--error);
+  font-size: .85rem;
+}
+
+.telemetria-boton {
+  display: block;
+  width: 100%;
+  margin-top: 1rem;
+  padding: .85rem 1rem;
+  border: 0;
+  border-radius: 12px;
+  background: var(--ciruela);
+  color: var(--crema);
+  font: 700 .9rem/1.2 var(--font-ui);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 4px 0 var(--coral);
+  transition: transform .15s, box-shadow .15s;
+}
+
+.telemetria-boton:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 0 var(--coral);
+}
+
+.telemetria-boton:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 var(--coral);
+}
+
+.telemetria-boton:focus-visible {
+  outline: 3px solid var(--agua-osc);
+  outline-offset: 3px;
+}
+
+@media (max-width: 420px) {
+  .telemetria {
+    padding: 1rem;
+  }
+
+  .telemetria-contenido {
+    padding: .9rem;
+  }
+}
+
+/* Autenticación (GUI-91) */
+input[type="email"], input[type="password"] {
+  width: 100%; padding: .8rem .9rem; font: 500 1rem var(--font-body); color: var(--ciruela);
+  background: #fff; border: 1.5px solid var(--linea-fuerte); border-radius: 12px;
+  transition: border-color .2s, box-shadow .2s; box-sizing: border-box;
+}
+.campo-clave { position: relative; }
+.campo-clave input { padding-right: 4.6rem; }
+.ver-clave { position: absolute; top: 50%; right: .5rem; transform: translateY(-50%); padding: .35rem .6rem; border: 0; border-radius: 8px; background: var(--arena); color: var(--ciruela); font: 700 .75rem var(--font-ui); letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+.ver-clave:focus-visible { outline: 3px solid var(--agua-osc); outline-offset: 2px; }
+.btn-primario:disabled, .btn-secundario:disabled { opacity: .6; cursor: not-allowed; }
+.sesion { display: flex; justify-content: center; align-items: center; gap: .6rem; margin-top: .5rem; font: 600 .8rem var(--font-ui); letter-spacing: .06em; text-transform: uppercase; color: var(--suave); }
+.sesion button { padding: .3rem .8rem; border: 1.5px solid var(--ciruela); border-radius: 99px; background: transparent; color: var(--ciruela); font: 700 .75rem var(--font-ui); letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+.sesion button:hover { background: var(--arena); }
+.sesion button:focus-visible { outline: 3px solid var(--agua-osc); outline-offset: 2px; }
+
+/* GUI-77: Detección automática del medio de transporte */
+.telemetria-transporte {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background-color: var(--papel);
+  border: 1px solid var(--arena);
+}
+
+.telemetria-transporte span {
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.telemetria-transporte strong {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ciruela);
 }

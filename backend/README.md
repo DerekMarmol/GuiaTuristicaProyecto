@@ -1,6 +1,6 @@
 # Backend
 
-API HTTP con Node.js, Express y TypeScript (CommonJS). Expone la consulta de lugares de interés mediante [Geoapify Places API](https://apidocs.geoapify.com/docs/places/), enriquecida con los horarios publicados que devuelve [Geoapify Place Details API](https://apidocs.geoapify.com/docs/place-details/), la validación de una propuesta de itinerario contra esos horarios (`POST /api/itinerarios/validar`), el pronóstico del clima para las fechas de un viaje mediante [OpenWeather 5 Day / 3 Hour Forecast](https://openweathermap.org/forecast5) y la priorización de las paradas según la lluvia pronosticada (`POST /api/itinerarios/priorizar-clima`) y las recomendaciones de hoteles cercanos al itinerario de un día con precios referenciales de [SerpApi Google Hotels](https://serpapi.com/google-hotels-api) convertidos a quetzales con [ExchangeRate-API](https://www.exchangerate-api.com/docs/standard-requests) dentro del presupuesto de hospedaje (`POST /api/hoteles/recomendaciones`). La configuración de Prisma se mantiene sin cambios.
+API HTTP con Node.js, Fastify y TypeScript (CommonJS). Expone la consulta de lugares de interés mediante [Geoapify Places API](https://apidocs.geoapify.com/docs/places/), enriquecida con los horarios publicados que devuelve [Geoapify Place Details API](https://apidocs.geoapify.com/docs/place-details/), la validación de una propuesta de itinerario contra esos horarios (`POST /api/itinerarios/validar`), el pronóstico del clima para las fechas de un viaje mediante [OpenWeather 5 Day / 3 Hour Forecast](https://openweathermap.org/forecast5) y la priorización de las paradas según la lluvia pronosticada (`POST /api/itinerarios/priorizar-clima`) y las recomendaciones de hoteles cercanos al itinerario de un día con precios referenciales de [SerpApi Google Hotels](https://serpapi.com/google-hotels-api) convertidos a quetzales con [ExchangeRate-API](https://www.exchangerate-api.com/docs/standard-requests) dentro del presupuesto de hospedaje (`POST /api/hoteles/recomendaciones`). La configuración de Prisma se mantiene sin cambios.
 
 ## Requisitos
 
@@ -26,9 +26,17 @@ Edita `backend/.env` y asigna tu clave:
 | `SERPAPI_API_KEY` | Clave de SerpApi (Google Hotels). Si falta, el servidor inicia, muestra un aviso y `POST /api/hoteles/recomendaciones` responde `503` cuando necesita consultar hoteles. El resto de las rutas funciona igual. |
 | `EXCHANGERATE_API_KEY` | Clave de ExchangeRate-API (plan gratuito). Mismo comportamiento que `SERPAPI_API_KEY` si falta. |
 | `PORT` | Puerto HTTP del backend. Valor por defecto: `3000`. |
+| `OPTIMIZER_URL` | URL base del optimizador FastAPI. Por defecto `http://localhost:8000`; el backend llama a `/reoptimize`. |
+| `HOST` | Dirección en la que escucha el servidor. Valor por defecto: `::` (todas las interfaces, IPv6 e IPv4). Usa `127.0.0.1` para aceptar solo conexiones locales. |
 | `DATABASE_URL` | Conexión de Prisma a PostgreSQL (no se usa en los endpoints de lugares ni de clima). |
 
 El servidor carga `backend/.env` sin sobrescribir variables que ya estén definidas en el entorno. El archivo `.env` está excluido de Git; solo se versiona `.env.example`. Las claves se usan únicamente en el servidor: no deben definirse como variables `VITE_` ni enviarse al frontend.
+
+### Reoptimización de una ruta en curso
+
+`POST /api/itinerarios/reoptimizar` recibe `tipo` (`clima`, `retraso` o `parada_cancelada`), las paradas pendientes del día, `horaActualMinutos` (minutos desde medianoche) y, para cancelaciones, `paradaCanceladaId`. El backend elimina la parada cancelada, convierte los campos al contrato del optimizador y llama `POST {OPTIMIZER_URL}/reoptimize`. La respuesta devuelve el nuevo orden y las paradas reordenadas.
+
+En el paso 4, la lluvia significativa del pronóstico dispara el evento de clima automáticamente. Los botones “Reportar retraso y recalcular” y “Cancelar parada y recalcular” envían los otros eventos; la lista y el mapa se actualizan desde el estado compartido del itinerario.
 
 ## Comandos
 

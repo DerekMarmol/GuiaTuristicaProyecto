@@ -1,8 +1,7 @@
 import { test, describe, beforeEach, afterEach, mock } from "node:test";
 import assert from "node:assert/strict";
-import { once } from "node:events";
-import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { FastifyInstance } from "fastify";
 import type { RespuestaRecomendacionesHoteles } from "../../shared/types";
 import { crearApp, type OpcionesApp } from "../src/app";
 import { TTL_CACHE_BUSQUEDAS_MS } from "../src/hoteles/serpapi";
@@ -43,7 +42,7 @@ let serpapi: Simulador;
 let exchangeRate: Simulador;
 let llamadas: URL[];
 let instante: number;
-let servidores: Server[];
+let servidores: FastifyInstance[];
 let baseUrl: string;
 
 function respuestaJson(cuerpo: unknown, estado = 200): Response {
@@ -115,10 +114,9 @@ async function iniciar(opciones: OpcionesApp["hoteles"] = {}): Promise<string> {
     },
     hoteles: { serpApiKey: CLAVE_SERP, exchangeRateApiKey: CLAVE_TASA, tiempoEsperaMs: 50, ahora: () => new Date(instante), ...opciones },
   });
-  const servidor = app.listen(0, "127.0.0.1");
-  await once(servidor, "listening");
-  servidores.push(servidor);
-  return `http://127.0.0.1:${(servidor.address() as AddressInfo).port}`;
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  servidores.push(app);
+  return `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
 }
 
 async function enviarA<T>(url: string, datos: unknown): Promise<Resultado<T>> {
@@ -161,10 +159,10 @@ beforeEach(async () => {
   baseUrl = await iniciar();
 });
 
-afterEach(() => {
+afterEach(async () => {
   for (const servidor of servidores) {
-    servidor.closeAllConnections();
-    servidor.close();
+    servidor.server.closeAllConnections();
+    await servidor.close();
   }
   mock.restoreAll();
 });

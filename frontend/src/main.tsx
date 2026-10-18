@@ -9,15 +9,17 @@ import "@fontsource/manrope/600.css";
 import "@fontsource/manrope/700.css";
 import App from "./App";
 import { ViajeProvider } from "./context/ViajeContext";
+import { AuthProvider } from "./context/AuthContext";
 import "./styles.css";
 
-// Registra el service worker: precachea la app y se actualiza solo.
 registerSW({ immediate: true });
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <ViajeProvider>
-      <App />
-    </ViajeProvider>
+    <AuthProvider>
+      <ViajeProvider>
+        <App />
+      </ViajeProvider>
+    </AuthProvider>
   </React.StrictMode>
 );
