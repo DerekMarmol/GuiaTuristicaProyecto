@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.6.4",
     "prisma": "^6.19.3",
     "tsx": "^4.23.15",

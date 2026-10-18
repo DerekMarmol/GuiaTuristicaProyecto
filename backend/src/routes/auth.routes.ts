@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { PrismaClient } from "../generated/prisma"; // o "@prisma/client" según tu ruta de schema
+import { PrismaClient } from "../../generated/prisma";
 
 const prisma = new PrismaClient();
 

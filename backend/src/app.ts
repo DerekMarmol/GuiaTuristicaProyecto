@@ -9,6 +9,8 @@ import { crearPriorizadorClima } from "./ai/prioridadClima";
 import { crearClienteOpenWeather } from "./openweather/cliente";
 import { crearServicioClima } from "./clima/servicio";
 import { crearRutaPronosticoClima } from "./routes/pronosticoClima";
+import authPlugin from "./plugins/auth.plugin";
+import authRoutes from "./routes/auth.routes";
 import { manejarErrores } from "./errores";
 import type { FuncionFetch } from "./tipos";
 
@@ -43,8 +45,9 @@ export function crearApp({
     routerOptions: { ignoreTrailingSlash: true, caseSensitive: false },
     frameworkErrors: manejarErrores,
   });
-  app.setErrorHandler(manejarErrores);
-
+  app.register(authPlugin);
+  app.register(authRoutes, { prefix: "/api/auth" });
+  
   const buscarLugares = crearClienteGeoapify({ apiKey, fetch, tiempoEsperaMs });
   const consultarDetalles = crearClienteDetalles({ apiKey, fetch, tiempoEsperaMs: detalles.tiempoEsperaMs });
   const opcionesDetalles = {
