@@ -7,3 +7,4 @@ export * from "./clima";
 export * from "./entornoClima";
 export * from "./hotel";
 export * from "./restaurante";
+export * from "./climaReactivo";

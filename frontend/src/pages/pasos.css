@@ -139,6 +139,17 @@
 .parada p { margin: .3rem 0 0; font-size: .85rem; color: var(--suave); }
 .aviso-plan-actualizado { margin: .7rem 0; padding: .75rem 1rem; border: 1px solid #80bfa1; border-radius: 10px; color: #145c3c; background: #eaf7ef; }
 .acciones-ruta { display: flex; justify-content: flex-end; margin: .6rem 0; }
+.propuesta-clima { margin: .6rem 0 1rem; }
+.propuesta-clima-acciones { display: flex; flex-wrap: wrap; gap: .5rem; }
+.propuesta-clima-detalle { margin-top: .8rem; padding: .9rem 1rem; border: 1px solid var(--linea); border-radius: 12px; background: #fff; }
+.propuesta-clima-alerta { border-color: #e0a340; background: #fff8eb; }
+.propuesta-clima-detalle h3 { margin: 0 0 .4rem; }
+.propuesta-clima-detalle h4 { margin: .8rem 0 .3rem; }
+.propuesta-clima-comparacion { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .8rem; }
+.propuesta-clima-ruta ol { margin: .2rem 0; padding-left: 1.2rem; }
+.propuesta-clima-ruta .visita-sustituta { color: #145c3c; font-weight: 600; }
+.propuesta-clima-ruta .visita-afectada_sin_alternativa { color: var(--error); }
+.propuesta-clima-alternativas, .propuesta-clima-advertencias { margin: .4rem 0; padding-left: 1.2rem; font-size: .9rem; }
 .accion-parada { margin-top: .6rem; padding: .35rem .6rem; border: 1px solid var(--linea); border-radius: 8px; color: var(--suave); background: #fff; cursor: pointer; }
 .accion-parada:disabled { opacity: .6; cursor: wait; }
 .estado-parada-visitada { color: #145c3c !important; font-weight: 700; }
