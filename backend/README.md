@@ -420,7 +420,30 @@ try {
 - Los festivos (`PH`) y las vacaciones escolares (`SH`) no se evalúan (el horario queda `no_interpretable`), así que un lugar cerrado por un feriado no indicado en su horario puede aparecer como abierto.
 - `evaluarApertura` construye la fecha local del lugar con un `Date` del servidor. Si esa hora local no existe en la zona del servidor (el salto de horario de verano del servidor), el estado queda `desconocido` en ese minuto; en el cambio de hora del servidor, `cierreEstimado` puede diferir una hora. No afecta a servidores en UTC o en zonas sin horario de verano.
 - El resultado se limita a los candidatos evaluados (como máximo 30 por solicitud); consulta `cobertura.busquedaLimitada`.
-- El frontend todavía no consume este endpoint.
+- El frontend lo consume con el botón «Abierto ahora» del paso 4; consulta [Frontend: botón «Abierto ahora»](#frontend-botón-abierto-ahora).
+
+### Frontend: botón «Abierto ahora»
+
+El paso 4 (`frontend/src/pages/Paso4Generacion.tsx`) muestra el botón «Abierto ahora» encima del mapa del día. Al activarlo:
+
+1. Pide la ubicación al navegador una sola vez (`src/services/ubicacionActual.ts`). El navegador muestra el permiso la primera vez. Si devuelve una lectura guardada de más de 5 minutos, se pide una nueva una vez más. No se consulta la ubicación de forma continua ni se guarda fuera del estado del modo; al desactivarlo se descarta.
+2. Consulta `GET /api/lugares/abiertos-ahora` con `lat`, `lng`, `radio=2000` y `limite=10` (`src/services/abiertosAhora.ts`), con un tiempo máximo de espera de 25 s. Con el filtro «Mis intereses» agrega `intereses` con los intereses elegidos en el paso 3; por defecto usa la búsqueda general del backend.
+3. Muestra debajo del mapa las tarjetas de los lugares con `open_now === true` (nombre, dirección, categoría, distancia en línea recta, hora de cierre en la hora local del lugar y horario publicado) y los dibuja en el mapa con un marcador verde propio. «Ver en el mapa» y el clic en un marcador seleccionan el mismo lugar en ambos.
+
+Si no se obtiene la ubicación (permiso denegado, navegador sin soporte, tiempo agotado, coordenadas inválidas), se explica el motivo y se puede buscar cerca de una parada del itinerario. Ese punto se identifica siempre como «punto elegido, no es tu ubicación actual».
+
+El estado del modo vive en un controlador separado del itinerario (`src/services/abiertosAhoraEstado.ts`, usado por `src/hooks/useAbiertosAhora.ts`). Ignora los clics repetidos mientras busca, cancela con `AbortController` la consulta en curso al desactivar el modo o al iniciar otra búsqueda, y descarta cualquier respuesta tardía. El modo nunca agrega, quita ni reordena paradas. Al desactivarlo se retiran sus marcadores y el mapa vuelve a encuadrar el recorrido del día. No se integra con la reoptimización: el flujo actual de `POST /api/itinerarios/reoptimizar` solo reordena paradas existentes, así que agregar un lugar abierto al itinerario queda como integración pendiente de GUI-73.
+
+Pruebas: `cd frontend; npm test` ejecuta `test/abiertosAhora.test.ts` (servicio HTTP, geolocalización, controlador del modo y marcado de los componentes con `react-dom/server`). El script de pruebas usa `tsx --test`, que ya estaba en `devDependencies`, para poder importar los componentes `.tsx`.
+
+Prueba manual en el navegador:
+
+```powershell
+cd backend; npm run dev          # terminal 1
+cd frontend; npm run dev         # terminal 2, abre http://localhost:5173
+```
+
+Completa los pasos 1 a 3, pulsa «Abierto ahora» en el paso 4 y acepta el permiso de ubicación. Para probar sin GPS, deniega el permiso y usa «Buscar cerca de una parada del itinerario». Los resultados dependen de la hora: fuera del horario habitual (por ejemplo, de noche) lo normal es la lista vacía con el mensaje «No se encontraron lugares con apertura confirmada cerca de esta ubicación.». Sin `VITE_MAPBOX_TOKEN` el mapa muestra su aviso, pero el botón y las tarjetas funcionan igual.
 
 ## Clasificación climática de lugares
 

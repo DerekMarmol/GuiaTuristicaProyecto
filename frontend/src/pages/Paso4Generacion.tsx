@@ -17,6 +17,10 @@ import type { RespuestaEta } from "../services/eta";
 import PropuestaClima from "../components/PropuestaClima";
 import { useMonitoreoClima } from "../hooks/useMonitoreoClima";
 import { aplicarParadasPropuestas, construirItinerarioActivo, firmaItinerario } from "../services/climaReactivoEstado";
+import { BarraAbiertosAhora, ResultadosAbiertosAhora, describirReferencia, type FiltroAbiertos } from "../components/AbiertosAhora";
+import type { CapaAbiertosAhora } from "../components/Mapa";
+import { useAbiertosAhora } from "../hooks/useAbiertosAhora";
+import { coordenadasValidas, lugaresParaMapa } from "../services/abiertosAhora";
 
 import {
   generarItinerario,
@@ -410,6 +414,32 @@ export default function Paso4Generacion() {
     }
   }
 
+  // GUI-73: modo «Abierto ahora». Su estado está separado del itinerario y nunca lo modifica.
+  const [filtroAbiertos, setFiltroAbiertos] = useState<FiltroAbiertos>("turisticos");
+  const interesesViaje = viaje.intereses ?? [];
+  const abiertos = useAbiertosAhora(filtroAbiertos === "intereses" ? interesesViaje : []);
+  const [abiertoSeleccionado, setAbiertoSeleccionado] = useState<string | null>(null);
+  const estadoAbiertos = abiertos.estado;
+  const lugaresAbiertosMapa = useMemo(
+    () => (estadoAbiertos.fase === "listo" ? lugaresParaMapa(estadoAbiertos.respuesta.lugares) : []),
+    [estadoAbiertos]
+  );
+  const referenciaAbiertos = useMemo(
+    () => estadoAbiertos.fase === "listo"
+      ? { lat: estadoAbiertos.referencia.lat, lng: estadoAbiertos.referencia.lng, etiqueta: describirReferencia(estadoAbiertos.referencia) }
+      : null,
+    [estadoAbiertos]
+  );
+  useEffect(() => {
+    setAbiertoSeleccionado((actual) => (actual && lugaresAbiertosMapa.some((l) => l.idExterno === actual) ? actual : null));
+  }, [lugaresAbiertosMapa]);
+  const capaAbiertos: CapaAbiertosAhora | null = estadoAbiertos.fase === "listo"
+    ? { lugares: lugaresAbiertosMapa, referencia: referenciaAbiertos, seleccionadoId: abiertoSeleccionado, onSeleccionar: setAbiertoSeleccionado }
+    : null;
+  const puntosReferencia = (dia?.paradas ?? [])
+    .filter((p) => coordenadasValidas(p.lat, p.lng))
+    .map((p) => ({ id: p.id, nombre: p.nombre, lat: p.lat, lng: p.lng }));
+
   const mostrarHoteles =
     viaje.hospedaje === false && !viaje.sinHotel;
 
@@ -639,6 +669,19 @@ export default function Paso4Generacion() {
             onEliminar={eliminarGasto}
           />
 
+          {/* GUI-73: botón «Abierto ahora» */}
+          <BarraAbiertosAhora
+            estado={estadoAbiertos}
+            filtro={filtroAbiertos}
+            interesesViaje={interesesViaje}
+            puntos={puntosReferencia}
+            onAlternar={abiertos.alternar}
+            onCambiarFiltro={setFiltroAbiertos}
+            onActualizarUbicacion={abiertos.actualizarUbicacion}
+            onUsarPunto={(p) => abiertos.usarPuntoManual({ lat: p.lat, lng: p.lng, etiqueta: `la parada ${p.nombre}` })}
+            onReintentar={abiertos.reintentar}
+          />
+
           {/* Mapa */}
           <div
             className="mapa-dia"
@@ -650,12 +693,20 @@ export default function Paso4Generacion() {
               paradasCompletadas={idsParadasCompletadas}
               pronostico={pronostico?.dias.find((d) => d.fecha === dia.fecha)}
               eta={etaMapa}
+              abiertos={capaAbiertos}
             />
           </div>
           <div className="leyenda-ruta" aria-label="Leyenda del progreso de la ruta">
             <span><i className="leyenda-ruta-completada" /> Recorrido completado</span>
             <span><i className="leyenda-ruta-pendiente" /> Recorrido pendiente</span>
+            {capaAbiertos && capaAbiertos.lugares.length > 0 && <span><i className="leyenda-abierto" /> Abierto ahora</span>}
           </div>
+
+          <ResultadosAbiertosAhora
+            estado={estadoAbiertos}
+            seleccionadoId={abiertoSeleccionado}
+            onSeleccionar={setAbiertoSeleccionado}
+          />
 
           {/* Telemetría GPS del recorrido */}
           <PanelTelemetria />
