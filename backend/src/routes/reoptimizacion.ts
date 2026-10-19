@@ -1,7 +1,9 @@
 import type { FastifyPluginAsync } from "fastify";
+import type { ModoTransporteRuta } from "../../../shared/types";
 import { ErrorApi } from "../errores";
 
 type TipoEvento = "clima" | "retraso" | "parada_cancelada";
+const MODOS_TRANSPORTE: readonly ModoTransporteRuta[] = ["auto", "pedestrian"];
 interface ParadaEvento {
   id: string;
   lat: number;
@@ -22,6 +24,7 @@ interface EventoReoptimizacion {
   horaActualMinutos: number;
   paradaCanceladaId?: string;
   probabilidadLluvia?: number;
+  modoTransporte?: ModoTransporteRuta;
 }
 
 function validarEvento(cuerpo: unknown): EventoReoptimizacion {
@@ -56,6 +59,9 @@ function validarEvento(cuerpo: unknown): EventoReoptimizacion {
   if (evento.tipo === "clima" && evento.probabilidadLluvia !== undefined &&
     (!Number.isFinite(evento.probabilidadLluvia) || evento.probabilidadLluvia < 0 || evento.probabilidadLluvia > 100)) {
     throw new ErrorApi(400, "PARAMETRO_INVALIDO", "La probabilidad de lluvia debe estar entre 0 y 100.");
+  }
+  if (evento.modoTransporte !== undefined && !MODOS_TRANSPORTE.includes(evento.modoTransporte)) {
+    throw new ErrorApi(400, "PARAMETRO_INVALIDO", "El medio de transporte debe ser auto o pedestrian.");
   }
   return evento as EventoReoptimizacion;
 }
@@ -95,11 +101,18 @@ export function crearRutaReoptimizacion({
         respuesta = await fetchImpl(new URL("/reoptimize", url), {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ paradas, hora_actual_minutos: evento.horaActualMinutos }),
+          body: JSON.stringify({
+            paradas,
+            hora_actual_minutos: evento.horaActualMinutos,
+            modo_transporte: evento.modoTransporte ?? "auto",
+          }),
           signal: AbortSignal.timeout(10_000),
         });
       } catch {
         throw new ErrorApi(502, "OPTIMIZADOR_NO_DISPONIBLE", "No fue posible conectar con el optimizador de rutas.");
+      }
+      if (respuesta.status === 503) {
+        throw new ErrorApi(503, "SERVICIO_RUTAS_NO_DISPONIBLE", "El servicio de cálculo de rutas no está disponible en este momento.");
       }
       if (!respuesta.ok) {
         throw new ErrorApi(respuesta.status === 422 ? 409 : 502, "REOPTIMIZACION_NO_DISPONIBLE", "El optimizador no pudo encontrar una ruta válida para las paradas pendientes.");

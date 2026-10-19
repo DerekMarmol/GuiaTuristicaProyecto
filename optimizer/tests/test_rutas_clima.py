@@ -5,6 +5,8 @@ from app.routers.optimize import (
     seleccionar_mejor_ruta
 )
 
+from valhalla_falso import crear_matriz, matriz_uniforme
+
 
 def crear_paradas_prueba():
     pronostico = [
@@ -50,16 +52,17 @@ def crear_paradas_prueba():
 
 def test_costo_climatico_segun_orden():
     paradas = crear_paradas_prueba()
+    matriz = matriz_uniforme(3)
 
     ruta_1 = [0, 1, 2]
     ruta_2 = [0, 2, 1]
 
     costo_1 = calcular_costo_climatico_ruta(
-        paradas, ruta_1, 9 * 60
+        paradas, ruta_1, 9 * 3600, matriz
     )
 
     costo_2 = calcular_costo_climatico_ruta(
-        paradas, ruta_2, 9 * 60
+        paradas, ruta_2, 9 * 3600, matriz
     )
 
     assert costo_1 == 80
@@ -77,7 +80,30 @@ def test_seleccionar_mejor_ruta_por_clima():
     mejor_ruta = seleccionar_mejor_ruta(
         paradas,
         rutas_candidatas,
-        9 * 60
+        9 * 3600,
+        matriz_uniforme(3)
     )
 
     assert mejor_ruta == [0, 2, 1]
+
+
+def test_costo_climatico_usa_la_hora_de_llegada_de_valhalla():
+    paradas = crear_paradas_prueba()
+
+    traslado_corto = crear_matriz([
+        [0, 60, 60],
+        [60, 0, 60],
+        [60, 60, 0]
+    ])
+    traslado_de_tres_horas = crear_matriz([
+        [0, 3 * 3600, 60],
+        [60, 0, 60],
+        [60, 60, 0]
+    ])
+
+    assert calcular_costo_climatico_ruta(
+        paradas, [0, 1, 2], 9 * 3600, traslado_corto
+    ) == 80
+    assert calcular_costo_climatico_ruta(
+        paradas, [0, 1, 2], 9 * 3600, traslado_de_tres_horas
+    ) == 50
