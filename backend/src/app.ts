@@ -1,7 +1,9 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { crearClienteGeoapify, crearConsultaPlaces } from "./geoapify/cliente";
 import { crearClienteDetalles } from "./geoapify/detalles";
-import { crearEnriquecedorHorarios, crearResolvedorLugares } from "./geoapify/enriquecer";
+import { crearConsultaApertura, crearEnriquecedorHorarios, crearResolvedorLugares } from "./geoapify/enriquecer";
+import { crearBuscadorAbiertosAhora } from "./lugares/abiertosAhora";
+import { crearCacheApertura } from "./lugares/cacheApertura";
 import { crearRutaLugares } from "./routes/lugares";
 import { crearRutaItinerarios } from "./routes/itinerarios";
 import { crearRutaReoptimizacion } from "./routes/reoptimizacion";
@@ -45,6 +47,10 @@ export interface OpcionesApp {
     intervaloMs?: number;
     presupuestoMs?: number;
   };
+  abiertosAhora?: {
+    ahora?: () => Date;
+    vigenciaCacheMs?: number;
+  };
   clima?: {
     apiKey?: string;
     fetch?: FuncionFetch;
@@ -80,6 +86,7 @@ export function crearApp({
   fetch,
   tiempoEsperaMs,
   detalles = {},
+  abiertosAhora = {},
   clima = {},
   hoteles = {},
   restaurantes = {},
@@ -106,7 +113,17 @@ export function crearApp({
     presupuestoMs: detalles.presupuestoMs,
   };
   const enriquecerHorarios = crearEnriquecedorHorarios(opcionesDetalles);
-  app.register(crearRutaLugares(buscarLugares, enriquecerHorarios), { prefix: "/api/lugares" });
+  const ahoraAbiertos = abiertosAhora.ahora ?? (() => new Date());
+  const buscarAbiertosAhora = crearBuscadorAbiertosAhora({
+    buscarLugares,
+    consultarApertura: crearCacheApertura({
+      consultar: crearConsultaApertura(opcionesDetalles),
+      vigenciaMs: abiertosAhora.vigenciaCacheMs,
+      ahora: ahoraAbiertos,
+    }),
+    ahora: ahoraAbiertos,
+  });
+  app.register(crearRutaLugares(buscarLugares, enriquecerHorarios, buscarAbiertosAhora), { prefix: "/api/lugares" });
   const clienteChat = chat.cliente ?? (process.env.GEMINI_API_KEY ? crearClienteChatGemini() : undefined);
   app.register(crearRutaChat(crearAgenteChat({ cliente: clienteChat })), { prefix: "/api/chat" });
 

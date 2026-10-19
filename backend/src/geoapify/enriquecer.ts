@@ -1,6 +1,6 @@
 import { interpretarHorario, horarioErrorConsulta, type Horario } from "./horario";
 import { transformarDetalles, type Lugar } from "./transformar";
-import type { ConsultarDetalles, PropiedadesDetalles } from "./detalles";
+import { zonaHorariaDeDetalles, type ConsultarDetalles, type PropiedadesDetalles } from "./detalles";
 
 export const CONCURRENCIA_DETALLES = 4;
 export const INTERVALO_DETALLES_MS = 250;
@@ -21,6 +21,13 @@ export interface LugarResuelto {
 }
 
 export type ResolverLugares = (identificadores: string[]) => Promise<Map<string, LugarResuelto>>;
+
+export interface DatosApertura {
+  horario: Horario;
+  zonaHoraria: string | null;
+}
+
+export type ConsultarApertura = (identificadores: string[]) => Promise<Map<string, DatosApertura>>;
 
 type ConsultarVarios = <R>(
   identificadores: string[],
@@ -148,5 +155,28 @@ export function crearResolvedorLugares(opciones: OpcionesEnriquecedor): Resolver
     );
 
     return new Map(unicos.map((idExterno) => [idExterno, resultados.get(idExterno) ?? lugarNoResuelto()]));
+  };
+}
+
+function aperturaNoConsultada(): DatosApertura {
+  return { horario: horarioErrorConsulta(), zonaHoraria: null };
+}
+
+export function crearConsultaApertura(opciones: OpcionesEnriquecedor): ConsultarApertura {
+  const consultarVarios = crearConsultaLimitada(opciones);
+
+  return async function consultarApertura(identificadores) {
+    const unicos = [...new Set(identificadores)];
+    if (unicos.length === 0) {
+      return new Map();
+    }
+
+    const resultados = await consultarVarios<DatosApertura>(
+      unicos,
+      (propiedades) => ({ horario: interpretarHorario(propiedades.opening_hours), zonaHoraria: zonaHorariaDeDetalles(propiedades) }),
+      aperturaNoConsultada,
+    );
+
+    return new Map(unicos.map((idExterno) => [idExterno, resultados.get(idExterno) ?? aperturaNoConsultada()]));
   };
 }
