@@ -1,13 +1,7 @@
-from fastapi.testclient import TestClient
-from fastapi import FastAPI
-
-from app.routers.optimize import router
+from valhalla_falso import ClienteValhallaFalso, crear_cliente_api
 
 
-app = FastAPI()
-app.include_router(router)
-
-client = TestClient(app)
+client = crear_cliente_api(ClienteValhallaFalso())
 
 
 def test_reoptimize_desde_hora_actual():
