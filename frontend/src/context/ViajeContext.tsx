@@ -36,12 +36,18 @@ export function ViajeProvider({ children }: { children: ReactNode }) {
   // TODO(backend): gastos reales desde el endpoint de Lucía. Por ahora son simulados y viven en memoria.
   const [gastos, setGastos] = useState<Gasto[]>([]);
 
-  const setItinerarios: Dispatch<SetStateAction<Itinerario[] | null>> = (it) => {
-    setItinerariosState(it);
-    if (it === null) {
-      setCalificaciones({}); // itinerario nuevo = paradas nuevas
-      setGastos([]);
-    }
+  const setItinerarios: Dispatch<SetStateAction<Itinerario[] | null>> = (actualizacion) => {
+    setItinerariosState((anterior) => {
+      const siguiente =
+        typeof actualizacion === "function"
+          ? (actualizacion as (prev: Itinerario[] | null) => Itinerario[] | null)(anterior)
+          : actualizacion;
+      if (siguiente === null) {
+        setCalificaciones({}); // itinerario nuevo = paradas nuevas
+        setGastos([]);
+      }
+      return siguiente;
+    });
   };
 
   const guardarCalificacion = (c: Calificacion) =>

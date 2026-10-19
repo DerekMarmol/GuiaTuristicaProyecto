@@ -45,8 +45,9 @@ function crearIconoParada(numero: number): SVGSVGElement {
 }
 
 function textoClima(dia?: PronosticoDiario): string {
-  if (!dia || dia.estado === "sin_datos") return "Pronóstico no disponible";
+  if (!dia) return "Pronóstico no disponible";
   if (dia.estado === "fuera_de_cobertura") return "Fecha fuera de cobertura del pronóstico";
+  if (dia.estado !== "disponible" && dia.estado !== "parcial") return "Pronóstico no disponible";
   const lluvia = dia.lluviaMm === 0 ? "sin lluvia" : `${dia.lluviaMm} mm de lluvia`;
   return `${Math.round(dia.temperaturaMinimaC)}–${Math.round(dia.temperaturaMaximaC)} °C · ${lluvia}${dia.estado === "parcial" ? " · datos parciales" : ""}`;
 }
