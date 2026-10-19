@@ -11,6 +11,7 @@ import { crearServicioClima } from "./clima/servicio";
 import { crearRutaPronosticoClima } from "./routes/pronosticoClima";
 import authPlugin from "./plugins/auth.plugin";
 import authRoutes from "./routes/auth.routes";
+import usuariosRoutes from "./routes/usuarios.routes";
 import { manejarErrores } from "./errores";
 import type { FuncionFetch } from "./tipos";
 
@@ -47,6 +48,7 @@ export function crearApp({
   });
   app.register(authPlugin);
   app.register(authRoutes, { prefix: "/api/auth" });
+  app.register(usuariosRoutes, { prefix: "/api/usuarios" });
   
   const buscarLugares = crearClienteGeoapify({ apiKey, fetch, tiempoEsperaMs });
   const consultarDetalles = crearClienteDetalles({ apiKey, fetch, tiempoEsperaMs: detalles.tiempoEsperaMs });
