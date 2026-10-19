@@ -34,7 +34,17 @@ El servidor carga `backend/.env` sin sobrescribir variables que ya estén defini
 
 ### Reoptimización de una ruta en curso
 
-`POST /api/itinerarios/reoptimizar` recibe `tipo` (`clima`, `retraso` o `parada_cancelada`), las paradas pendientes del día, `horaActualMinutos` (minutos desde medianoche) y, para cancelaciones, `paradaCanceladaId`. El backend elimina la parada cancelada, convierte los campos al contrato del optimizador y llama `POST {OPTIMIZER_URL}/reoptimize`. La respuesta devuelve el nuevo orden y las paradas reordenadas.
+`POST /api/itinerarios/reoptimizar` recibe `tipo` (`clima`, `retraso` o `parada_cancelada`), las paradas pendientes del día, `horaActualMinutos` (minutos desde medianoche), opcionalmente `modoTransporte` (`auto` o `pedestrian`; `auto` si se omite) y, para cancelaciones, `paradaCanceladaId`. El backend elimina la parada cancelada, convierte los campos al contrato del optimizador (`modo_transporte`) y llama `POST {OPTIMIZER_URL}/reoptimize`. El optimizador calcula los traslados con [Valhalla](../docs/valhalla.md). La respuesta devuelve el nuevo orden y las paradas reordenadas.
+
+El paso 4 del frontend envía `pedestrian` cuando el viaje se planificó «A pie» y `auto` para los demás medios del selector.
+
+| Estado | Código | Cuándo |
+| --- | --- | --- |
+| `400` | `PARAMETRO_INVALIDO` | Datos inválidos, incluido un `modoTransporte` distinto de `auto` o `pedestrian`. No se llama al optimizador. |
+| `409` | `REOPTIMIZACION_NO_DISPONIBLE` | El optimizador respondió `422`: no hay un orden viable con los horarios y las rutas disponibles, o una parada está fuera del mapa de Valhalla. |
+| `502` | `OPTIMIZADOR_NO_DISPONIBLE` | No fue posible conectar con el optimizador. |
+| `502` | `REOPTIMIZACION_NO_DISPONIBLE` / `RESPUESTA_OPTIMIZADOR_INVALIDA` | El optimizador falló o devolvió un orden inválido. |
+| `503` | `SERVICIO_RUTAS_NO_DISPONIBLE` | El optimizador respondió `503` porque Valhalla no está disponible o no respondió a tiempo. |
 
 En el paso 4, la lluvia significativa del pronóstico dispara el evento de clima automáticamente. Los botones “Reportar retraso y recalcular” y “Cancelar parada y recalcular” envían los otros eventos; la lista y el mapa se actualizan desde el estado compartido del itinerario.
 
@@ -358,7 +368,7 @@ Cualquier otro campo de la parada (nombre, coordenadas, `opening_hours`, `horari
 4. Se evalúa la apertura en esa llegada con la biblioteca `opening_hours` (`evaluarApertura` en `src/geoapify/horario.ts`). La biblioteca lee la fecha con la hora local del proceso, así que se le entrega una `Date` construida explícitamente con la fecha y la hora de pared del destino. El intervalo abierto incluye su inicio y excluye su cierre.
 5. Si el lugar está abierto, se aplica la validación de estancia existente (`validarEstancia`): la visita se acorta hasta el siguiente cierre o se descarta si quedan menos de 15 minutos.
 
-**Traslados estimados.** No hay datos de rutas reales. El tiempo base se estima con la distancia en línea recta entre las coordenadas y 40 km/h, igual que el optimizador; a ese tiempo se suma la holgura de `calcularTiempoTotalTraslado` (`tiempoService.ts`), con la regla existente de traslado a pie si el tiempo base es menor de 12 minutos. La llegada se valida con el tiempo **ya incluida la holgura**, y ese mismo traslado se publica en la parada (`traslado`, con `estimado: true`). La holgura ya no se añade después de validar.
+**Traslados estimados.** No hay datos de rutas reales. El tiempo base se estima con la distancia en línea recta entre las coordenadas y 40 km/h (el optimizador, en cambio, usa los tiempos de [Valhalla](../docs/valhalla.md)); a ese tiempo se suma la holgura de `calcularTiempoTotalTraslado` (`tiempoService.ts`), con la regla existente de traslado a pie si el tiempo base es menor de 12 minutos. La llegada se valida con el tiempo **ya incluida la holgura**, y ese mismo traslado se publica en la parada (`traslado`, con `estimado: true`). La holgura ya no se añade después de validar.
 
 **Orden.** Se valida el orden recibido. Si otro módulo (por ejemplo, el optimizador) cambia el orden, la propuesta reordenada debe enviarse de nuevo a este endpoint antes de mostrarla. Este endpoint no consulta el clima ni aplica la prioridad por lluvia; para eso existe [`POST /api/itinerarios/priorizar-clima`](#endpoint-post-apiitinerariospriorizar-clima), que valida los horarios sobre el orden ya priorizado.
 

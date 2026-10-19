@@ -12,7 +12,7 @@ import { generarGastosSimulados } from "../services/gastos";
 import CalificacionParada, { ResumenCalificacion } from "../components/CalificacionParada";
 import type { RespuestaClima } from "../../../shared/types";
 import { consultarPronostico, coordenadasDelViaje, hayLluviaSignificativa } from "../services/clima";
-import { reoptimizarRuta, type TipoEventoRuta } from "../services/reoptimizacion";
+import { modoTransporteRuta, reoptimizarRuta, type TipoEventoRuta } from "../services/reoptimizacion";
 import type { RespuestaEta } from "../services/eta";
 
 import {
@@ -186,6 +186,7 @@ export default function Paso4Generacion() {
         paradas: paradasPendientes,
         paradaCanceladaId,
         probabilidadLluvia,
+        modoTransporte: modoTransporteRuta(viaje.transporte),
       });
       const paradas = [
         ...diaSolicitado.paradas.filter((p) => completadas.has(p.id)),

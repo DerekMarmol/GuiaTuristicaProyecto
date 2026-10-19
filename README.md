@@ -75,3 +75,15 @@ npm start
 ```
 
 Consulta [backend/README.md](backend/README.md) para la configuración, los parámetros, las categorías admitidas y los códigos de error.
+
+## Optimizador y Valhalla
+
+El optimizador (`optimizer/`, FastAPI + Google OR-Tools) calcula los tiempos y distancias de traslado entre paradas con [Valhalla](https://github.com/valhalla/valhalla) sobre datos de OpenStreetMap de Guatemala, en automóvil (`auto`) o a pie (`pedestrian`).
+
+```powershell
+docker compose up -d valhalla            # la primera vez descarga el mapa y construye el grafo (~10 min)
+Invoke-RestMethod http://localhost:8002/status
+docker compose up -d --build optimizer
+```
+
+Consulta [docs/valhalla.md](docs/valhalla.md) para la configuración (`VALHALLA_URL`), la preparación de los datos, ejemplos de consultas, las pruebas y los errores habituales, y [optimizer/API.md](optimizer/API.md) para el contrato de `/optimize` y `/reoptimize`.
