@@ -90,6 +90,10 @@ export function normalizarInteres(texto: string): string {
 
 const INTERES_POR_CLAVE = new Map(INTERESES_PERMITIDOS.map((interes) => [normalizarInteres(interes), interes]));
 
+export function interesAdmitido(texto: string): string | undefined {
+  return INTERES_POR_CLAVE.get(normalizarInteres(texto));
+}
+
 function validarCategoria(query: Consulta, errores: ErrorParametro[]): string | null {
   const texto = leerTexto(query, "categoria", false, errores);
   if (texto === null) {
@@ -122,7 +126,7 @@ function validarIntereses(query: Consulta, errores: ErrorParametro[]): string[] 
   const intereses: string[] = [];
   const desconocidos: string[] = [];
   for (const elemento of elementos) {
-    const interes = INTERES_POR_CLAVE.get(normalizarInteres(elemento));
+    const interes = interesAdmitido(elemento);
     if (!interes) {
       desconocidos.push(elemento);
     } else if (!intereses.includes(interes)) {
@@ -141,7 +145,7 @@ function validarIntereses(query: Consulta, errores: ErrorParametro[]): string[] 
   return intereses;
 }
 
-function combinarCategorias(categoria: string | null, intereses: string[]): string[] {
+export function combinarCategorias(categoria: string | null, intereses: string[]): string[] {
   const categorias = new Set(categoria ? [categoria] : []);
   for (const interes of intereses) {
     for (const categoriaInteres of CATEGORIAS_POR_INTERES[interes]) {

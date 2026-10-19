@@ -194,7 +194,7 @@ Nunca se asigna un horario por defecto ni se descartan lugares por no tener hora
 El texto se valida con la biblioteca [`opening_hours`](https://github.com/opening-hours/opening_hours.js), el intérprete de referencia de la sintaxis `opening_hours` de OpenStreetMap. Admite horarios distintos por día (`Mo-Fr 09:00-17:00; Sa 10:00-14:00`), varios intervalos en un día (`Mo-Fr 08:00-12:00,14:00-18:00`), turnos que cruzan la medianoche (`Fr-Sa 22:00-03:00`), `24/7`, días cerrados (`Su off`), temporadas, comentarios y horas solares (`sunrise-sunset`). Un día marcado como cerrado (`off`) es un horario publicado y se devuelve como `disponible`; no equivale a un horario ausente.
 
 - La validación comprueba la estructura del texto publicado; no certifica que el establecimiento mantenga actualizado su horario.
-- `GET /api/lugares` no calcula si un lugar está abierto en un momento dado; esa evaluación se hace para la llegada estimada de cada parada en [`POST /api/itinerarios/validar`](#endpoint-post-apiitinerariosvalidar). `valorOriginal` conserva todas las reglas y excepciones; no se reduce a una pareja de apertura y cierre ni a una tabla semanal.
+- `GET /api/lugares` no calcula si un lugar está abierto en un momento dado; esa evaluación se hace para la llegada estimada de cada parada en [`POST /api/itinerarios/validar`](#endpoint-post-apiitinerariosvalidar) y para el momento actual en [`GET /api/lugares/abiertos-ahora`](#endpoint-get-apilugaresabiertos-ahora). `valorOriginal` conserva todas las reglas y excepciones; no se reduce a una pareja de apertura y cierre ni a una tabla semanal.
 - No se inventan ubicación administrativa, festivos ni zona horaria. Las reglas de festivos (`PH`) o vacaciones escolares (`SH`) requieren el país y la región, que no se conocen, por lo que se marcan `no_interpretable` conservando el texto.
 - Si la biblioteca emite advertencias (por ejemplo, formato de 12 horas `9am-5pm`, nombres de días en otro idioma o un `;` final), la biblioteca tuvo que suponer la intención, así que el valor se marca `no_interpretable`.
 
@@ -275,6 +275,152 @@ Comprobación manual de horarios con un límite pequeño (consume hasta 6 crédi
 $respuesta = Invoke-RestMethod -Uri "http://localhost:3000/api/lugares?lat=14.6349&lng=-90.5069&categoria=catering.restaurant&radio=2000&limite=5"
 $respuesta.lugares | Format-Table nombre, @{ n = "estado"; e = { $_.horario.estado } }, @{ n = "horario"; e = { $_.horario.valorOriginal } } -Wrap
 ```
+
+## Endpoint `GET /api/lugares/abiertos-ahora`
+
+Base del modo «Abierto ahora» (GUI-73). Devuelve los lugares cercanos a unas coordenadas cuyo horario publicado en Geoapify indica que están abiertos en el momento de la consulta. Es un endpoint independiente: `GET /api/lugares` conserva sus parámetros, valores por defecto y contrato, y sigue sin calcular la apertura.
+
+`open_now` es una evaluación del horario publicado (`opening_hours` de OpenStreetMap a través de Geoapify), no una confirmación en tiempo real de que el establecimiento esté atendiendo. Cada respuesta indica el instante evaluado (`evaluadoEn`) y el criterio (`criterio: "horarios_publicados"`).
+
+| Parámetro | Obligatorio | Regla |
+| --- | --- | --- |
+| `lat` | Sí | Número decimal entre -90 y 90 |
+| `lng` | Sí | Número decimal entre -180 y 180 |
+| `radio` | No | Entero de 1 a 10000 metros. Por defecto `2000` |
+| `limite` | No | Entero de 1 a 20. Máximo de lugares abiertos devueltos. Por defecto `10` |
+| `categoria` | No | Una de las [categorías admitidas](#categorías-admitidas-en-categoria) |
+| `intereses` | No | Lista de [intereses admitidos](#intereses-admitidos) separados por comas |
+
+Los parámetros se validan con Zod (`src/validacion/abiertosAhora.ts`) con las mismas reglas de formato que `/api/lugares`: notación decimal simple, sin valores vacíos, repetidos, `NaN`, `Infinity` ni exponentes. Además, se rechaza cualquier parámetro no admitido. `categoria` e `intereses` se normalizan y combinan con las mismas funciones de `/api/lugares`. Ante un parámetro inválido se responde `400` sin consultar a Geoapify.
+
+**Búsqueda general.** Si no se envían `categoria` ni `intereses`, se consulta un conjunto acotado de categorías turísticas definido en `CATEGORIAS_TURISTICAS_PREDETERMINADAS` (`src/config/abiertosAhora.ts`): `tourism.attraction`, `tourism.sights`, `entertainment.museum`, `entertainment.culture` y `leisure.park`. Se excluyen hospedaje y gastronomía; para incluirlos, envía `categoria` o `intereses` (por ejemplo `intereses=Gastronomía`). La respuesta indica `categoriasPredeterminadas: true`.
+
+### Proceso
+
+1. Se busca en Geoapify Places con el cliente existente (`crearClienteGeoapify`), centrado en `lat`/`lng` con `filter=circle` y `bias=proximity`. Se piden hasta `min(limite × 3, 30)` candidatos (`limiteCandidatos` en `src/config/abiertosAhora.ts`), porque varios pueden estar cerrados o sin horario.
+2. Se descartan los duplicados y los lugares cuya distancia en línea recta (haversine, `distanciaMetros` de `src/hoteles/geografia.ts`) supera `radio`, y se ordenan por cercanía (empate por `idExterno`). No se usa Valhalla: la distancia es geográfica, no una duración de traslado.
+3. Para cada candidato se obtienen de Place Details el horario (`opening_hours`, validado con `interpretarHorario`) y la zona horaria IANA (`timezone.name`, validada con `esZonaHorariaValida`). Se usa `crearConsultaApertura` (`src/geoapify/enriquecer.ts`), con los mismos límites de concurrencia, ritmo, tiempo de espera y presupuesto que `/api/lugares`.
+4. Se evalúa la apertura con `evaluarAperturaActual` (`src/lugares/aperturaActual.ts`), que traduce el instante actual a la hora local del lugar y aplica `evaluarApertura` de `src/geoapify/horario.ts`.
+5. Se devuelven solo los lugares con `open_now === true`, en orden de cercanía y hasta `limite`.
+
+| Estado de apertura | `open_now` | Se devuelve |
+| --- | --- | --- |
+| `abierto` | `true` | Sí |
+| `cerrado` | `false` | No |
+| `desconocido` | `null` | No |
+
+Un lugar queda como `desconocido` si su horario es `no_publicado`, `no_interpretable` o `error_consulta`, si la biblioteca no puede determinar el estado (`estado_desconocido`: `unknown`, comentarios, horas solares, aperturas abiertas como `10:00+`) o si Place Details no informó una zona IANA válida (`zona_horaria_desconocida`). Nunca se supone que un lugar sin horario está abierto. El contrato TypeScript está en `shared/types/lugaresAbiertos.ts` (`RespuestaLugaresAbiertosAhora`, `LugarAbiertoAhora`, `AperturaActual`, `CoberturaAbiertosAhora`).
+
+### Zona horaria
+
+`opening_hours` describe la hora local del establecimiento. El instante de la consulta (`ahora`, inyectable en `crearApp({ abiertosAhora: { ahora } })`) se convierte a la zona IANA que informa Place Details mediante `Intl.DateTimeFormat`, con las funciones de `src/ai/zonaHoraria.ts`. El resultado no depende de la zona horaria del servidor y respeta el horario de verano de la zona del lugar. Los turnos que cruzan la medianoche, `24/7` y los días `off` se interpretan con la biblioteca `opening_hours`, como en la validación de itinerarios. `cierreEstimado` es el próximo cambio a cerrado dentro de las 48 horas siguientes, en hora local con desplazamiento (`2026-10-19T16:00-06:00`); es `null` si no hay cierre en ese plazo (por ejemplo `24/7`). La búsqueda de Places no informa la zona horaria, por eso se obtiene de Place Details, en la misma consulta que el horario y sin costo adicional.
+
+### Respuesta (200)
+
+```json
+{
+  "evaluadoEn": "2026-10-19T21:02:43.145Z",
+  "criterio": "horarios_publicados",
+  "origen": { "lat": 14.6431, "lng": -90.5133 },
+  "radioMetros": 2000,
+  "limite": 2,
+  "categorias": ["tourism.attraction", "tourism.sights", "entertainment.museum", "entertainment.culture", "leisure.park"],
+  "categoriasPredeterminadas": true,
+  "total": 1,
+  "cobertura": {
+    "candidatosEvaluados": 3,
+    "limiteCandidatos": 6,
+    "busquedaLimitada": false,
+    "abiertos": 1,
+    "cerrados": 0,
+    "desconocidos": 2,
+    "desconocidosPorMotivo": { "no_publicado": 2 }
+  },
+  "lugares": [
+    {
+      "idExterno": "51...",
+      "proveedor": "geoapify",
+      "nombre": "Palacio Nacional de la Cultura",
+      "direccion": "Palacio Nacional de la Cultura, 6a Calle, Zona 1, Guatemala",
+      "lat": 14.6433,
+      "lng": -90.5131,
+      "categorias": ["building", "building.historic", "tourism", "tourism.sights"],
+      "tipo_entorno": "outdoor",
+      "sensibilidad_clima": "alta",
+      "regla_clima": null,
+      "horario": { "estado": "disponible", "valorOriginal": "Mo-Fr 08:00-16:00; Sa-Su 09:00-16:00", "fuente": "geoapify" },
+      "open_now": true,
+      "estadoApertura": "abierto",
+      "evaluadoEn": "2026-10-19T21:02:43.145Z",
+      "zonaHoraria": "America/Guatemala",
+      "horaLocalEvaluacion": "2026-10-19T15:02-06:00",
+      "cierreEstimado": "2026-10-19T16:00-06:00",
+      "distanciaMetros": 32
+    }
+  ]
+}
+```
+
+Los valores de horario, zona, hora local, cierre, distancia y cobertura provienen de una consulta real; el identificador, la dirección, las coordenadas y las categorías se abreviaron o completaron como ilustración.
+
+Cada lugar conserva todos los campos de `LugarInteres` de `/api/lugares`, incluido el objeto `horario`, y agrega `open_now`, `estadoApertura`, `evaluadoEn`, `zonaHoraria`, `horaLocalEvaluacion`, `cierreEstimado` y `distanciaMetros` (redondeada al metro).
+
+**Cobertura.** El resultado se limita a los candidatos consultados. `candidatosEvaluados` cuenta los candidatos dentro del radio; `abiertos`, `cerrados` y `desconocidos` los clasifican (`abiertos` puede superar `total` cuando se recorta por `limite`). `busquedaLimitada: true` indica que Geoapify llenó el cupo de candidatos (`limiteCandidatos`) y puede haber más lugares en el radio que no se evaluaron. Por eso, una lista vacía no significa que no haya ningún lugar abierto en la zona.
+
+### Errores y respuestas vacías
+
+| HTTP | Código | Situación |
+| --- | --- | --- |
+| 400 | `PARAMETRO_INVALIDO` | Parámetros inválidos, repetidos o no admitidos (incluye `detalles` por parámetro) |
+| 502 | `PROVEEDOR_DETALLES_NO_DISPONIBLES` | Había candidatos, pero no se pudo obtener el horario de ninguno (todos con `error_consulta`) |
+| 500, 502, 503, 504 | Los de [`GET /api/lugares`](#errores) | Fallos de la búsqueda principal de Geoapify (sin clave, credenciales, límite de solicitudes, red, respuesta inválida, tiempo agotado) |
+
+- Sin candidatos en el radio, o sin ningún lugar confirmado como abierto, la respuesta es `200` con `lugares: []`, `total: 0` y la cobertura correspondiente.
+- Si fallan los detalles de solo algunos lugares (error HTTP, red o tiempo agotado de 5 s), esos lugares se excluyen y se cuentan en `desconocidosPorMotivo.error_consulta`. Si fallan todos, se responde `502` para no confundir un fallo técnico con «no hay lugares abiertos».
+- Nunca se completan horarios ni se inventan lugares.
+
+### Caché y consumo
+
+- Se guardan en memoria, por `idExterno`, el horario publicado y la zona horaria durante 30 minutos (`VIGENCIA_CACHE_APERTURA_MS`, como máximo 1000 entradas). **No se guarda `open_now`**: se recalcula en cada consulta con el reloj actual, así que un lugar deja de aparecer en cuanto llega su hora de cierre aunque su horario siga en caché. Los fallos de consulta (`error_consulta`) no se guardan. La caché es por proceso y se vacía al reiniciar.
+- Cada solicitud consume 1 crédito de búsqueda más 1 por candidato sin caché: con `limite=10`, hasta 31 créditos la primera vez. Con el ritmo de 4 consultas de detalles por segundo, 30 candidatos tardan unos 7,5 s, dentro del presupuesto de 10 s.
+
+### Ejemplos en PowerShell
+
+Con el servidor iniciado (`npm run dev`). Búsqueda general alrededor del Centro Histórico (consume hasta 7 créditos):
+
+```powershell
+$respuesta = Invoke-RestMethod -Uri "http://localhost:3000/api/lugares/abiertos-ahora?lat=14.6431&lng=-90.5133&radio=2000&limite=2"
+$respuesta | Select-Object evaluadoEn, criterio, radioMetros, total
+$respuesta.cobertura | ConvertTo-Json
+$respuesta.lugares | Format-Table nombre, distanciaMetros, horaLocalEvaluacion, cierreEstimado, @{ n = "horario"; e = { $_.horario.valorOriginal } } -Wrap
+```
+
+Por intereses, codificando los valores:
+
+```powershell
+$parametros = [ordered]@{ lat = "14.6349"; lng = "-90.5069"; intereses = "Cultura,Gastronomía"; radio = "3000"; limite = "5" }
+$consulta = ($parametros.GetEnumerator() | ForEach-Object { "$($_.Key)=$([uri]::EscapeDataString($_.Value))" }) -join "&"
+$respuesta = Invoke-RestMethod -Uri "http://localhost:3000/api/lugares/abiertos-ahora?$consulta"
+$respuesta.lugares | Format-Table nombre, distanciaMetros, cierreEstimado
+```
+
+Solicitud inválida (responde `400` sin consultar a Geoapify):
+
+```powershell
+try {
+  Invoke-RestMethod -Uri "http://localhost:3000/api/lugares/abiertos-ahora?lat=abc&lng=-90.5&radio=0"
+} catch {
+  $_.ErrorDetails.Message | ConvertFrom-Json | ConvertTo-Json -Depth 4
+}
+```
+
+### Limitaciones
+
+- La apertura depende de la calidad de los datos de OpenStreetMap: muchos lugares no publican horario y algunos horarios pueden estar desactualizados.
+- Los festivos (`PH`) y las vacaciones escolares (`SH`) no se evalúan (el horario queda `no_interpretable`), así que un lugar cerrado por un feriado no indicado en su horario puede aparecer como abierto.
+- `evaluarApertura` construye la fecha local del lugar con un `Date` del servidor. Si esa hora local no existe en la zona del servidor (el salto de horario de verano del servidor), el estado queda `desconocido` en ese minuto; en el cambio de hora del servidor, `cierreEstimado` puede diferir una hora. No afecta a servidores en UTC o en zonas sin horario de verano.
+- El resultado se limita a los candidatos evaluados (como máximo 30 por solicitud); consulta `cobertura.busquedaLimitada`.
+- El frontend todavía no consume este endpoint.
 
 ## Clasificación climática de lugares
 

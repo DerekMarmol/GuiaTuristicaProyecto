@@ -1,3 +1,4 @@
+import { esZonaHorariaValida } from "../ai/zonaHoraria";
 import { esObjeto, type FuncionFetch } from "../tipos";
 
 export const URL_PLACE_DETAILS = "https://api.geoapify.com/v2/place-details";
@@ -46,6 +47,12 @@ export function extraerRegistroDetalles(datos: unknown, idExterno: string): Prop
     return coincidentes[0].properties;
   }
   throw new ErrorDetalles("registro de detalles ausente o ambiguo");
+}
+
+// Place Details informa la zona IANA del lugar en timezone.name; la búsqueda de Places no la incluye.
+export function zonaHorariaDeDetalles(propiedades: PropiedadesDetalles): string | null {
+  const { timezone } = propiedades;
+  return esObjeto(timezone) && esZonaHorariaValida(timezone.name) ? timezone.name : null;
 }
 
 export function crearClienteDetalles({
