@@ -84,11 +84,10 @@ function desconocido(motivo: MotivoAperturaDesconocida): EvaluacionApertura {
   return { estado: "desconocido", motivo };
 }
 
-export function evaluarApertura(horario: Horario | null | undefined, momento: MomentoLocal): EvaluacionApertura {
+function interpreteVerificable(horario: Horario | null | undefined): OpeningHours | { motivo: MotivoAperturaDesconocida } {
   if (!horario || horario.estado !== "disponible" || typeof horario.valorOriginal !== "string") {
-    return desconocido(horario && ESTADOS_NO_VERIFICABLES.has(horario.estado) ? (horario.estado as MotivoAperturaDesconocida) : "error_consulta");
+    return { motivo: horario && ESTADOS_NO_VERIFICABLES.has(horario.estado) ? (horario.estado as MotivoAperturaDesconocida) : "error_consulta" };
   }
-
   let interprete: OpeningHours | null;
   try {
     interprete = crearInterprete(horario.valorOriginal);
@@ -96,10 +95,57 @@ export function evaluarApertura(horario: Horario | null | undefined, momento: Mo
     interprete = null;
   }
   if (!interprete) {
-    return desconocido("no_interpretable");
+    return { motivo: "no_interpretable" };
   }
   if (HORAS_SOLARES.test(horario.valorOriginal)) {
-    return desconocido("estado_desconocido");
+    return { motivo: "estado_desconocido" };
+  }
+  return interprete;
+}
+
+export interface VentanaApertura {
+  inicioMinutos: number;
+  finMinutos: number;
+}
+
+export type VentanasDelDia =
+  | { estado: "disponible"; ventanas: VentanaApertura[] }
+  | { estado: "desconocido"; motivo: MotivoAperturaDesconocida };
+
+// Intervalos abiertos del día local indicado, en minutos desde la medianoche (el último puede terminar en 1440).
+export function ventanasDelDia(horario: Horario | null | undefined, { anio, mes, dia }: Pick<MomentoLocal, "anio" | "mes" | "dia">): VentanasDelDia {
+  const interprete = interpreteVerificable(horario);
+  if (!(interprete instanceof OpeningHours)) {
+    return { estado: "desconocido", motivo: interprete.motivo };
+  }
+  const inicioDia = fechaDesdeMomento({ anio, mes, dia, hora: 0, minuto: 0 });
+  if (!inicioDia) {
+    return { estado: "desconocido", motivo: "estado_desconocido" };
+  }
+  const finDia = new Date(anio, mes - 1, dia + 1);
+  const minutosDe = (fecha: Date) =>
+    fecha.getTime() >= finDia.getTime() ? 1440 : fecha.getTime() <= inicioDia.getTime() ? 0 : fecha.getHours() * 60 + fecha.getMinutes();
+  try {
+    const ventanas: VentanaApertura[] = [];
+    for (const [desde, hasta, incierto] of interprete.getOpenIntervals(inicioDia, finDia)) {
+      if (incierto) {
+        return { estado: "desconocido", motivo: "estado_desconocido" };
+      }
+      const ventana = { inicioMinutos: minutosDe(desde), finMinutos: minutosDe(hasta) };
+      if (ventana.finMinutos > ventana.inicioMinutos) {
+        ventanas.push(ventana);
+      }
+    }
+    return { estado: "disponible", ventanas };
+  } catch {
+    return { estado: "desconocido", motivo: "estado_desconocido" };
+  }
+}
+
+export function evaluarApertura(horario: Horario | null | undefined, momento: MomentoLocal): EvaluacionApertura {
+  const interprete = interpreteVerificable(horario);
+  if (!(interprete instanceof OpeningHours)) {
+    return desconocido(interprete.motivo);
   }
 
   const fecha = fechaDesdeMomento(momento);

@@ -1,7 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
+import type { ModoTransporteRuta } from "../../../shared/types";
 import { ErrorApi } from "../errores";
+import { crearClienteOptimizador, errorRespuestaOptimizador, URL_OPTIMIZADOR_PREDETERMINADA } from "../optimizador/cliente";
 
 type TipoEvento = "clima" | "retraso" | "parada_cancelada";
+const MODOS_TRANSPORTE: readonly ModoTransporteRuta[] = ["auto", "pedestrian"];
 interface ParadaEvento {
   id: string;
   lat: number;
@@ -22,6 +25,8 @@ interface EventoReoptimizacion {
   horaActualMinutos: number;
   paradaCanceladaId?: string;
   probabilidadLluvia?: number;
+  modoTransporte?: ModoTransporteRuta;
+  origen?: { lat: number; lng: number };
 }
 
 function validarEvento(cuerpo: unknown): EventoReoptimizacion {
@@ -57,13 +62,24 @@ function validarEvento(cuerpo: unknown): EventoReoptimizacion {
     (!Number.isFinite(evento.probabilidadLluvia) || evento.probabilidadLluvia < 0 || evento.probabilidadLluvia > 100)) {
     throw new ErrorApi(400, "PARAMETRO_INVALIDO", "La probabilidad de lluvia debe estar entre 0 y 100.");
   }
+  if (evento.modoTransporte !== undefined && !MODOS_TRANSPORTE.includes(evento.modoTransporte)) {
+    throw new ErrorApi(400, "PARAMETRO_INVALIDO", "El medio de transporte debe ser auto o pedestrian.");
+  }
+  if (evento.origen !== undefined) {
+    const { lat, lng } = (evento.origen ?? {}) as { lat?: unknown; lng?: unknown };
+    if (typeof lat !== "number" || !Number.isFinite(lat) || lat < -90 || lat > 90 ||
+      typeof lng !== "number" || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+      throw new ErrorApi(400, "PARAMETRO_INVALIDO", "El origen debe tener lat entre -90 y 90 y lng entre -180 y 180.");
+    }
+  }
   return evento as EventoReoptimizacion;
 }
 
 export function crearRutaReoptimizacion({
-  url = process.env.OPTIMIZER_URL ?? "http://localhost:8000",
+  url = process.env.OPTIMIZER_URL ?? URL_OPTIMIZADOR_PREDETERMINADA,
   fetchImpl = fetch,
 }: { url?: string; fetchImpl?: typeof fetch } = {}): FastifyPluginAsync {
+  const llamarOptimizador = crearClienteOptimizador({ url, fetchImpl });
   return async (app) => {
     app.post("/reoptimizar", { bodyLimit: 100 * 1024 }, async (req) => {
       const evento = validarEvento(req.body);
@@ -90,29 +106,22 @@ export function crearRutaReoptimizacion({
         probabilidad_lluvia: p.probabilidadLluvia ?? (evento.tipo === "clima" ? evento.probabilidadLluvia : undefined),
         pronostico_horario: p.pronosticoHorario?.map((x) => ({ hora: x.hora, probabilidad_lluvia: x.probabilidadLluvia })) ?? [],
       }));
-      let respuesta: Response;
-      try {
-        respuesta = await fetchImpl(new URL("/reoptimize", url), {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ paradas, hora_actual_minutos: evento.horaActualMinutos }),
-          signal: AbortSignal.timeout(10_000),
-        });
-      } catch {
-        throw new ErrorApi(502, "OPTIMIZADOR_NO_DISPONIBLE", "No fue posible conectar con el optimizador de rutas.");
+      const datos = await llamarOptimizador("/reoptimize", {
+        paradas,
+        hora_actual_minutos: evento.horaActualMinutos,
+        modo_transporte: evento.modoTransporte ?? "auto",
+        ...(evento.origen ? { origen: { lat: evento.origen.lat, lng: evento.origen.lng } } : {}),
+      });
+      if (!datos || typeof datos !== "object") {
+        throw errorRespuestaOptimizador();
       }
-      if (!respuesta.ok) {
-        throw new ErrorApi(respuesta.status === 422 ? 409 : 502, "REOPTIMIZACION_NO_DISPONIBLE", "El optimizador no pudo encontrar una ruta válida para las paradas pendientes.");
-      }
-      let resultado: { orden_optimo?: unknown; distancia_total_km?: unknown };
-      try { resultado = await respuesta.json() as typeof resultado; }
-      catch { throw new ErrorApi(502, "RESPUESTA_OPTIMIZADOR_INVALIDA", "El optimizador devolvió una respuesta inválida."); }
+      const resultado = datos as { orden_optimo?: unknown; distancia_total_km?: unknown };
       if (!Array.isArray(resultado.orden_optimo) || !resultado.orden_optimo.every((id) => typeof id === "string") ||
         resultado.orden_optimo.length !== paradasPendientes.length ||
         new Set(resultado.orden_optimo).size !== paradasPendientes.length ||
         resultado.orden_optimo.some((id) => !paradasPendientes.some((p) => p.id === id)) ||
         typeof resultado.distancia_total_km !== "number") {
-        throw new ErrorApi(502, "RESPUESTA_OPTIMIZADOR_INVALIDA", "El optimizador devolvió un orden de paradas inválido.");
+        throw errorRespuestaOptimizador("El optimizador devolvió un orden de paradas inválido.");
       }
       const porId = new Map(paradasPendientes.map((p) => [p.id, p]));
       return {

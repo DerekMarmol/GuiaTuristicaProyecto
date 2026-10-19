@@ -1,5 +1,5 @@
 import Fastify, { type FastifyInstance } from "fastify";
-import { crearClienteGeoapify } from "./geoapify/cliente";
+import { crearClienteGeoapify, crearConsultaPlaces } from "./geoapify/cliente";
 import { crearClienteDetalles } from "./geoapify/detalles";
 import { crearEnriquecedorHorarios, crearResolvedorLugares } from "./geoapify/enriquecer";
 import { crearRutaLugares } from "./routes/lugares";
@@ -7,9 +7,24 @@ import { crearRutaItinerarios } from "./routes/itinerarios";
 import { crearRutaReoptimizacion } from "./routes/reoptimizacion";
 import { crearValidadorPropuestas } from "./ai/propuesta";
 import { crearPriorizadorClima } from "./ai/prioridadClima";
-import { crearClienteOpenWeather } from "./openweather/cliente";
+import { crearClienteClimaActual, crearClienteOpenWeather } from "./openweather/cliente";
+import { leerConfiguracionClimaReactivo, type ConfiguracionClimaReactivo } from "./config/climaReactivo";
+import { crearBuscadorAlternativas } from "./clima/reactivo/alternativas";
+import { crearObtenedorClima } from "./clima/reactivo/climaCache";
+import { crearFirmador } from "./clima/reactivo/firma";
+import { crearReoptimizadorClima } from "./clima/reactivo/optimizador";
+import { crearServicioClimaReactivo } from "./clima/reactivo/servicio";
+import { crearClienteOptimizador } from "./optimizador/cliente";
+import { crearRutaClimaReactivo } from "./routes/climaReactivo";
 import { crearServicioClima } from "./clima/servicio";
 import { crearRutaPronosticoClima } from "./routes/pronosticoClima";
+import { crearRecomendadorHoteles } from "./hoteles/recomendaciones";
+import { crearBuscadorHoteles } from "./hoteles/serpapi";
+import { crearObtenedorTipoCambio } from "./hoteles/tipoCambio";
+import { crearRutaHoteles } from "./routes/hoteles";
+import { crearBuscadorRestaurantes } from "./restaurantes/busqueda";
+import { crearRecomendadorRestaurantes } from "./restaurantes/recomendaciones";
+import { crearRutaRestaurantes } from "./routes/restaurantes";
 import authPlugin from "./plugins/auth.plugin";
 import authRoutes from "./routes/auth.routes";
 import { manejarErrores } from "./errores";
@@ -35,6 +50,25 @@ export interface OpcionesApp {
     tiempoEsperaMs?: number;
     ahora?: () => Date;
   };
+  hoteles?: {
+    serpApiKey?: string;
+    exchangeRateApiKey?: string;
+    fetch?: FuncionFetch;
+    tiempoEsperaMs?: number;
+    tiempoEsperaTipoCambioMs?: number;
+    ahora?: () => Date;
+  };
+  restaurantes?: {
+    concurrencia?: number;
+    intervaloMs?: number;
+  };
+  climaReactivo?: {
+    optimizadorUrl?: string;
+    fetchOptimizador?: typeof fetch;
+    ahora?: () => Date;
+    secreto?: string;
+    configuracion?: ConfiguracionClimaReactivo;
+  };
   chat?: {
     cliente?: ClienteChat;
   };
@@ -46,6 +80,9 @@ export function crearApp({
   tiempoEsperaMs,
   detalles = {},
   clima = {},
+  hoteles = {},
+  restaurantes = {},
+  climaReactivo = {},
   chat = {},
 }: OpcionesApp = {}): FastifyInstance {
   // Igual que con Express: rutas sin distinguir mayúsculas y con o sin barra final.
@@ -86,6 +123,57 @@ export function crearApp({
   app.register(rutaEta, { prefix: "/api/itinerarios" });
 
   app.register(crearRutaPronosticoClima(consultarClima), { prefix: "/api/clima/pronostico" });
+
+  const configClimaReactivo = climaReactivo.configuracion ?? leerConfiguracionClimaReactivo();
+  const ahoraClimaReactivo = climaReactivo.ahora ?? clima.ahora ?? (() => new Date());
+  const servicioClimaReactivo = crearServicioClimaReactivo({
+    obtenerClima: crearObtenedorClima({
+      obtenerClimaActual: crearClienteClimaActual({
+        apiKey: clima.apiKey === undefined ? process.env.OPENWEATHER_API_KEY : clima.apiKey,
+        fetch: clima.fetch,
+        tiempoEsperaMs: clima.tiempoEsperaMs,
+      }),
+      obtenerPronostico,
+      vigenciaMs: configClimaReactivo.vigenciaCacheClimaMs,
+      ahora: ahoraClimaReactivo,
+    }),
+    buscarAlternativas: crearBuscadorAlternativas({ buscarLugares, enriquecerHorarios, config: configClimaReactivo }),
+    reoptimizarClima: crearReoptimizadorClima(
+      crearClienteOptimizador({
+        url: climaReactivo.optimizadorUrl,
+        fetchImpl: climaReactivo.fetchOptimizador,
+        tiempoEsperaMs: configClimaReactivo.tiempoEsperaOptimizadorMs,
+      }),
+    ),
+    firmador: crearFirmador(climaReactivo.secreto ?? process.env.CLIMA_REACTIVO_SECRETO),
+    config: configClimaReactivo,
+    ahora: ahoraClimaReactivo,
+  });
+  app.register(crearRutaClimaReactivo(servicioClimaReactivo), { prefix: "/api/itinerarios/clima-reactivo" });
+
+  const ahoraHoteles = hoteles.ahora ?? (() => new Date());
+  const recomendarHoteles = crearRecomendadorHoteles({
+    buscador: crearBuscadorHoteles({
+      apiKey: hoteles.serpApiKey === undefined ? process.env.SERPAPI_API_KEY : hoteles.serpApiKey,
+      fetch: hoteles.fetch ?? fetch,
+      tiempoEsperaMs: hoteles.tiempoEsperaMs,
+      ahora: ahoraHoteles,
+    }),
+    tipoCambio: crearObtenedorTipoCambio({
+      apiKey: hoteles.exchangeRateApiKey === undefined ? process.env.EXCHANGERATE_API_KEY : hoteles.exchangeRateApiKey,
+      fetch: hoteles.fetch ?? fetch,
+      tiempoEsperaMs: hoteles.tiempoEsperaTipoCambioMs ?? hoteles.tiempoEsperaMs,
+      ahora: ahoraHoteles,
+    }),
+  });
+  app.register(crearRutaHoteles(recomendarHoteles, ahoraHoteles), { prefix: "/api/hoteles" });
+
+  const recomendarRestaurantes = crearRecomendadorRestaurantes({
+    buscar: crearBuscadorRestaurantes(crearConsultaPlaces({ apiKey, fetch, tiempoEsperaMs })),
+    concurrencia: restaurantes.concurrencia,
+    intervaloMs: restaurantes.intervaloMs,
+  });
+  app.register(crearRutaRestaurantes(recomendarRestaurantes), { prefix: "/api/restaurantes" });
 
   app.setNotFoundHandler((req, reply) => {
     reply.code(404).send({

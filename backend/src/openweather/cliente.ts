@@ -1,11 +1,16 @@
 import { ErrorApi } from "../errores";
 import type { FuncionFetch } from "../tipos";
-import { interpretarPronostico, type Pronostico } from "./transformar";
+import { interpretarClimaActual, interpretarPronostico, type ClimaActual, type Pronostico } from "./transformar";
 
 export const URL_PRONOSTICO = "https://api.openweathermap.org/data/2.5/forecast";
+export const URL_CLIMA_ACTUAL = "https://api.openweathermap.org/data/2.5/weather";
 export const TIEMPO_ESPERA_MS = 10000;
 
-export type ObtenerPronostico = (ubicacion: { lat: number; lng: number }) => Promise<Pronostico>;
+type Ubicacion = { lat: number; lng: number };
+
+export type ObtenerPronostico = (ubicacion: Ubicacion) => Promise<Pronostico>;
+
+export type ObtenerClimaActual = (ubicacion: Ubicacion) => Promise<ClimaActual>;
 
 interface OpcionesCliente {
   apiKey?: string;
@@ -39,19 +44,15 @@ function errorTiempoAgotado(): ErrorApi {
   return new ErrorApi(504, "PROVEEDOR_TIEMPO_AGOTADO", "El proveedor de clima tardó demasiado en responder.");
 }
 
-export function crearClienteOpenWeather({
-  apiKey,
-  fetch: fetchImpl = globalThis.fetch,
-  tiempoEsperaMs = TIEMPO_ESPERA_MS,
-}: OpcionesCliente = {}): ObtenerPronostico {
+function crearSolicitud({ apiKey, fetch: fetchImpl = globalThis.fetch, tiempoEsperaMs = TIEMPO_ESPERA_MS }: OpcionesCliente) {
   const clave = typeof apiKey === "string" ? apiKey.trim() : "";
 
-  return async function obtenerPronostico({ lat, lng }) {
+  return async function solicitar(direccion: string, { lat, lng }: Ubicacion): Promise<unknown> {
     if (!clave) {
       throw new ErrorApi(503, "SERVICIO_NO_CONFIGURADO", "El servicio de clima no está configurado.");
     }
 
-    const url = new URL(URL_PRONOSTICO);
+    const url = new URL(direccion);
     url.search = new URLSearchParams({
       lat: formatearCoordenada(lat),
       lon: formatearCoordenada(lng),
@@ -82,19 +83,30 @@ export function crearClienteOpenWeather({
         throw errorPorEstado(respuesta.status);
       }
 
-      let datos: unknown;
       try {
-        datos = await respuesta.json();
+        return (await respuesta.json()) as unknown;
       } catch {
         if (controlador.signal.aborted) {
           throw errorTiempoAgotado();
         }
         throw new ErrorApi(502, "PROVEEDOR_RESPUESTA_INVALIDA", "El proveedor de clima devolvió una respuesta que no es JSON válido.");
       }
-
-      return interpretarPronostico(datos);
     } finally {
       clearTimeout(temporizador);
     }
+  };
+}
+
+export function crearClienteOpenWeather(opciones: OpcionesCliente = {}): ObtenerPronostico {
+  const solicitar = crearSolicitud(opciones);
+  return async function obtenerPronostico(ubicacion) {
+    return interpretarPronostico(await solicitar(URL_PRONOSTICO, ubicacion));
+  };
+}
+
+export function crearClienteClimaActual(opciones: OpcionesCliente = {}): ObtenerClimaActual {
+  const solicitar = crearSolicitud(opciones);
+  return async function obtenerClimaActual(ubicacion) {
+    return interpretarClimaActual(await solicitar(URL_CLIMA_ACTUAL, ubicacion));
   };
 }

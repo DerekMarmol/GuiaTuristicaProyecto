@@ -12,8 +12,11 @@ import { generarGastosSimulados } from "../services/gastos";
 import CalificacionParada, { ResumenCalificacion } from "../components/CalificacionParada";
 import type { RespuestaClima } from "../../../shared/types";
 import { consultarPronostico, coordenadasDelViaje, hayLluviaSignificativa } from "../services/clima";
-import { reoptimizarRuta, type TipoEventoRuta } from "../services/reoptimizacion";
+import { modoTransporteRuta, reoptimizarRuta, type TipoEventoRuta } from "../services/reoptimizacion";
 import type { RespuestaEta } from "../services/eta";
+import PropuestaClima from "../components/PropuestaClima";
+import { useMonitoreoClima } from "../hooks/useMonitoreoClima";
+import { aplicarParadasPropuestas, construirItinerarioActivo, firmaItinerario } from "../services/climaReactivoEstado";
 
 import {
   generarItinerario,
@@ -186,6 +189,7 @@ export default function Paso4Generacion() {
         paradas: paradasPendientes,
         paradaCanceladaId,
         probabilidadLluvia,
+        modoTransporte: modoTransporteRuta(viaje.transporte),
       });
       const paradas = [
         ...diaSolicitado.paradas.filter((p) => completadas.has(p.id)),
@@ -359,6 +363,52 @@ export default function Paso4Generacion() {
       : [],
     [dia?.id, dia?.paradas, visitadas, calificaciones, paradasVisitadas]
   );
+
+  // GUI-72: estado del día que se envía al monitoreo del clima.
+  const itinerarioActivo = useMemo(
+    () => (dia ? construirItinerarioActivo(dia, { completadas: new Set(idsParadasCompletadas), descartadas: new Set() }) : null),
+    [dia, idsParadasCompletadas]
+  );
+  const itinerarioActivoRef = useRef(itinerarioActivo);
+  itinerarioActivoRef.current = itinerarioActivo;
+  const monitoreo = useMonitoreoClima({
+    itinerario: itinerarioActivo,
+    modoTransporte: modoTransporteRuta(viaje.transporte),
+    intereses: viaje.intereses ?? [],
+  });
+  const [aplicandoClima, setAplicandoClima] = useState(false);
+
+  async function aceptarPropuestaDeClima() {
+    if (aplicandoClima) return;
+    setAplicandoClima(true);
+    try {
+      const { respuesta, firmaEnviada } = await monitoreo.aceptarPropuesta();
+      const actual = itinerarioActivoRef.current;
+      // Si el usuario marcó o canceló paradas mientras se aplicaba, no se sobrescribe su itinerario.
+      if (!actual || actual.id !== respuesta.itinerarioId || firmaItinerario(actual) !== firmaEnviada) {
+        setAvisoReoptimizacion("El itinerario cambió mientras se aplicaba la propuesta y no se modificó. Revisa el clima de nuevo.");
+        return;
+      }
+      const estado = {
+        completadas: new Set(actual.paradas.filter((p) => p.estado === "completada").map((p) => p.id)),
+        descartadas: new Set(actual.paradas.filter((p) => p.estado === "cancelada").map((p) => p.id)),
+      };
+      setItinerarios((actuales) => actuales?.map((it) =>
+        it.id === respuesta.itinerarioId
+          ? { ...it, paradas: aplicarParadasPropuestas(it.paradas, estado, respuesta.paradasPendientes) }
+          : it
+      ) ?? null);
+      setEtaMapa(null);
+      monitoreo.descartarPropuesta();
+      setAvisoReoptimizacion(respuesta.yaAplicada
+        ? "El plan ya incluía esta propuesta."
+        : "El plan se actualizó con las alternativas techadas propuestas por el clima.");
+    } catch (err) {
+      setAvisoReoptimizacion(err instanceof Error ? err.message : "No se pudo aplicar la propuesta.");
+    } finally {
+      setAplicandoClima(false);
+    }
+  }
 
   const mostrarHoteles =
     viaje.hospedaje === false && !viaje.sinHotel;
@@ -549,6 +599,28 @@ export default function Paso4Generacion() {
               dia={pronostico?.dias.find((d) => d.fecha === dia.fecha)}
             />
           </section>
+          {monitoreo.activo || monitoreo.propuesta ? (
+            <PropuestaClima
+              estado={monitoreo.estado}
+              nivel={monitoreo.evaluacion?.evaluacion?.nivel ?? null}
+              senal={monitoreo.evaluacion?.evaluacion?.senalPrincipal ?? null}
+              consultadoEn={monitoreo.evaluacion?.evaluacion?.consultadoEn ?? null}
+              mensajeEvaluacion={monitoreo.evaluacion?.mensaje ?? null}
+              error={monitoreo.error}
+              proximaRevision={monitoreo.proximaRevision}
+              estadoUbicacion={monitoreo.estadoUbicacion}
+              propuesta={monitoreo.propuesta}
+              obsoleta={monitoreo.propuestaObsoleta}
+              aplicando={aplicandoClima}
+              onVerificar={() => void monitoreo.verificar()}
+              onCompartirUbicacion={monitoreo.compartirUbicacion}
+              onDejarDeCompartir={monitoreo.dejarDeCompartir}
+              onAceptar={() => void aceptarPropuestaDeClima()}
+              onRechazar={monitoreo.descartarPropuesta}
+            />
+          ) : (
+            <p className="nota">El monitoreo del clima durante el recorrido se activa el día del itinerario mientras queden paradas pendientes.</p>
+          )}
           <div className="acciones-ruta">
             <button type="button" className="btn-secundario" disabled={reoptimizando || dia.paradas.length === 0}
               onClick={() => void solicitarReoptimizacion("retraso")}>

@@ -11,6 +11,17 @@ export interface RegistroPronostico {
   dt: number;
   temperaturaC: number;
   lluviaMm: number;
+  probabilidadPrecipitacion: number | null;
+  codigosClima: number[];
+  descripcion: string | null;
+}
+
+export interface ClimaActual {
+  dt: number;
+  desplazamientoUtcSegundos: number;
+  codigosClima: number[];
+  descripcion: string | null;
+  lluvia1hMm: number | null;
 }
 
 export interface Pronostico {
@@ -78,6 +89,18 @@ function leerLluvia(registro: Record<string, unknown>): number {
   return volumen;
 }
 
+// pop y weather son informativos para el resumen diario: un valor ausente o fuera de rango no invalida la respuesta.
+function leerProbabilidad(valor: unknown): number | null {
+  return esNumeroFinito(valor) && valor >= 0 && valor <= 1 ? valor : null;
+}
+
+function leerCondiciones(valor: unknown): { codigosClima: number[]; descripcion: string | null } {
+  const condiciones = Array.isArray(valor) ? valor.filter(esObjeto) : [];
+  const codigosClima = condiciones.map((c) => c.id).filter((id): id is number => esEnteroSeguro(id) && id >= 200 && id < 1000);
+  const descripcion = condiciones.map((c) => c.description).find((d): d is string => typeof d === "string" && d.trim() !== "");
+  return { codigosClima, descripcion: descripcion?.trim() ?? null };
+}
+
 function leerRegistro(registro: unknown): RegistroPronostico {
   if (!esObjeto(registro) || !esEnteroSeguro(registro.dt) || !esObjeto(registro.main)) {
     throw respuestaInvalida();
@@ -85,7 +108,32 @@ function leerRegistro(registro: unknown): RegistroPronostico {
   if (!esNumeroFinito(registro.main.temp)) {
     throw respuestaInvalida();
   }
-  return { dt: registro.dt, temperaturaC: registro.main.temp, lluviaMm: leerLluvia(registro) };
+  return {
+    dt: registro.dt,
+    temperaturaC: registro.main.temp,
+    lluviaMm: leerLluvia(registro),
+    probabilidadPrecipitacion: leerProbabilidad(registro.pop),
+    ...leerCondiciones(registro.weather),
+  };
+}
+
+export function interpretarClimaActual(datos: unknown): ClimaActual {
+  if (!esObjeto(datos) || !esEnteroSeguro(datos.dt) || datos.dt <= 0 || !Array.isArray(datos.weather)) {
+    throw respuestaInvalida();
+  }
+  const desplazamiento = datos.timezone;
+  if (!esEnteroSeguro(desplazamiento) || desplazamiento < DESPLAZAMIENTO_MINIMO_S || desplazamiento > DESPLAZAMIENTO_MAXIMO_S) {
+    throw respuestaInvalida();
+  }
+  let lluvia1hMm: number | null = null;
+  if ("rain" in datos) {
+    const volumen = esObjeto(datos.rain) ? datos.rain["1h"] : undefined;
+    if (volumen !== undefined && (!esNumeroFinito(volumen) || volumen < 0)) {
+      throw respuestaInvalida();
+    }
+    lluvia1hMm = esNumeroFinito(volumen) ? volumen : null;
+  }
+  return { dt: datos.dt, desplazamientoUtcSegundos: desplazamiento, ...leerCondiciones(datos.weather), lluvia1hMm };
 }
 
 export function interpretarPronostico(datos: unknown): Pronostico {

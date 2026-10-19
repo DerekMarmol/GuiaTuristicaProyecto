@@ -19,6 +19,32 @@ services:
     build: ./optimizer
     ports:
       - "8000:8000"
-  
+    environment:
+      VALHALLA_URL: http://valhalla:8002
+    depends_on:
+      - valhalla
+
+  valhalla:
+    image: ghcr.io/valhalla/valhalla-scripted:3.9.1
+    ports:
+      - "8002:8002"
+    environment:
+      tile_urls: https://download.geofabrik.de/central-america/guatemala-latest.osm.pbf
+      use_tiles_ignore_pbf: "True"
+      build_elevation: "False"
+      build_admins: "True"
+      build_time_zones: "True"
+      build_tar: "True"
+      server_threads: "4"
+    volumes:
+      - valhalla_data:/custom_files
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8002/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30m
+
 volumes:
   postgres_data:
+  valhalla_data:
