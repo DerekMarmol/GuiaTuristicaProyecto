@@ -134,6 +134,20 @@ class MatrizTraslados:
             if duracion is None
         ]
 
+    def seleccionar(self, indices: list[int]) -> "MatrizTraslados":
+        """Submatriz con las filas y columnas indicadas, en ese orden."""
+        if not indices or any(not 0 <= i < self.tamano for i in indices):
+            raise DatosRutaInvalidos("Los índices de la submatriz no son válidos.")
+        return MatrizTraslados(
+            modo=self.modo,
+            duraciones_segundos=tuple(
+                tuple(self.duraciones_segundos[i][j] for j in indices) for i in indices
+            ),
+            distancias_metros=tuple(
+                tuple(self.distancias_metros[i][j] for j in indices) for i in indices
+            ),
+        )
+
 
 def _numero_no_negativo(valor: object, campo: str) -> float:
     if not _es_numero(valor) or valor < 0:

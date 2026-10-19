@@ -14,6 +14,9 @@ interface Plantilla {
   apertura: string;
   cierre: string;
   estancia: number;
+  // Categorías de Geoapify: el backend clasifica con ellas el entorno climático de la parada.
+  categorias: string[];
+  entorno?: Pick<Parada, "tipo_entorno" | "sensibilidad_clima">;
 }
 
 export interface ParadaConHorario extends Parada {
@@ -30,12 +33,14 @@ const LUGARES: Record<string, Plantilla[]> = {
   Cultura: [
     {
       nombre: "Museo de arte de {d}",
+      categorias: ["entertainment.museum"],
       apertura: "09:00",
       cierre: "17:00",
       estancia: 90,
     },
     {
       nombre: "Casa de la cultura de {d}",
+      categorias: ["entertainment.culture"],
       apertura: "09:00",
       cierre: "16:00",
       estancia: 60,
@@ -44,12 +49,14 @@ const LUGARES: Record<string, Plantilla[]> = {
   Historia: [
     {
       nombre: "Centro histórico de {d}",
+      categorias: ["tourism.sights"],
       apertura: "08:00",
       cierre: "18:00",
       estancia: 75,
     },
     {
       nombre: "Catedral de {d}",
+      categorias: ["tourism.sights.place_of_worship"],
       apertura: "08:00",
       cierre: "17:00",
       estancia: 45,
@@ -58,12 +65,14 @@ const LUGARES: Record<string, Plantilla[]> = {
   Gastronomía: [
     {
       nombre: "Mercado de comida típica",
+      categorias: ["commercial.marketplace"],
       apertura: "07:00",
       cierre: "15:00",
       estancia: 60,
     },
     {
       nombre: "Restaurante tradicional",
+      categorias: ["catering.restaurant"],
       apertura: "12:00",
       cierre: "21:00",
       estancia: 80,
@@ -72,12 +81,14 @@ const LUGARES: Record<string, Plantilla[]> = {
   Naturaleza: [
     {
       nombre: "Mirador natural",
+      categorias: ["tourism.attraction.viewpoint"],
       apertura: "06:00",
       cierre: "18:00",
       estancia: 60,
     },
     {
       nombre: "Parque ecológico",
+      categorias: ["leisure.park"],
       apertura: "07:00",
       cierre: "17:00",
       estancia: 120,
@@ -86,12 +97,14 @@ const LUGARES: Record<string, Plantilla[]> = {
   Aventura: [
     {
       nombre: "Ruta de senderismo",
+      categorias: ["natural"],
       apertura: "06:00",
       cierre: "16:00",
       estancia: 150,
     },
     {
       nombre: "Tirolesa y cuerdas",
+      categorias: ["entertainment.activity_park"],
       apertura: "08:00",
       cierre: "16:00",
       estancia: 120,
@@ -100,12 +113,15 @@ const LUGARES: Record<string, Plantilla[]> = {
   Compras: [
     {
       nombre: "Mercado de artesanías",
+      categorias: ["commercial.marketplace"],
       apertura: "09:00",
       cierre: "19:00",
       estancia: 70,
     },
     {
       nombre: "Tienda de productos locales",
+      categorias: ["commercial.gift_and_souvenir"],
+      entorno: { tipo_entorno: "indoor", sensibilidad_clima: "baja" },
       apertura: "10:00",
       cierre: "19:00",
       estancia: 40,
@@ -114,12 +130,15 @@ const LUGARES: Record<string, Plantilla[]> = {
   "Vida nocturna": [
     {
       nombre: "Bar con música en vivo",
+      categorias: ["catering.bar"],
       apertura: "18:00",
       cierre: "23:59",
       estancia: 120,
     },
     {
       nombre: "Terraza con vista nocturna",
+      categorias: ["catering.bar"],
+      entorno: { tipo_entorno: "outdoor", sensibilidad_clima: "media" },
       apertura: "18:00",
       cierre: "23:00",
       estancia: 90,
@@ -128,12 +147,14 @@ const LUGARES: Record<string, Plantilla[]> = {
   Playa: [
     {
       nombre: "Playa principal",
+      categorias: ["beach"],
       apertura: "08:00",
       cierre: "18:00",
       estancia: 120,
     },
     {
       nombre: "Muelle y puesta de sol",
+      categorias: ["man_made.pier"],
       apertura: "16:00",
       cierre: "19:30",
       estancia: 60,
@@ -142,12 +163,14 @@ const LUGARES: Record<string, Plantilla[]> = {
   Fotografía: [
     {
       nombre: "Punto panorámico para fotos",
+      categorias: ["tourism.attraction.viewpoint"],
       apertura: "05:30",
       cierre: "18:30",
       estancia: 45,
     },
     {
       nombre: "Calles coloridas de {d}",
+      categorias: ["tourism.sights"],
       apertura: "07:00",
       cierre: "19:00",
       estancia: 60,
@@ -156,12 +179,15 @@ const LUGARES: Record<string, Plantilla[]> = {
   Arte: [
     {
       nombre: "Galería de arte contemporáneo",
+      categorias: ["entertainment.culture.gallery"],
       apertura: "10:00",
       cierre: "18:00",
       estancia: 60,
     },
     {
       nombre: "Taller de artesanos",
+      categorias: ["commercial.art"],
+      entorno: { tipo_entorno: "indoor", sensibilidad_clima: "baja" },
       apertura: "09:00",
       cierre: "17:00",
       estancia: 60,
@@ -358,6 +384,8 @@ function construirItinerarios(
 
         horaApertura: plantilla.apertura,
         horaCierre: plantilla.cierre,
+        categorias: plantilla.categorias,
+        ...plantilla.entorno,
 
         tiempoEstanciaMinutos: resultado.estanciaFinal,
 
