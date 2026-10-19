@@ -1,6 +1,6 @@
 # Backend
 
-API HTTP con Node.js, Fastify y TypeScript (CommonJS). Expone la consulta de lugares de interés mediante [Geoapify Places API](https://apidocs.geoapify.com/docs/places/), enriquecida con los horarios publicados que devuelve [Geoapify Place Details API](https://apidocs.geoapify.com/docs/place-details/), la validación de una propuesta de itinerario contra esos horarios (`POST /api/itinerarios/validar`), el pronóstico del clima para las fechas de un viaje mediante [OpenWeather 5 Day / 3 Hour Forecast](https://openweathermap.org/forecast5) y la priorización de las paradas según la lluvia pronosticada (`POST /api/itinerarios/priorizar-clima`) y las recomendaciones de hoteles cercanos al itinerario de un día con precios referenciales de [SerpApi Google Hotels](https://serpapi.com/google-hotels-api) convertidos a quetzales con [ExchangeRate-API](https://www.exchangerate-api.com/docs/standard-requests) dentro del presupuesto de hospedaje (`POST /api/hoteles/recomendaciones`). La configuración de Prisma se mantiene sin cambios.
+API HTTP con Node.js, Fastify y TypeScript (CommonJS). Expone la consulta de lugares de interés mediante [Geoapify Places API](https://apidocs.geoapify.com/docs/places/), enriquecida con los horarios publicados que devuelve [Geoapify Place Details API](https://apidocs.geoapify.com/docs/place-details/), la validación de una propuesta de itinerario contra esos horarios (`POST /api/itinerarios/validar`), el pronóstico del clima para las fechas de un viaje mediante [OpenWeather 5 Day / 3 Hour Forecast](https://openweathermap.org/forecast5) y la priorización de las paradas según la lluvia pronosticada (`POST /api/itinerarios/priorizar-clima`) y las recomendaciones de hoteles cercanos al itinerario de un día con precios referenciales de [SerpApi Google Hotels](https://serpapi.com/google-hotels-api) convertidos a quetzales con [ExchangeRate-API](https://www.exchangerate-api.com/docs/standard-requests) dentro del presupuesto de hospedaje (`POST /api/hoteles/recomendaciones`) y las recomendaciones de restaurantes cercanos a cada parada del día, filtradas con tarifas referenciales en quetzales contra el presupuesto de alimentación (`POST /api/restaurantes/recomendaciones`). La configuración de Prisma se mantiene sin cambios.
 
 ## Requisitos
 
@@ -55,7 +55,7 @@ npm run build  # compila TypeScript a dist/ (el servidor queda en dist/backend/s
 npm start      # inicia el servidor compilado (requiere npm run build)
 npm run dev    # inicia el servidor con tsx y lo reinicia al detectar cambios
 npm run typecheck  # verifica los tipos de src/ y test/
-npm test       # ejecuta todas las pruebas de test/ con Geoapify, OpenWeather, SerpApi y ExchangeRate-API simulados (no requiere claves ni consume cuotas), incluidas las de clasificación y priorización climática y las de recomendaciones de hoteles
+npm test       # ejecuta todas las pruebas de test/ con Geoapify, OpenWeather, SerpApi y ExchangeRate-API simulados (no requiere claves ni consume cuotas), incluidas las de clasificación y priorización climática y las de recomendaciones de hoteles y de restaurantes
 npm run ai:test   # pruebas del módulo de IA (validador, orquestador, validación de estancias y de apertura)
 npm run ai:tipos  # comprobación de tipos estricta del módulo de IA
 ```
@@ -1316,3 +1316,315 @@ Las pruebas automáticas simulan ambos proveedores y no usan claves reales ni co
 - **SerpApi:** una prueba manual previa, fuera de este endpoint, mostró un hotel de Guatemala con precio total e importe antes de impuestos diferenciados. Eso **no** valida el endpoint integrado: falta ejecutar la consulta integrada de arriba con una clave real y revisar la normalización, el radio, el orden y `hayMasPaginas` con datos reales.
 - **ExchangeRate-API:** la consulta real sigue **pendiente**. Falta comprobar con una clave real que la respuesta tenga `result: "success"`, `base_code: "USD"`, `conversion_rates.GTQ` y las fechas Unix esperadas, y que el endpoint la acepte.
 - Falta comprobar con claves reales los errores de clave inválida y de cuota agotada de ambos proveedores (solo se probaron con respuestas simuladas según su documentación).
+
+## Endpoint `POST /api/restaurantes/recomendaciones`
+
+Recomienda restaurantes cercanos a **cada parada** del itinerario de un día cuyo costo referencial de **una comida principal** para el grupo no supera el 30 % del presupuesto diario. Los establecimientos provienen de [Geoapify Places API](https://apidocs.geoapify.com/docs/places/) y los precios, de un catálogo propio de rangos estadísticos en quetzales construido con fuentes públicas (Numbeo y Preciosmundi). No reserva, no cobra, no hace pedidos, no guarda nada y el frontend todavía no lo consume.
+
+> **Los precios son referenciales.** Ningún restaurante publica su precio a través de Geoapify. Cada establecimiento recibe un **rango de mercado** según su categoría, no su menú. El filtro garantiza que el **costo referencial máximo** del grupo no supera el presupuesto de alimentación; no garantiza el importe real de la cuenta.
+
+### Flujo
+
+1. Se valida el cuerpo (`src/validacion/restaurantes.ts`). Cualquier error responde `400` antes de consultar a Geoapify.
+2. Se calcula el presupuesto de alimentación (30 % del diario) en centavos (`src/restaurantes/tarifas.ts`).
+3. Si `paradas` está vacía, responde `200` con `motivo: "itinerario_sin_paradas"` sin consultar al proveedor.
+4. Se agrupan las paradas con las mismas coordenadas (7 decimales): cada grupo hace **una sola** búsqueda.
+5. Por cada parada se consulta Geoapify con **esa parada como centro** (`circle:lng,lat,radio` y `bias=proximity`). No se usa un centro común del día ni del destino.
+6. Los resultados se normalizan con el mismo `transformarLugares` de `GET /api/lugares` (se descartan registros sin identificador, nombre, coordenadas válidas o categorías, y los repetidos dentro de la misma parada).
+7. Se mide la distancia en línea recta a la parada y se descartan los que quedan fuera del radio.
+8. Se asigna una tarifa referencial según la categoría y el país (`src/restaurantes/catalogo.ts`). Si no hay una referencia sustentada, el restaurante queda como `sin_estimacion`.
+9. Se calcula el costo referencial del grupo y se separan los elegibles de los excluidos por presupuesto.
+10. Se ordena por cercanía (empates por `idExterno`) y se aplica `limite` por parada al final.
+
+Un mismo restaurante puede aparecer en varias paradas si está dentro del radio de cada una; en cada parada lleva su propia distancia. Las paradas de la respuesta conservan exactamente el orden recibido.
+
+### Solicitud
+
+```json
+{
+  "fecha": "2026-11-20",
+  "paradas": [
+    { "id": "catedral", "lat": 14.5586, "lng": -90.7295 },
+    { "id": "arco", "lat": 14.5609, "lng": -90.7343 }
+  ],
+  "presupuestoDiario": 500,
+  "moneda": "GTQ",
+  "comensales": 2,
+  "radio": 2000,
+  "limite": 10
+}
+```
+
+| Campo | Obligatorio | Regla |
+| --- | --- | --- |
+| `fecha` | No | Fecha real `AAAA-MM-DD` del día del itinerario. Solo se devuelve en la respuesta: no cambia la búsqueda ni los precios |
+| `paradas` | Sí | Lista de 0 a 25 objetos `{ id, lat, lng }` con las paradas **de ese día** (`MAX_PARADAS_DIA`, el mismo límite de hoteles). `id` es un texto de 1 a 100 caracteres sin caracteres de control, se recortan los espacios y no puede repetirse. `lat` entre -90 y 90 y `lng` entre -180 y 180, números JSON finitos (se acepta `0`) |
+| `presupuestoDiario` | Sí | Presupuesto diario total en quetzales. Mayor que 0, como máximo 1 000 000, con hasta dos decimales |
+| `moneda` | Sí | Solo `"GTQ"` |
+| `comensales` | Sí | Entero de 1 a 10: personas que comerán. Es un campo propio; **no** se deduce de la ocupación del hotel |
+| `radio` | No | Entero de 1 a 10000 metros alrededor de **cada** parada. Por defecto `2000` |
+| `limite` | No | Entero de 1 a 20: recomendaciones máximas **por parada**. Por defecto `10` |
+
+- El cuerpo debe ser un objeto JSON de hasta 32 KB. Los campos desconocidos se ignoran: un `porcentajeAlimentacion` enviado por el cliente no cambia el cálculo.
+- Los errores responden `400 PARAMETRO_INVALIDO` con `detalles` por campo (por ejemplo `paradas.1.id` si un identificador se repite).
+- El contrato TypeScript está en `shared/types/restaurante.ts` (`SolicitudRecomendacionesRestaurantes`, `RespuestaRecomendacionesRestaurantes`, `ResultadoParadaRestaurantes`, `RestauranteRecomendado`, `RestauranteSinEstimacion`, `TarifaReferencialRestaurante`, etc.).
+
+### Presupuesto: regla del 30 % y comensales
+
+```
+presupuestoAlimentacion = presupuestoDiario × 0.30
+costoReferencialGrupo   = precioMaximoReferencialPorPersona × comensales
+elegible                = costoReferencialGrupo <= presupuestoAlimentacion
+```
+
+- El porcentaje es fijo (`PORCENTAJE_ALIMENTACION` en `src/restaurantes/tarifas.ts`). Todo se calcula en centavos enteros: `floor(presupuestoDiarioCentavos × 30 / 100)`, redondeando hacia abajo como en hoteles para no superar el porcentaje.
+- **Es una asignación independiente** del 40 % de hospedaje (`PORCENTAJE_HOSPEDAJE`, sin cambios). Ambos son límites de planificación sobre el mismo presupuesto diario; el backend no descuenta el costo de un hotel como si ya se hubiera pagado.
+- **Una comida principal por día.** Las recomendaciones de todas las paradas son alternativas para la **misma** comida: cada restaurante se compara solo contra el límite diario y no se suman los costos de los restaurantes recomendados ni se presupuesta una comida por parada. No se distingue desayuno, almuerzo y cena.
+- Se evalúa con el **máximo** del rango (criterio conservador). El costo del grupo se compara contra el presupuesto total de alimentación; `presupuestoPorPersona` es informativo.
+
+| Presupuesto diario | Alimentación | Comensales | Perfil | Máximo por persona | Costo del grupo | Resultado |
+| --- | --- | --- | --- | --- | --- | --- |
+| Q500.00 | Q150.00 | 2 | Comida rápida | Q70 | Q140.00 | Elegible |
+| Q500.00 | Q150.00 | 2 | Patio de comidas | Q100 | Q200.00 | Excluido |
+| Q500.00 | Q150.00 | 1 | Patio de comidas | Q100 | Q100.00 | Elegible |
+| Q1000.00 | Q300.00 | 1 | Restaurante general | Q300 | Q300.00 | Elegible (igual al límite) |
+| Q466.67 | Q140.00 | 2 | Comida rápida | Q70 | Q140.00 | Elegible (igual al límite) |
+| Q466.66 | Q139.99 | 2 | Comida rápida | Q70 | Q140.00 | Excluido (un centavo por encima) |
+
+### Tarifas referenciales
+
+**Fuentes** (consultadas el 2026-10-18; Numbeo indica su última actualización el 2 de octubre de 2026 y Preciosmundi, julio de 2026):
+
+| Fuente | Indicador | Valor publicado |
+| --- | --- | --- |
+| [Numbeo — Guatemala](https://www.numbeo.com/cost-of-living/country_result.jsp?country=Guatemala) | Meal at an Inexpensive Restaurant | Q30.00–Q100.00 por persona (promedio Q60.00) |
+| Numbeo — Guatemala | Combo Meal at McDonald's (or Equivalent Fast-Food Meal) | Q55.00–Q70.00 (promedio Q60.61) |
+| Numbeo — Guatemala | Meal for Two at a Mid-Range Restaurant (Three Courses, Without Drinks) | Q300.00–Q600.00 para dos (promedio Q384.09) |
+| [Numbeo — Ciudad de Guatemala](https://www.numbeo.com/cost-of-living/in/Guatemala-City) | Combo Meal at McDonald's (or Equivalent Fast-Food Meal) | Q50.00–Q70.00 (promedio Q60.00) |
+| [Preciosmundi — Guatemala](https://preciosmundi.com/guatemala/precio-restaurantes) | Menú de McDonalds, Burger King o similar / comida en restaurante barato | ≈ Q59.94 por persona |
+| Preciosmundi — Guatemala | Comida para dos en restaurante a la carta | ≈ Q400 para dos |
+
+Los valores de Preciosmundi quedan dentro de los rangos de Numbeo, por lo que se usan como contraste y no amplían los rangos. Estas estadísticas son agregados de colaboradores; **no** son el menú de ningún establecimiento.
+
+**Catálogo** (`CATALOGO_TARIFAS_RESTAURANTES` en `src/restaurantes/catalogo.ts`; región: Guatemala, código de país `gt`):
+
+| Referencia | Categoría de Geoapify | Rango por persona | Aplicabilidad | Confianza | Criterio |
+| --- | --- | --- | --- | --- | --- |
+| `gt-comida-rapida` | `catering.fast_food` y subcategorías | Q50–Q70 | `perfil_correspondiente` | media | La categoría es venta de comida rápida en mostrador, el mismo producto que mide el indicador de combo |
+| `gt-patio-comidas` | `catering.food_court` | Q30–Q100 | `escenario_general` | baja | Un patio agrupa locales de mostrador que no se identifican uno a uno; se combinan el rango de comida rápida y el de restaurante económico |
+| `gt-restaurante-general` | `catering.restaurant` y subcategorías | Q30–Q300 | `escenario_general` | baja | La categoría **no** indica el nivel de precios: se usa el rango desde un restaurante económico (Q30) hasta uno de gama media (Q600 para dos = Q300 por persona) |
+
+- **No se clasifica a ningún restaurante como económico** por su categoría, subcategoría de cocina (`catering.restaurant.tacos`, `…pizza`, etc.) ni por su nombre. El rango «restaurante económico» Q30–Q100 de las referencias preliminares se usa como límite inferior del escenario general y como parte del patio de comidas, pero no se asigna por sí solo a `catering.restaurant`. Con el máximo de Q300 por persona, un restaurante genérico solo es elegible cuando el presupuesto de alimentación cubre ese escenario.
+- Si un lugar tiene categorías de varios perfiles, se usa el de **máximo más alto** para no subestimar el costo.
+- **`sin_estimacion`.** Un establecimiento recibe este estado (y aparece en `sinEstimacion`, nunca en `restaurantes`) si su categoría no tiene referencia (`categoria_sin_referencia`), si Geoapify indica un país distinto de Guatemala (`region_no_cubierta`) o si no indica el país (`region_no_identificada`).
+- **Integridad.** `validarCatalogo` exige identificadores únicos, rangos en centavos enteros positivos con mínimo ≤ máximo, moneda `GTQ`, unidad `persona_comida`, región con códigos de país, alcance descrito, al menos una fuente `https` con fecha de consulta `AAAA-MM-DD` y reglas que apunten a referencias existentes. La aplicación no inicia si el catálogo es inválido.
+- **Actualizar los precios** solo requiere editar el catálogo (rangos, fuentes y `CONSULTADO_EN`); la lógica de recomendaciones no cambia. No se usan tablas de Prisma.
+- Se excluyen a propósito `catering.cafe`, `catering.bar`, `catering.pub`, `catering.ice_cream` y similares: no representan una comida principal.
+
+### Consulta a Geoapify y consumo
+
+Se reutiliza el cliente de `src/geoapify/cliente.ts` (`crearConsultaPlaces`): la misma clave `GEOAPIFY_API_KEY`, el tiempo de espera de 10 segundos y la traducción de errores de `GET /api/lugares`, cuyo comportamiento no cambia.
+
+| Parámetro | Valor |
+| --- | --- |
+| `categories` | `catering.restaurant,catering.fast_food,catering.food_court` |
+| `filter` | `circle:<lng>,<lat>,<radio>` de la parada |
+| `bias` | `proximity:<lng>,<lat>` de la parada |
+| `limit` | `40` (`RESULTADOS_PROVEEDOR_POR_PARADA` en `src/restaurantes/busqueda.ts`) |
+| `lang` | `es` |
+
+| Límite | Valor | Constante |
+| --- | --- | --- |
+| Paradas por solicitud | 25 | `MAX_PARADAS_RESTAURANTES` |
+| Resultados pedidos por parada | 40 (2 créditos: Geoapify cobra 1 crédito por cada 20 lugares) | `RESULTADOS_PROVEEDOR_POR_PARADA` |
+| Búsquedas simultáneas | 2 | `CONCURRENCIA_BUSQUEDAS` en `src/restaurantes/recomendaciones.ts` |
+| Separación entre inicios | 250 ms (como máximo 4 por segundo, bajo el límite de 5 del plan gratuito) | `INTERVALO_BUSQUEDAS_MS` |
+| Radio | 1 a 10000 m, por defecto 2000 | `RADIO_MAXIMO_RESTAURANTES` |
+| Recomendaciones por parada | 1 a 20, por defecto 10 | `LIMITE_MAXIMO_RESTAURANTES` |
+| Cuerpo de la solicitud | 32 KB | `LIMITE_CUERPO_BYTES` en `src/routes/restaurantes.ts` |
+
+- **Consumo máximo:** 25 paradas distintas × 2 créditos = 50 créditos por solicitud. Las paradas con las mismas coordenadas comparten una búsqueda (`busqueda.busquedaCompartida: true`). No se consultan detalles de cada lugar (Place Details) ni otros proveedores de precios.
+- **Resultados limitados antes del filtro.** Geoapify entrega como máximo 40 lugares por parada, ordenados por cercanía, **antes** de aplicar el presupuesto. Si la zona tiene más, no se revisan todos: `busqueda.posiblesResultadosAdicionales` vale `true` cuando se recibió el máximo. Una parada sin elegibles no demuestra que no exista ningún restaurante dentro del presupuesto en la zona.
+- No hay caché entre solicitudes ni reintentos automáticos. El ritmo de 4 búsquedas por segundo es por solicitud: varias solicitudes simultáneas al backend no comparten ese control.
+
+### Respuesta (200)
+
+Ejemplo ilustrativo con datos **ficticios** (el restaurante, su identificador y su dirección no son reales; el rango sí es el del catálogo):
+
+```json
+{
+  "fecha": "2026-11-20",
+  "moneda": "GTQ",
+  "presupuestoDiario": 500,
+  "presupuestoDiarioCentavos": 50000,
+  "porcentajeAlimentacion": 30,
+  "presupuestoAlimentacion": 150,
+  "presupuestoAlimentacionCentavos": 15000,
+  "comensales": 2,
+  "presupuestoPorPersona": 75,
+  "presupuestoPorPersonaCentavos": 7500,
+  "comidasPresupuestadas": 1,
+  "metodoDistancia": "linea_recta",
+  "radioMetros": 2000,
+  "limitePorParada": 10,
+  "preciosReferenciales": {
+    "referencial": true,
+    "precioConfirmado": false,
+    "moneda": "GTQ",
+    "unidad": "persona_comida",
+    "criterioEvaluacion": "maximo_del_rango",
+    "consultadoEn": "2026-10-18",
+    "fuentes": [{ "nombre": "Numbeo — Cost of Living in Guatemala City", "url": "https://www.numbeo.com/cost-of-living/in/Guatemala-City" }],
+    "aviso": "Los importes son rangos referenciales de mercado en GTQ…"
+  },
+  "paradas": [
+    {
+      "id": "catedral",
+      "lat": 14.5586,
+      "lng": -90.7295,
+      "estado": "procesada",
+      "restaurantesEncontrados": 12,
+      "recomendacionesElegibles": 3,
+      "restaurantes": [
+        {
+          "idExterno": "51ficticio…",
+          "proveedor": "geoapify",
+          "nombre": "Comida rápida de ejemplo",
+          "direccion": "4a Calle Oriente, Antigua Guatemala",
+          "lat": 14.5592,
+          "lng": -90.7301,
+          "categorias": ["catering", "catering.fast_food"],
+          "distanciaLineaRectaMetros": 92,
+          "estimacion": "estimado",
+          "tarifaReferencial": {
+            "referencial": true,
+            "precioConfirmado": false,
+            "referenciaId": "gt-comida-rapida",
+            "perfil": "comida_rapida",
+            "aplicabilidad": "perfil_correspondiente",
+            "confianza": "media",
+            "region": "Guatemala",
+            "moneda": "GTQ",
+            "unidad": "persona_comida",
+            "minimo": 50,
+            "minimoCentavos": 5000,
+            "maximo": 70,
+            "maximoCentavos": 7000,
+            "criterioEvaluacion": "maximo_del_rango",
+            "valorEvaluacion": 70,
+            "valorEvaluacionCentavos": 7000,
+            "alcance": "Combo de comida rápida (tipo McDonald's o equivalente) para una persona…",
+            "fuentes": [{ "nombre": "Numbeo — Cost of Living in Guatemala City", "url": "https://www.numbeo.com/cost-of-living/in/Guatemala-City", "indicador": "Combo Meal at McDonald's (or Equivalent Fast-Food Meal)", "consultadoEn": "2026-10-18" }]
+          },
+          "costoReferencialGrupo": { "comensales": 2, "importe": 140, "importeCentavos": 14000, "moneda": "GTQ" },
+          "elegiblePorPresupuesto": true
+        }
+      ],
+      "sinEstimacion": [],
+      "busqueda": {
+        "proveedor": "geoapify",
+        "categorias": ["catering.restaurant", "catering.fast_food", "catering.food_court"],
+        "radioMetros": 2000,
+        "limiteProveedor": 40,
+        "resultadosProveedor": 12,
+        "resultadosDescartados": 0,
+        "fueraDeRadio": 0,
+        "sinEstimacion": 0,
+        "excluidosPorPresupuesto": 9,
+        "posiblesResultadosAdicionales": false,
+        "busquedaCompartida": false
+      },
+      "motivo": null,
+      "mensaje": null,
+      "error": null
+    }
+  ],
+  "resumen": { "paradasSolicitadas": 1, "paradasProcesadas": 1, "paradasFallidas": 0, "busquedasIntentadas": 1, "busquedasOmitidas": 0, "completo": true },
+  "motivo": null,
+  "mensaje": null
+}
+```
+
+| Campo | Significado |
+| --- | --- |
+| `presupuestoAlimentacion` | 30 % del presupuesto diario; los campos `…Centavos` son los valores exactos de la comparación |
+| `paradas[].restaurantesEncontrados` | Restaurantes válidos dentro del radio de esa parada (con o sin estimación) |
+| `paradas[].recomendacionesElegibles` | Elegibles por presupuesto antes de aplicar `limite` |
+| `paradas[].restaurantes` | Solo los elegibles, del más cercano al más lejano, hasta `limite` |
+| `paradas[].sinEstimacion` | Establecimientos cercanos sin tarifa sustentada, separados y con `elegiblePorPresupuesto: false`, hasta `limite` |
+| `paradas[].busqueda` | Qué se pidió a Geoapify y cuántos resultados se descartaron, quedaron fuera del radio, sin estimación o fuera de presupuesto |
+| `distanciaLineaRectaMetros` | Distancia Haversine (6 371 km) entre la parada y el restaurante, redondeada al metro solo al devolverla. **No es distancia caminando ni por calles** |
+| `tarifaReferencial` | Rango, valor usado para filtrar (`valorEvaluacion` = máximo), moneda, unidad, fuentes, aplicabilidad, confianza y `precioConfirmado: false` |
+| `resumen.completo` | `false` si alguna parada falló |
+
+**Motivos por parada** (`motivo` es `null` si hay recomendaciones):
+
+| `motivo` | Cuándo |
+| --- | --- |
+| `sin_restaurantes_encontrados` | La búsqueda fue exitosa, pero no devolvió establecimientos utilizables |
+| `sin_restaurantes_en_radio` | Todos los devueltos quedan fuera del radio |
+| `sin_tarifas_aplicables` | Hay restaurantes dentro del radio, pero ninguno tiene tarifa sustentada (todos en `sinEstimacion`) |
+| `sin_restaurantes_en_presupuesto` | Hay restaurantes con tarifa, pero el costo referencial del grupo supera el presupuesto de alimentación |
+| `busqueda_fallida` | Fallo técnico del proveedor en esa parada (`estado: "fallida"`, con `error`). **No significa que no haya restaurantes** |
+
+### Errores y fallos parciales
+
+- Si **todas** las paradas fallan, la solicitud responde con el error del proveedor (mismos códigos que `GET /api/lugares`): nunca se presenta como una lista vacía.
+- Si fallan **algunas**, responde `200`: las paradas fallidas tienen `estado: "fallida"`, `restaurantes: []`, `restaurantesEncontrados: null` y `error: { codigo, mensaje, consultada }`, y `resumen.completo` es `false`.
+- Si Geoapify rechaza la clave o informa el límite de solicitudes, no se inician las búsquedas pendientes: esas paradas quedan con `consultada: false` y el mismo código de error.
+
+| HTTP | Código | Situación |
+| --- | --- | --- |
+| 400 | `PARAMETRO_INVALIDO` | JSON mal formado o de más de 32 KB, campos ausentes, de otro tipo, fuera de rango, ids repetidos (incluye `detalles`) |
+| 500 | `SERVICIO_NO_CONFIGURADO` | La aplicación se creó sin `GEOAPIFY_API_KEY` (el servidor no inicia sin ella) |
+| 502 | `PROVEEDOR_CREDENCIALES_INVALIDAS` | Geoapify rechazó la clave (`401`/`403`) |
+| 503 | `PROVEEDOR_LIMITE_SOLICITUDES` | Geoapify respondió `429` |
+| 502 | `PROVEEDOR_ERROR` / `PROVEEDOR_NO_DISPONIBLE` | Otro error HTTP o fallo de red |
+| 502 | `PROVEEDOR_RESPUESTA_INVALIDA` | Respuesta no JSON o sin `features` |
+| 504 | `PROVEEDOR_TIEMPO_AGOTADO` | Geoapify no respondió en 10 segundos |
+
+### Ejemplo en PowerShell
+
+Consume hasta 2 créditos de Geoapify por parada distinta (aquí, 4 créditos). La clave no se envía en la petición:
+
+```powershell
+$cuerpo = @{
+  fecha = "2026-11-20"
+  paradas = @(
+    @{ id = "catedral"; lat = 14.5586; lng = -90.7295 },
+    @{ id = "arco"; lat = 14.5609; lng = -90.7343 }
+  )
+  presupuestoDiario = 500
+  moneda = "GTQ"
+  comensales = 2
+  limite = 5
+}
+$bytes = [System.Text.Encoding]::UTF8.GetBytes(($cuerpo | ConvertTo-Json -Depth 4))
+$r = Invoke-RestMethod -Method Post -Uri "http://localhost:3000/api/restaurantes/recomendaciones" -ContentType "application/json; charset=utf-8" -Body $bytes
+"alimentación: Q$($r.presupuestoAlimentacion) para $($r.comensales) comensales  completo: $($r.resumen.completo)"
+foreach ($p in $r.paradas) {
+  "--- $($p.id): $($p.estado)  encontrados: $($p.restaurantesEncontrados)  elegibles: $($p.recomendacionesElegibles)  motivo: $($p.motivo)"
+  $p.restaurantes | Format-Table nombre, distanciaLineaRectaMetros, @{ n = "perfil"; e = { $_.tarifaReferencial.perfil } }, @{ n = "máx. p/p"; e = { $_.tarifaReferencial.maximo } }, @{ n = "grupo"; e = { $_.costoReferencialGrupo.importe } } -Wrap
+}
+```
+
+### Limitaciones
+
+- **Precios estadísticos, no del establecimiento.** Geoapify (OpenStreetMap) no publica precios. Los rangos son agregados de colaboradores de Numbeo y Preciosmundi y pueden cambiar; deben revisarse periódicamente y actualizarse en el catálogo.
+- **Clasificación por categoría.** La calidad depende de la categoría que OpenStreetMap asigna a cada lugar. El escenario general de restaurante (hasta Q300 por persona) es conservador: excluye restaurantes económicos que no pueden identificarse como tales y no cubre restaurantes de alta gama.
+- **Cobertura geográfica.** El catálogo solo aplica a Guatemala (`country_code: "gt"` de Geoapify) y no distingue entre ciudades o zonas turísticas, aunque los precios de Antigua o de la Ciudad de Guatemala pueden ser más altos que el promedio nacional.
+- **Resultados limitados** a 40 por parada antes del filtro de presupuesto; tampoco se verifican horarios de apertura ni disponibilidad.
+- **Distancia en línea recta**, no a pie ni por calles. Integrar Valhalla es una mejora posible, fuera de esta historia.
+- **Sin caché** entre solicitudes; una caché temporal por coordenadas y radio sería una mejora posible.
+- Una sola comida principal por día: no se gestionan desayuno, almuerzo y cena ni bebidas, propinas o cargos por servicio.
+
+### Verificaciones con servicios reales pendientes
+
+Las pruebas automáticas (`test/restaurantes.test.ts` y `test/restaurantesCalculos.test.ts`) simulan Geoapify y no consumen créditos.
+
+Verificación manual del 2026-10-18 con la clave real (3 créditos en total):
+
+- Una consulta directa a Places alrededor de la Catedral de Antigua Guatemala (`limit=5`) devolvió los 5 lugares con `country_code: "gt"` y categorías jerárquicas (por ejemplo `catering.fast_food.pizza` o `catering.restaurant.regional`, a veces con `building.catering`).
+- Una solicitud integrada al endpoint con esa parada, Q500 y 2 comensales respondió `200`: 40 restaurantes dentro de 2000 m (`posiblesResultadosAdicionales: true`), 2 de comida rápida elegibles (Q140 para el grupo), 38 restaurantes genéricos excluidos por presupuesto (escenario general de Q600 para dos) y ninguno sin estimación. La respuesta no contenía la clave.
+
+Pendiente: comprobar con datos reales los errores de clave inválida y de límite de solicitudes (solo se probaron con respuestas simuladas) y revisar periódicamente los rangos del catálogo.

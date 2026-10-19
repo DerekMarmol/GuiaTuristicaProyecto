@@ -1,5 +1,5 @@
 import Fastify, { type FastifyInstance } from "fastify";
-import { crearClienteGeoapify } from "./geoapify/cliente";
+import { crearClienteGeoapify, crearConsultaPlaces } from "./geoapify/cliente";
 import { crearClienteDetalles } from "./geoapify/detalles";
 import { crearEnriquecedorHorarios, crearResolvedorLugares } from "./geoapify/enriquecer";
 import { crearRutaLugares } from "./routes/lugares";
@@ -14,6 +14,9 @@ import { crearRecomendadorHoteles } from "./hoteles/recomendaciones";
 import { crearBuscadorHoteles } from "./hoteles/serpapi";
 import { crearObtenedorTipoCambio } from "./hoteles/tipoCambio";
 import { crearRutaHoteles } from "./routes/hoteles";
+import { crearBuscadorRestaurantes } from "./restaurantes/busqueda";
+import { crearRecomendadorRestaurantes } from "./restaurantes/recomendaciones";
+import { crearRutaRestaurantes } from "./routes/restaurantes";
 import authPlugin from "./plugins/auth.plugin";
 import authRoutes from "./routes/auth.routes";
 import { manejarErrores } from "./errores";
@@ -47,6 +50,10 @@ export interface OpcionesApp {
     tiempoEsperaTipoCambioMs?: number;
     ahora?: () => Date;
   };
+  restaurantes?: {
+    concurrencia?: number;
+    intervaloMs?: number;
+  };
   chat?: {
     cliente?: ClienteChat;
   };
@@ -59,6 +66,7 @@ export function crearApp({
   detalles = {},
   clima = {},
   hoteles = {},
+  restaurantes = {},
   chat = {},
 }: OpcionesApp = {}): FastifyInstance {
   // Igual que con Express: rutas sin distinguir mayúsculas y con o sin barra final.
@@ -116,6 +124,13 @@ export function crearApp({
     }),
   });
   app.register(crearRutaHoteles(recomendarHoteles, ahoraHoteles), { prefix: "/api/hoteles" });
+
+  const recomendarRestaurantes = crearRecomendadorRestaurantes({
+    buscar: crearBuscadorRestaurantes(crearConsultaPlaces({ apiKey, fetch, tiempoEsperaMs })),
+    concurrencia: restaurantes.concurrencia,
+    intervaloMs: restaurantes.intervaloMs,
+  });
+  app.register(crearRutaRestaurantes(recomendarRestaurantes), { prefix: "/api/restaurantes" });
 
   app.setNotFoundHandler((req, reply) => {
     reply.code(404).send({

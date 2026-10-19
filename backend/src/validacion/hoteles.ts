@@ -16,12 +16,12 @@ export const RADIO_MAXIMO = 50000;
 export const LIMITE_PREDETERMINADO = 10;
 export const LIMITE_MAXIMO = 20;
 
-const CARACTERES_DE_CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+export const CARACTERES_DE_CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 
-const numeroFinito = (campo: string) =>
+export const numeroFinito = (campo: string) =>
   z.number({ required_error: `${campo} es obligatorio.`, invalid_type_error: `${campo} debe ser un número.` }).finite(`${campo} debe ser un número finito.`);
 
-const enteroEntre = (campo: string, minimo: number, maximo: number) =>
+export const enteroEntre = (campo: string, minimo: number, maximo: number) =>
   numeroFinito(campo)
     .int(`${campo} debe ser un número entero.`)
     .min(minimo, `${campo} debe estar entre ${minimo} y ${maximo}.`)
