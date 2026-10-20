@@ -148,5 +148,108 @@ export function crearRutaItinerarios(validarPropuesta: ValidarPropuesta, prioriz
         });
       }
     );
+    // GET /:id/exportar
+    app.get(
+      "/:id/exportar",
+      { preHandler: [app.verificarToken] },
+      async (req, reply) => {
+        const { id } = req.params as { id: string };
+
+        if (!id) {
+          return reply.status(400).send({
+            statusCode: 400,
+            mensaje: "El ID del plan es requerido para la exportación",
+          });
+        }
+
+        // Consultar el plan con todos sus días, paradas y restricciones
+        const viaje = await prisma.viaje.findUnique({
+          where: { id },
+          include: {
+            itinerarios: {
+              orderBy: { numeroDia: "asc" },
+              include: {
+                paradas: {
+                  include: {
+                    restriccion: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        if (!viaje) {
+          return reply.status(404).send({
+            statusCode: 404,
+            mensaje: "No se encontró ningún plan de viaje con ese ID",
+          });
+        }
+
+        // Estructurar el archivo exportable con días, paradas, horarios y notas
+        const exportacion = {
+          metadatos: {
+            sistema: "GuiaTuristicaProyecto",
+            version: "1.0",
+            fechaExportacion: new Date().toISOString(),
+          },
+          viaje: {
+            id: viaje.id,
+            destino: viaje.destino,
+            tipoViaje: viaje.tipoViaje,
+            presupuesto: viaje.presupuesto,
+            transporte: viaje.transporte,
+            fechaInicio: viaje.fechaInicio,
+            fechaFin: viaje.fechaFin,
+            coordenadas: {
+              lat: viaje.lat,
+              lng: viaje.lng,
+            },
+            intereses: viaje.intereses,
+            notasGenerales: [
+              viaje.nombreHotel ? `Hospedaje asignado: ${viaje.nombreHotel}` : "Hospedaje no asignado",
+              `Tipo de grupo: ${viaje.tipoViaje}`,
+              `Medio de transporte: ${viaje.transporte}`,
+            ],
+            totalDias: viaje.itinerarios.length,
+            dias: viaje.itinerarios.map((it) => ({
+              numeroDia: it.numeroDia,
+              fecha: it.fecha,
+              totalParadas: it.paradas.length,
+              notasDia: `Itinerario programado para el día ${it.numeroDia}`,
+              paradas: it.paradas.map((p) => ({
+                id: p.id,
+                lugar: p.nombre,
+                coordenadas: { lat: p.lat, lng: p.lng },
+                horarios: {
+                  apertura: p.horaApertura || "N/A",
+                  cierre: p.horaCierre || "N/A",
+                  estanciaMinutos: p.tiempoEstanciaMinutos,
+                },
+                restriccionClima: p.restriccion
+                  ? {
+                      entorno: p.restriccion.tipoEntorno,
+                      sensibilidad: p.restriccion.sensibilidadClima,
+                    }
+                  : null,
+                placeId: p.placeId,
+                notasParada: p.restriccion?.tipoEntorno
+                  ? `Visita en entorno ${p.restriccion.tipoEntorno}`
+                  : "Sin notas adicionales",
+              })),
+            })),
+          },
+        };
+
+        const nombreSeguro = viaje.destino.toLowerCase().replace(/[^a-z0-9]/gi, "_");
+        const nombreArchivo = `itinerario_${nombreSeguro}_${viaje.id.slice(0, 8)}.json`;
+
+        reply.header("Content-Disposition", `attachment; filename="${nombreArchivo}"`);
+        reply.type("application/json");
+
+        return reply.send(JSON.stringify(exportacion, null, 2));
+      }
+    );
+
   };
 }
