@@ -444,6 +444,47 @@ export async function generarItinerario(
 
   return construirItinerarios(viaje);
 }
+/**
+ * Descarga el itinerario en formato JSON desde el backend disparando
+ * la descarga nativa del navegador mediante un blob.
+ */
+export async function exportarPlanViaje(viajeId: string): Promise<void> {
+  const token =
+    localStorage.getItem("token") ||
+    sessionStorage.getItem("token") ||
+    localStorage.getItem("jwt");
+
+  const respuesta = await fetch(`${API_BASE_URL}/api/itinerarios/${viajeId}/exportar`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!respuesta.ok) {
+    const errorData = await respuesta.json().catch(() => ({}));
+    throw new Error(errorData.mensaje || "Error al descargar el archivo de exportación");
+  }
+
+  // Extraer el nombre de archivo de la cabecera o asignar uno por defecto
+  const disposicion = respuesta.headers.get("content-disposition");
+  let nombreArchivo = `itinerario_${viajeId.slice(0, 8)}.json`;
+  if (disposicion && disposicion.includes("filename=")) {
+    const match = disposicion.match(/filename="?([^"]+)"?/);
+    if (match?.[1]) nombreArchivo = match[1];
+  }
+
+  // Generar la descarga nativa en el navegador
+  const blob = await respuesta.blob();
+  const urlDescarga = window.URL.createObjectURL(blob);
+  const enlace = document.createElement("a");
+  enlace.href = urlDescarga;
+  enlace.download = nombreArchivo;
+  document.body.appendChild(enlace);
+  enlace.click();
+  document.body.removeChild(enlace);
+  window.URL.revokeObjectURL(urlDescarga);
+}
 
 export interface ResultadoGuardado {
   exito: boolean;

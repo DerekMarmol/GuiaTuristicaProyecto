@@ -25,6 +25,7 @@ import { coordenadasValidas, lugaresParaMapa } from "../services/abiertosAhora";
 import {
   generarItinerario,
   guardarPlanViaje,
+  exportarPlanViaje,
   PASOS_GENERACION,
 } from "../services/itinerario";
 import type { ParadaConHorario } from "../services/itinerario";
@@ -178,6 +179,32 @@ export default function Paso4Generacion() {
       setGuardando(false);
     }
   }
+  const [exportando, setExportando] = useState(false);
+
+async function manejarExportarPlan() {
+  // Si ya fue guardado en el servidor usamos su id, si no usamos el último id persistido
+  const idParaExportar = idGuardado || localStorage.getItem("ultimo_viaje_id");
+
+  if (!idParaExportar) {
+    setNotificacionGuardado({
+      tipo: "local",
+      texto: "Debes guardar el plan en tu cuenta antes de poder exportarlo.",
+    });
+    return;
+  }
+
+  setExportando(true);
+  try {
+    await exportarPlanViaje(idParaExportar);
+  } catch (err) {
+    setNotificacionGuardado({
+      tipo: "error",
+      texto: err instanceof Error ? err.message : "No se pudo exportar el archivo.",
+    });
+  } finally {
+    setExportando(false);
+  }
+}
 
   useEffect(() => {
     const intervalo = window.setInterval(() => setTiempoActual(Date.now()), 60_000);
@@ -1215,6 +1242,15 @@ export default function Paso4Generacion() {
             >
               Regenerar
             </button>
+
+            <button
+           type="button"
+           className="btn-secundario"
+           disabled={exportando}
+           onClick={manejarExportarPlan}
+         >
+           {exportando ? "Exportando..." : "⬇ Exportar"}
+         </button>
 
             <button
               type="button"
