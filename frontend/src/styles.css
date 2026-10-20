@@ -56,6 +56,25 @@ body {
 /* Mapa de Mapbox con las paradas del día activo (dentro del Paso 4) */
 .mapa-dia { margin-top: 1rem; overflow: hidden; border: 1px solid var(--linea); border-radius: 14px; background: var(--arena); }
 .mapa { width: 100%; height: 280px; }
+.marcador-parada { display: block; width: 2.25rem; height: 2.75rem; overflow: visible; border: 0; background: transparent; }
+.marcador-svg { display: block; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .4)); }
+.marcador-svg-pin { fill: #2786a8; stroke: #fff; stroke-width: 1.5; }
+.marcador-svg-centro { fill: #fff; opacity: .96; }
+.marcador-svg-numero { fill: #382b43; font: 700 11px var(--font-ui); dominant-baseline: middle; }
+@keyframes pulso-parada-activa { 50% { box-shadow: 0 0 0 7px rgba(242, 165, 65, .35), 0 2px 7px rgba(0, 0, 0, .35); } }
+.marcador-parada-activa .marcador-svg { animation: pulso-parada-activa 1.5s ease-in-out infinite; }
+.marcador-parada-activa .marcador-svg-pin { fill: #f2a541; }
+.marcador-parada-completada .marcador-svg-pin { fill: #43b581; }
+.popup-parada { display: grid; gap: .3rem; width: min(16rem, calc(100vw - 5rem)); color: var(--ciruela); }
+.popup-parada h3 { margin: 0 0 .2rem; font: 700 1rem/1.2 var(--font-ui); }
+.popup-parada p { margin: 0; font: 400 .8rem/1.4 var(--font-body); }
+.popup-parada small { margin-top: .15rem; color: var(--suave); font-size: .68rem; line-height: 1.35; }
+.leyenda-ruta { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin: .5rem .2rem 0; color: var(--suave); font-size: .78rem; }
+.leyenda-ruta span { display: inline-flex; align-items: center; gap: .4rem; }
+.leyenda-ruta i { display: inline-block; width: 1.25rem; height: .25rem; border-radius: 99px; }
+.leyenda-ruta-completada { background: #43b581; }
+.leyenda-ruta-pendiente { background: linear-gradient(90deg, #f2a541, #2786a8); }
+@media (prefers-reduced-motion: reduce) { .marcador-parada-activa { animation: none; } }
 @media (min-width: 640px) { .mapa { height: 360px; } }
 .contenedor { width: min(560px, calc(100% - 2rem)); margin-inline: auto; padding-block: 1.6rem 3rem; }
 

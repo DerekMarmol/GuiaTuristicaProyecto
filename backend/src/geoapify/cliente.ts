@@ -15,6 +15,8 @@ export interface ConsultaBusqueda {
 
 export type BuscarLugares = (consulta: ConsultaBusqueda) => Promise<Lugar[]>;
 
+export type ConsultarPlaces = (consulta: ConsultaBusqueda) => Promise<unknown>;
+
 interface OpcionesCliente {
   apiKey?: string;
   fetch?: FuncionFetch;
@@ -47,14 +49,14 @@ function errorTiempoAgotado(): ErrorApi {
   return new ErrorApi(504, "PROVEEDOR_TIEMPO_AGOTADO", "El proveedor de lugares tardó demasiado en responder.");
 }
 
-export function crearClienteGeoapify({
+export function crearConsultaPlaces({
   apiKey,
   fetch: fetchImpl = globalThis.fetch,
   tiempoEsperaMs = TIEMPO_ESPERA_MS,
-}: OpcionesCliente = {}): BuscarLugares {
+}: OpcionesCliente = {}): ConsultarPlaces {
   const clave = typeof apiKey === "string" ? apiKey.trim() : "";
 
-  return async function buscarLugares({ lat, lng, categorias, radio, limite }) {
+  return async function consultarPlaces({ lat, lng, categorias, radio, limite }) {
     if (!clave) {
       throw new ErrorApi(500, "SERVICIO_NO_CONFIGURADO", "El servicio de lugares no está configurado.");
     }
@@ -93,19 +95,24 @@ export function crearClienteGeoapify({
         throw errorPorEstado(respuesta.status);
       }
 
-      let datos: unknown;
       try {
-        datos = await respuesta.json();
+        return (await respuesta.json()) as unknown;
       } catch {
         if (controlador.signal.aborted) {
           throw errorTiempoAgotado();
         }
         throw new ErrorApi(502, "PROVEEDOR_RESPUESTA_INVALIDA", "El proveedor de lugares devolvió una respuesta que no es JSON válido.");
       }
-
-      return transformarLugares(datos).slice(0, limite);
     } finally {
       clearTimeout(temporizador);
     }
+  };
+}
+
+export function crearClienteGeoapify(opciones: OpcionesCliente = {}): BuscarLugares {
+  const consultarPlaces = crearConsultaPlaces(opciones);
+
+  return async function buscarLugares(consulta) {
+    return transformarLugares(await consultarPlaces(consulta)).slice(0, consulta.limite);
   };
 }

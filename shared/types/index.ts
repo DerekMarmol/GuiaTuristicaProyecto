@@ -5,3 +5,5 @@ export * from "./restriccion";
 export * from "./lugarInteres";
 export * from "./clima";
 export * from "./entornoClima";
+export * from "./hotel";
+export * from "./restaurante";

@@ -1,3 +1,6 @@
+// Medios que admite el cálculo de traslados con Valhalla.
+export type ModoTransporteRuta = "auto" | "pedestrian";
+
 export interface Viaje {
 id: string;
 destino: string;

@@ -7,9 +7,10 @@ import {
 
 interface PanelEtaProps {
   solicitud: SolicitudEta;
+  onResultado?: (resultado: RespuestaEta) => void;
 }
 
-export default function PanelEta({ solicitud }: PanelEtaProps) {
+export default function PanelEta({ solicitud, onResultado }: PanelEtaProps) {
   const [resultado, setResultado] = useState<RespuestaEta | null>(null);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +24,7 @@ export default function PanelEta({ solicitud }: PanelEtaProps) {
         horaActual: new Date().toISOString(),
       });
       setResultado(datos);
+      onResultado?.(datos);
     } catch {
       setError("No se pudo actualizar la hora estimada de llegada.");
     } finally {

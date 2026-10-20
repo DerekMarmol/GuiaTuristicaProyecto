@@ -2,9 +2,8 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { crearApp } from "./app";
 
-// Compilado, este archivo queda en dist/backend/src (rootDir ".." en tsconfig.build.json).
-const RAIZ_BACKEND = path.resolve(__dirname, path.extname(__filename) === ".ts" ? ".." : "../../..");
-dotenv.config({ path: path.join(RAIZ_BACKEND, ".env"), quiet: true });
+// Carga directa del archivo .env desde la raíz de backend
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
 const apiKey = process.env.GEOAPIFY_API_KEY?.trim();
 if (!apiKey) {
@@ -16,6 +15,14 @@ if (!apiKey) {
 
 if (!process.env.OPENWEATHER_API_KEY?.trim()) {
   console.warn("Falta la variable de entorno OPENWEATHER_API_KEY. GET /api/clima/pronostico responderá 503 hasta que se defina en backend/.env.");
+}
+
+for (const variable of ["SERPAPI_API_KEY", "EXCHANGERATE_API_KEY"]) {
+  if (!process.env[variable]?.trim()) {
+    console.warn(
+      `Falta la variable de entorno ${variable}. POST /api/hoteles/recomendaciones responderá 503 cuando necesite consultar hoteles hasta que se defina en backend/.env.`,
+    );
+  }
 }
 
 const puerto = Number(process.env.PORT) || 3000;

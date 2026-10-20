@@ -2,12 +2,31 @@
 import math
 from itertools import permutations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from ortools.constraint_solver import routing_enums_pb2, pywrapcp
 
+from app.services.valhalla import (
+    ClienteValhalla,
+    Coordenada,
+    DatosRutaInvalidos,
+    ErrorValhalla,
+    FueraDeCobertura,
+    MatrizTraslados,
+    ModoTransporte,
+    RutaNoDisponible,
+    TiempoEsperaValhalla,
+    ValhallaNoDisponible,
+    obtener_cliente_valhalla,
+)
+
 
 router = APIRouter()
+
+SEGUNDOS_POR_MINUTO = 60
+HORIZONTE_SEGUNDOS = 24 * 60 * SEGUNDOS_POR_MINUTO
+ESPERA_MAXIMA_SEGUNDOS = 60 * SEGUNDOS_POR_MINUTO
+TIEMPO_INALCANZABLE = HORIZONTE_SEGUNDOS + 1
 
 
 class PronosticoHora(BaseModel):
@@ -17,8 +36,8 @@ class PronosticoHora(BaseModel):
 
 class Parada(BaseModel):
     id: str
-    lat: float
-    lng: float
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
     hora_apertura: str
     hora_cierre: str
     tiempo_estancia_minutos: int
@@ -31,11 +50,13 @@ class Parada(BaseModel):
 
 class OptimizeRequest(BaseModel):
     paradas: list[Parada]
+    modo_transporte: ModoTransporte = "auto"
 
 
 class ReoptimizeRequest(BaseModel):
     paradas: list[Parada]
     hora_actual_minutos: int
+    modo_transporte: ModoTransporte = "auto"
 
 
 class OptimizeResponse(BaseModel):
@@ -48,26 +69,24 @@ def hora_a_minutos(hora: str) -> int:
     return int(horas) * 60 + int(minutos)
 
 
-def distancia_km(lat1, lng1, lat2, lng2) -> float:
-    radio_tierra_km = 6371
+def hora_a_segundos(hora: str) -> int:
+    return hora_a_minutos(hora) * SEGUNDOS_POR_MINUTO
 
-    lat1_rad = math.radians(lat1)
-    lng1_rad = math.radians(lng1)
-    lat2_rad = math.radians(lat2)
-    lng2_rad = math.radians(lng2)
 
-    dlat = lat2_rad - lat1_rad
-    dlng = lng2_rad - lng1_rad
+def estancia_segundos(parada: Parada) -> int:
+    return parada.tiempo_estancia_minutos * SEGUNDOS_POR_MINUTO
 
-    a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(lat1_rad)
-        * math.cos(lat2_rad)
-        * math.sin(dlng / 2) ** 2
-    )
 
-    c = 2 * math.asin(math.sqrt(a))
-    return radio_tierra_km * c
+def segundos_traslado(
+    matriz: MatrizTraslados,
+    origen: int,
+    destino: int
+) -> int | None:
+    # Se redondea hacia arriba para que un traslado corto nunca valga cero.
+    duracion = matriz.duraciones_segundos[origen][destino]
+    if duracion is None:
+        return None
+    return math.ceil(duracion)
 
 
 def calcular_penalizacion_clima(parada: Parada) -> int:
@@ -141,133 +160,158 @@ def calcular_penalizacion_por_hora(
     return calcular_penalizacion_clima(parada_temporal)
 
 
-def calcular_costo_climatico_ruta(
+def calcular_inicios_visita(
     paradas: list[Parada],
     orden_indices: list[int],
-    minuto_inicio: int
-) -> int:
-    minuto_actual = minuto_inicio
-    penalizacion_total = 0
+    segundo_inicio: int,
+    matriz: MatrizTraslados
+) -> list[int] | None:
+    """Segundo del día en que empieza cada visita; ``None`` si falta un tramo."""
+    segundo_actual = segundo_inicio
+    inicios = []
 
     for posicion, indice in enumerate(orden_indices):
         parada = paradas[indice]
 
-        minuto_actual = max(
-            minuto_actual,
-            hora_a_minutos(parada.hora_apertura)
+        segundo_actual = max(
+            segundo_actual,
+            hora_a_segundos(parada.hora_apertura)
         )
+        inicios.append(segundo_actual)
 
-        penalizacion_total += calcular_penalizacion_por_hora(
-            parada,
-            minuto_actual
-        )
-
-        minuto_actual += parada.tiempo_estancia_minutos
+        segundo_actual += estancia_segundos(parada)
 
         if posicion + 1 < len(orden_indices):
-            siguiente = paradas[orden_indices[posicion + 1]]
-
-            distancia = distancia_km(
-                parada.lat,
-                parada.lng,
-                siguiente.lat,
-                siguiente.lng
+            traslado = segundos_traslado(
+                matriz,
+                indice,
+                orden_indices[posicion + 1]
             )
 
-            minuto_actual += int((distancia / 40) * 60)
+            if traslado is None:
+                return None
 
-    return penalizacion_total
+            segundo_actual += traslado
+
+    return inicios
+
+
+def calcular_costo_climatico_ruta(
+    paradas: list[Parada],
+    orden_indices: list[int],
+    segundo_inicio: int,
+    matriz: MatrizTraslados
+) -> int:
+    inicios = calcular_inicios_visita(
+        paradas,
+        orden_indices,
+        segundo_inicio,
+        matriz
+    )
+
+    if inicios is None:
+        raise ValueError("La ruta usa una conexión inexistente.")
+
+    return sum(
+        calcular_penalizacion_por_hora(
+            paradas[indice],
+            inicio // SEGUNDOS_POR_MINUTO
+        )
+        for indice, inicio in zip(orden_indices, inicios)
+    )
 
 
 def calcular_matriz_tiempos(
-    paradas: list[Parada]
+    paradas: list[Parada],
+    matriz: MatrizTraslados
 ) -> list[list[int]]:
+    """Tránsito en segundos para OR-Tools: estancia del origen más traslado."""
     n = len(paradas)
-    velocidad_promedio_kmh = 40
-    matriz = [[0] * n for _ in range(n)]
+    tiempos = [[0] * n for _ in range(n)]
 
     for i in range(n):
         for j in range(n):
             if i != j:
-                km = distancia_km(
-                    paradas[i].lat,
-                    paradas[i].lng,
-                    paradas[j].lat,
-                    paradas[j].lng
+                traslado = segundos_traslado(matriz, i, j)
+
+                tiempos[i][j] = (
+                    TIEMPO_INALCANZABLE
+                    if traslado is None
+                    else traslado + estancia_segundos(paradas[i])
                 )
 
-                minutos_viaje = int(
-                    (km / velocidad_promedio_kmh) * 60
-                )
+    return tiempos
 
-                matriz[i][j] = (
-                    minutos_viaje
-                    + paradas[i].tiempo_estancia_minutos
-                )
 
-    return matriz
+def calcular_tiempo_traslado_ruta(
+    matriz: MatrizTraslados,
+    orden_indices: list[int]
+) -> int:
+    total = 0
+
+    for i in range(len(orden_indices) - 1):
+        traslado = segundos_traslado(
+            matriz,
+            orden_indices[i],
+            orden_indices[i + 1]
+        )
+
+        if traslado is None:
+            raise ValueError("La ruta usa una conexión inexistente.")
+
+        total += traslado
+
+    return total
 
 
 def calcular_distancia_ruta(
-    paradas: list[Parada],
+    matriz: MatrizTraslados,
     orden_indices: list[int]
 ) -> float:
-    distancia_total = 0.0
+    """Distancia total en kilómetros de los tramos seleccionados."""
+    distancia_metros = 0.0
 
     for i in range(len(orden_indices) - 1):
-        actual = paradas[orden_indices[i]]
-        siguiente = paradas[orden_indices[i + 1]]
+        tramo = matriz.distancias_metros[orden_indices[i]][orden_indices[i + 1]]
 
-        distancia_total += distancia_km(
-            actual.lat,
-            actual.lng,
-            siguiente.lat,
-            siguiente.lng
-        )
+        if tramo is None:
+            raise ValueError("La ruta usa una conexión inexistente.")
 
-    return distancia_total
+        distancia_metros += tramo
+
+    return distancia_metros / 1000
 
 
 def ruta_respeta_horarios(
     paradas: list[Parada],
     orden_indices: list[int],
-    minuto_inicio: int
+    segundo_inicio: int,
+    matriz: MatrizTraslados
 ) -> bool:
-    minuto_actual = minuto_inicio
+    inicios = calcular_inicios_visita(
+        paradas,
+        orden_indices,
+        segundo_inicio,
+        matriz
+    )
 
-    for posicion, indice in enumerate(orden_indices):
+    if inicios is None:
+        return False
+
+    for indice, inicio in zip(orden_indices, inicios):
         parada = paradas[indice]
 
-        apertura = hora_a_minutos(parada.hora_apertura)
-        cierre = hora_a_minutos(parada.hora_cierre)
-
-        minuto_actual = max(minuto_actual, apertura)
-
-        if minuto_actual + parada.tiempo_estancia_minutos > cierre:
+        if inicio + estancia_segundos(parada) > hora_a_segundos(parada.hora_cierre):
             return False
 
-        minuto_actual += parada.tiempo_estancia_minutos
-
-        if posicion + 1 < len(orden_indices):
-            siguiente = paradas[orden_indices[posicion + 1]]
-
-            distancia = distancia_km(
-                parada.lat,
-                parada.lng,
-                siguiente.lat,
-                siguiente.lng
-            )
-
-            minuto_actual += int((distancia / 40) * 60)
-
     return True
-
 
 
 def seleccionar_mejor_ruta(
     paradas: list[Parada],
     rutas_candidatas,
-    minuto_inicio: int
+    segundo_inicio: int,
+    matriz: MatrizTraslados
 ) -> list[int] | None:
     mejor_ruta = None
     mejor_costo = float("inf")
@@ -276,22 +320,22 @@ def seleccionar_mejor_ruta(
         if not ruta_respeta_horarios(
             paradas,
             ruta,
-            minuto_inicio
+            segundo_inicio,
+            matriz
         ):
             continue
 
-        distancia = calcular_distancia_ruta(
-            paradas,
-            ruta
+        tiempo_viaje = (
+            calcular_tiempo_traslado_ruta(matriz, ruta) / SEGUNDOS_POR_MINUTO
         )
 
         penalizacion = calcular_costo_climatico_ruta(
             paradas,
             ruta,
-            minuto_inicio
+            segundo_inicio,
+            matriz
         )
 
-        tiempo_viaje = (distancia / 40) * 60
         costo_total = tiempo_viaje + penalizacion
 
         if costo_total < mejor_costo:
@@ -336,11 +380,57 @@ def validar_paradas(paradas: list[Parada]) -> None:
             )
 
 
+def obtener_matriz_traslados(
+    cliente: ClienteValhalla,
+    paradas: list[Parada],
+    modo: ModoTransporte
+) -> MatrizTraslados:
+    try:
+        return cliente.matriz(
+            [Coordenada(lat=p.lat, lon=p.lng) for p in paradas],
+            modo
+        )
+    except DatosRutaInvalidos as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except FueraDeCobertura:
+        raise HTTPException(
+            status_code=422,
+            detail="Una o más paradas están fuera de la cobertura del mapa de rutas."
+        )
+    except RutaNoDisponible:
+        raise HTTPException(
+            status_code=422,
+            detail="No existe una ruta entre las paradas para el medio de transporte seleccionado."
+        )
+    except TiempoEsperaValhalla:
+        raise HTTPException(
+            status_code=503,
+            detail="El servicio de rutas no respondió a tiempo."
+        )
+    except ValhallaNoDisponible:
+        raise HTTPException(
+            status_code=503,
+            detail="El servicio de rutas no está disponible."
+        )
+    except ErrorValhalla:
+        raise HTTPException(
+            status_code=502,
+            detail="El servicio de rutas devolvió una respuesta inválida."
+        )
+
+
 def resolver_ruta(
     paradas: list[Parada],
+    matriz: MatrizTraslados,
     hora_inicio_minutos: int | None = None
 ) -> OptimizeResponse:
-    matriz_tiempos = calcular_matriz_tiempos(paradas)
+    if matriz.tamano != len(paradas):
+        raise HTTPException(
+            status_code=502,
+            detail="La matriz de traslados no coincide con las paradas."
+        )
+
+    matriz_tiempos = calcular_matriz_tiempos(paradas, matriz)
 
     manager = pywrapcp.RoutingIndexManager(
         len(paradas), 1, 0
@@ -364,13 +454,22 @@ def resolver_ruta(
 
     routing.AddDimension(
         callback_index,
-        60,
-        24 * 60,
+        ESPERA_MAXIMA_SEGUNDOS,
+        HORIZONTE_SEGUNDOS,
         False,
         "Tiempo"
     )
 
     dimension = routing.GetDimensionOrDie("Tiempo")
+
+    conexiones_faltantes = matriz.conexiones_faltantes()
+
+    for origen, destino in conexiones_faltantes:
+        # El nodo 0 es el inicio; volver a él no forma parte del itinerario.
+        if destino != 0:
+            routing.NextVar(manager.NodeToIndex(origen)).RemoveValue(
+                manager.NodeToIndex(destino)
+            )
 
     for i, parada in enumerate(paradas):
         indice = manager.NodeToIndex(i)
@@ -378,10 +477,10 @@ def resolver_ruta(
         if i == 0:
             indice = routing.Start(0)
 
-        apertura = hora_a_minutos(parada.hora_apertura)
-        cierre = hora_a_minutos(parada.hora_cierre)
+        apertura = hora_a_segundos(parada.hora_apertura)
+        cierre = hora_a_segundos(parada.hora_cierre)
 
-        ultimo_inicio = cierre - parada.tiempo_estancia_minutos
+        ultimo_inicio = cierre - estancia_segundos(parada)
 
         if ultimo_inicio < apertura:
             raise HTTPException(
@@ -390,7 +489,10 @@ def resolver_ruta(
             )
 
         if i == 0 and hora_inicio_minutos is not None:
-            apertura = max(apertura, hora_inicio_minutos)
+            apertura = max(
+                apertura,
+                hora_inicio_minutos * SEGUNDOS_POR_MINUTO
+            )
 
             if apertura > ultimo_inicio:
                 raise HTTPException(
@@ -412,10 +514,15 @@ def resolver_ruta(
     solution = routing.SolveWithParameters(parametros)
 
     if solution is None:
-        raise HTTPException(
-            status_code=422,
-            detail="No se encontró un itinerario válido con los horarios proporcionados."
-        )
+        detalle = "No se encontró un itinerario válido con los horarios proporcionados."
+
+        if conexiones_faltantes:
+            detalle = (
+                "No se encontró un itinerario válido con los horarios y las "
+                "rutas disponibles para el medio de transporte seleccionado."
+            )
+
+        raise HTTPException(status_code=422, detail=detalle)
 
     orden_original = []
     indice = routing.Start(0)
@@ -432,7 +539,7 @@ def resolver_ruta(
         or bool(p.pronostico_horario)
         for p in paradas
     )
-    minuto_inicio = solution.Value(
+    segundo_inicio = solution.Value(
         dimension.CumulVar(routing.Start(0))
     )
 
@@ -458,7 +565,8 @@ def resolver_ruta(
         ruta_climatica = seleccionar_mejor_ruta(
             paradas,
             rutas_candidatas,
-            minuto_inicio
+            segundo_inicio,
+            matriz
         )
 
         if ruta_climatica is not None:
@@ -469,7 +577,7 @@ def resolver_ruta(
     ]
 
     distancia_total = calcular_distancia_ruta(
-        paradas,
+        matriz,
         mejor_orden
     )
 
@@ -480,13 +588,24 @@ def resolver_ruta(
 
 
 @router.post("/optimize", response_model=OptimizeResponse)
-def optimize(request: OptimizeRequest):
+def optimize(
+    request: OptimizeRequest,
+    cliente: ClienteValhalla = Depends(obtener_cliente_valhalla)
+):
     validar_paradas(request.paradas)
-    return resolver_ruta(request.paradas)
+    matriz = obtener_matriz_traslados(
+        cliente,
+        request.paradas,
+        request.modo_transporte
+    )
+    return resolver_ruta(request.paradas, matriz)
 
 
 @router.post("/reoptimize", response_model=OptimizeResponse)
-def reoptimize(request: ReoptimizeRequest):
+def reoptimize(
+    request: ReoptimizeRequest,
+    cliente: ClienteValhalla = Depends(obtener_cliente_valhalla)
+):
     validar_paradas(request.paradas)
 
     if request.hora_actual_minutos < 0 or request.hora_actual_minutos > 24 * 60:
@@ -495,4 +614,13 @@ def reoptimize(request: ReoptimizeRequest):
             detail="hora_actual_minutos debe estar entre 0 y 1440."
         )
 
-    return resolver_ruta(request.paradas, hora_inicio_minutos=request.hora_actual_minutos)
+    matriz = obtener_matriz_traslados(
+        cliente,
+        request.paradas,
+        request.modo_transporte
+    )
+    return resolver_ruta(
+        request.paradas,
+        matriz,
+        hora_inicio_minutos=request.hora_actual_minutos
+    )
