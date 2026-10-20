@@ -14,6 +14,13 @@ import type { RespuestaClima } from "../../../shared/types";
 import { consultarPronostico, coordenadasDelViaje, hayLluviaSignificativa } from "../services/clima";
 import { modoTransporteRuta, reoptimizarRuta, type TipoEventoRuta } from "../services/reoptimizacion";
 import type { RespuestaEta } from "../services/eta";
+import PropuestaClima from "../components/PropuestaClima";
+import { useMonitoreoClima } from "../hooks/useMonitoreoClima";
+import { aplicarParadasPropuestas, construirItinerarioActivo, firmaItinerario } from "../services/climaReactivoEstado";
+import { BarraAbiertosAhora, ResultadosAbiertosAhora, describirReferencia, type FiltroAbiertos } from "../components/AbiertosAhora";
+import type { CapaAbiertosAhora } from "../components/Mapa";
+import { useAbiertosAhora } from "../hooks/useAbiertosAhora";
+import { coordenadasValidas, lugaresParaMapa } from "../services/abiertosAhora";
 
 import {
   generarItinerario,
@@ -361,6 +368,78 @@ export default function Paso4Generacion() {
     [dia?.id, dia?.paradas, visitadas, calificaciones, paradasVisitadas]
   );
 
+  // GUI-72: estado del día que se envía al monitoreo del clima.
+  const itinerarioActivo = useMemo(
+    () => (dia ? construirItinerarioActivo(dia, { completadas: new Set(idsParadasCompletadas), descartadas: new Set() }) : null),
+    [dia, idsParadasCompletadas]
+  );
+  const itinerarioActivoRef = useRef(itinerarioActivo);
+  itinerarioActivoRef.current = itinerarioActivo;
+  const monitoreo = useMonitoreoClima({
+    itinerario: itinerarioActivo,
+    modoTransporte: modoTransporteRuta(viaje.transporte),
+    intereses: viaje.intereses ?? [],
+  });
+  const [aplicandoClima, setAplicandoClima] = useState(false);
+
+  async function aceptarPropuestaDeClima() {
+    if (aplicandoClima) return;
+    setAplicandoClima(true);
+    try {
+      const { respuesta, firmaEnviada } = await monitoreo.aceptarPropuesta();
+      const actual = itinerarioActivoRef.current;
+      // Si el usuario marcó o canceló paradas mientras se aplicaba, no se sobrescribe su itinerario.
+      if (!actual || actual.id !== respuesta.itinerarioId || firmaItinerario(actual) !== firmaEnviada) {
+        setAvisoReoptimizacion("El itinerario cambió mientras se aplicaba la propuesta y no se modificó. Revisa el clima de nuevo.");
+        return;
+      }
+      const estado = {
+        completadas: new Set(actual.paradas.filter((p) => p.estado === "completada").map((p) => p.id)),
+        descartadas: new Set(actual.paradas.filter((p) => p.estado === "cancelada").map((p) => p.id)),
+      };
+      setItinerarios((actuales) => actuales?.map((it) =>
+        it.id === respuesta.itinerarioId
+          ? { ...it, paradas: aplicarParadasPropuestas(it.paradas, estado, respuesta.paradasPendientes) }
+          : it
+      ) ?? null);
+      setEtaMapa(null);
+      monitoreo.descartarPropuesta();
+      setAvisoReoptimizacion(respuesta.yaAplicada
+        ? "El plan ya incluía esta propuesta."
+        : "El plan se actualizó con las alternativas techadas propuestas por el clima.");
+    } catch (err) {
+      setAvisoReoptimizacion(err instanceof Error ? err.message : "No se pudo aplicar la propuesta.");
+    } finally {
+      setAplicandoClima(false);
+    }
+  }
+
+  // GUI-73: modo «Abierto ahora». Su estado está separado del itinerario y nunca lo modifica.
+  const [filtroAbiertos, setFiltroAbiertos] = useState<FiltroAbiertos>("turisticos");
+  const interesesViaje = viaje.intereses ?? [];
+  const abiertos = useAbiertosAhora(filtroAbiertos === "intereses" ? interesesViaje : []);
+  const [abiertoSeleccionado, setAbiertoSeleccionado] = useState<string | null>(null);
+  const estadoAbiertos = abiertos.estado;
+  const lugaresAbiertosMapa = useMemo(
+    () => (estadoAbiertos.fase === "listo" ? lugaresParaMapa(estadoAbiertos.respuesta.lugares) : []),
+    [estadoAbiertos]
+  );
+  const referenciaAbiertos = useMemo(
+    () => estadoAbiertos.fase === "listo"
+      ? { lat: estadoAbiertos.referencia.lat, lng: estadoAbiertos.referencia.lng, etiqueta: describirReferencia(estadoAbiertos.referencia) }
+      : null,
+    [estadoAbiertos]
+  );
+  useEffect(() => {
+    setAbiertoSeleccionado((actual) => (actual && lugaresAbiertosMapa.some((l) => l.idExterno === actual) ? actual : null));
+  }, [lugaresAbiertosMapa]);
+  const capaAbiertos: CapaAbiertosAhora | null = estadoAbiertos.fase === "listo"
+    ? { lugares: lugaresAbiertosMapa, referencia: referenciaAbiertos, seleccionadoId: abiertoSeleccionado, onSeleccionar: setAbiertoSeleccionado }
+    : null;
+  const puntosReferencia = (dia?.paradas ?? [])
+    .filter((p) => coordenadasValidas(p.lat, p.lng))
+    .map((p) => ({ id: p.id, nombre: p.nombre, lat: p.lat, lng: p.lng }));
+
   const mostrarHoteles =
     viaje.hospedaje === false && !viaje.sinHotel;
 
@@ -550,6 +629,28 @@ export default function Paso4Generacion() {
               dia={pronostico?.dias.find((d) => d.fecha === dia.fecha)}
             />
           </section>
+          {monitoreo.activo || monitoreo.propuesta ? (
+            <PropuestaClima
+              estado={monitoreo.estado}
+              nivel={monitoreo.evaluacion?.evaluacion?.nivel ?? null}
+              senal={monitoreo.evaluacion?.evaluacion?.senalPrincipal ?? null}
+              consultadoEn={monitoreo.evaluacion?.evaluacion?.consultadoEn ?? null}
+              mensajeEvaluacion={monitoreo.evaluacion?.mensaje ?? null}
+              error={monitoreo.error}
+              proximaRevision={monitoreo.proximaRevision}
+              estadoUbicacion={monitoreo.estadoUbicacion}
+              propuesta={monitoreo.propuesta}
+              obsoleta={monitoreo.propuestaObsoleta}
+              aplicando={aplicandoClima}
+              onVerificar={() => void monitoreo.verificar()}
+              onCompartirUbicacion={monitoreo.compartirUbicacion}
+              onDejarDeCompartir={monitoreo.dejarDeCompartir}
+              onAceptar={() => void aceptarPropuestaDeClima()}
+              onRechazar={monitoreo.descartarPropuesta}
+            />
+          ) : (
+            <p className="nota">El monitoreo del clima durante el recorrido se activa el día del itinerario mientras queden paradas pendientes.</p>
+          )}
           <div className="acciones-ruta">
             <button type="button" className="btn-secundario" disabled={reoptimizando || dia.paradas.length === 0}
               onClick={() => void solicitarReoptimizacion("retraso")}>
@@ -568,6 +669,19 @@ export default function Paso4Generacion() {
             onEliminar={eliminarGasto}
           />
 
+          {/* GUI-73: botón «Abierto ahora» */}
+          <BarraAbiertosAhora
+            estado={estadoAbiertos}
+            filtro={filtroAbiertos}
+            interesesViaje={interesesViaje}
+            puntos={puntosReferencia}
+            onAlternar={abiertos.alternar}
+            onCambiarFiltro={setFiltroAbiertos}
+            onActualizarUbicacion={abiertos.actualizarUbicacion}
+            onUsarPunto={(p) => abiertos.usarPuntoManual({ lat: p.lat, lng: p.lng, etiqueta: `la parada ${p.nombre}` })}
+            onReintentar={abiertos.reintentar}
+          />
+
           {/* Mapa */}
           <div
             className="mapa-dia"
@@ -579,12 +693,20 @@ export default function Paso4Generacion() {
               paradasCompletadas={idsParadasCompletadas}
               pronostico={pronostico?.dias.find((d) => d.fecha === dia.fecha)}
               eta={etaMapa}
+              abiertos={capaAbiertos}
             />
           </div>
           <div className="leyenda-ruta" aria-label="Leyenda del progreso de la ruta">
             <span><i className="leyenda-ruta-completada" /> Recorrido completado</span>
             <span><i className="leyenda-ruta-pendiente" /> Recorrido pendiente</span>
+            {capaAbiertos && capaAbiertos.lugares.length > 0 && <span><i className="leyenda-abierto" /> Abierto ahora</span>}
           </div>
+
+          <ResultadosAbiertosAhora
+            estado={estadoAbiertos}
+            seleccionadoId={abiertoSeleccionado}
+            onSeleccionar={setAbiertoSeleccionado}
+          />
 
           {/* Telemetría GPS del recorrido */}
           <PanelTelemetria />

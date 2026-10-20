@@ -122,6 +122,55 @@ Es el mismo motor que `/optimize`, con una sola diferencia: la ruta no puede "em
 }
 ```
 
+**Origen explícito (opcional).** Sin `origen`, la primera parada de la lista es el punto de partida (nodo 0 de OR-Tools), como antes. Con `"origen": { "lat": 14.6349, "lng": -90.5069 }`, el servicio agrega ese punto como nodo 0 sintético (sin estancia y sin horario): calcula con Valhalla el traslado desde ahí hasta la primera visita, la hora actual se aplica al origen y cualquier parada puede ser la primera. El origen no aparece en `orden_optimo`, pero `distancia_total_km` incluye su tramo. El identificador `__origen__` está reservado.
+
+## POST /reoptimize-clima
+
+Lo usa el backend para el reordenamiento reactivo por clima (GUI-72). Recibe las paradas pendientes en su orden actual y, por cada parada afectada por el clima, una lista de candidatos para sustituirla. Pide **una sola** matriz a Valhalla con el origen, las paradas y todos los candidatos, y prueba cada candidato con OR-Tools sobre submatrices de esa matriz.
+
+```json
+{
+  "paradas": [
+    { "id": "cerro", "lat": 14.5672, "lng": -90.7322, "hora_apertura": "06:00", "hora_cierre": "18:00", "tiempo_estancia_minutos": 60 },
+    { "id": "museo", "lat": 14.5594, "lng": -90.7280, "hora_apertura": "09:00", "hora_cierre": "18:00", "tiempo_estancia_minutos": 60 }
+  ],
+  "hora_actual_minutos": 605,
+  "modo_transporte": "pedestrian",
+  "origen": { "lat": 14.5586, "lng": -90.7295 },
+  "sustituciones": [
+    { "parada_id": "cerro", "candidatos": [
+      { "id": "51ab", "lat": 14.5610, "lng": -90.7330, "hora_apertura": "09:00", "hora_cierre": "17:00", "tiempo_estancia_minutos": 60 }
+    ] }
+  ]
+}
+```
+
+| Campo | Regla |
+| --- | --- |
+| `paradas` | 1 a 25, identificadores únicos |
+| `origen` | Opcional; si falta, la primera parada es el punto de partida |
+| `sustituciones` | Hasta 5 grupos; cada `parada_id` debe ser una parada pendiente distinta. Hasta 5 candidatos por grupo; un candidato no puede tener el `id` de una parada pendiente y, si aparece en varios grupos, debe tener los mismos datos |
+
+**Selección.** Para cada grupo, en orden, se prueba cada candidato que no se haya usado; se queda el que produce una ruta viable (horarios, estancias y conexiones de Valhalla) con menor tiempo de traslado. Si ninguno es viable, la parada original se conserva y se informa en `sin_sustitucion`. Un mismo lugar nunca sustituye a dos paradas.
+
+**Respuesta (200):**
+
+```json
+{
+  "ruta_actual": { "orden": ["cerro", "museo"], "viable": true, "distancia_total_km": 3.39, "duracion_traslado_minutos": 40, "visitas": [
+    { "parada_id": "cerro", "inicio_minutos": 623, "fin_minutos": 683, "traslado_segundos": 1080, "distancia_metros": 1540.0 }
+  ] },
+  "ruta_propuesta": { "orden": ["51ab", "museo"], "viable": true, "distancia_total_km": 1.4, "duracion_traslado_minutos": 17, "visitas": [] },
+  "motivo_sin_ruta": null,
+  "sustituciones": [{ "parada_id": "cerro", "alternativa_id": "51ab" }],
+  "sin_sustitucion": []
+}
+```
+
+- `ruta_actual` evalúa el orden recibido sin cambiarlo, con los horarios de cada visita; sirve para saber cuándo se visitará cada parada y para comparar. `visitas` queda vacía si falta algún tramo en Valhalla.
+- `ruta_propuesta` es el orden óptimo con las sustituciones elegidas. Es `null` (con `motivo_sin_ruta`) si no existe un recorrido completo que respete los horarios: no se responde `422` por inviabilidad.
+- Los errores de Valhalla (no disponible, sin ruta, fuera de cobertura) y de validación se responden igual que en los otros endpoints (`503`, `422`, `502`), sin recurrir a cálculos aproximados.
+
 ## Errores de ambos endpoints
 
 | Estado | Ejemplo de `detail` | Causa |

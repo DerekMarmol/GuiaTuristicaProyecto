@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import health, optimize
+from app.routers import health, optimize, reoptimizacion_clima
 
 from app.config import settings
 from app.routers import health
@@ -19,6 +19,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
 app.include_router(health.router)
 app.include_router(optimize.router)
+app.include_router(reoptimizacion_clima.router)
 
 app.add_middleware(
     CORSMiddleware,

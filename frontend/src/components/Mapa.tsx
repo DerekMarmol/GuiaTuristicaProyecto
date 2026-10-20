@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
-import type { Parada, PronosticoDiario } from "../../../shared/types";
+import type { LugarAbiertoAhora, Parada, PronosticoDiario } from "../../../shared/types";
 import type { RespuestaEta } from "../services/eta";
+import { formatearDistancia, horaDelLugar } from "../services/abiertosAhora";
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 
@@ -10,11 +11,85 @@ const SOURCE_RUTA = "ruta-itinerario";
 const LAYER_BORDE_RUTA = "ruta-itinerario-borde";
 const LAYER_GRADIENTE_RUTA = "ruta-itinerario-gradiente";
 
+export interface ReferenciaMapa {
+  lat: number;
+  lng: number;
+  etiqueta: string;
+}
+
+export interface CapaAbiertosAhora {
+  lugares: LugarAbiertoAhora[];
+  referencia: ReferenciaMapa | null;
+  seleccionadoId: string | null;
+  onSeleccionar: (idExterno: string) => void;
+}
+
 interface MapaProps {
   paradas?: Parada[];
   paradasCompletadas?: string[];
   pronostico?: PronosticoDiario;
   eta?: RespuestaEta | null;
+  abiertos?: CapaAbiertosAhora | null;
+}
+
+function crearIconoAbierto(): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "marcador-svg");
+  svg.setAttribute("viewBox", "0 0 36 44");
+  svg.setAttribute("aria-hidden", "true");
+
+  const pin = document.createElementNS(svg.namespaceURI, "path");
+  pin.setAttribute("class", "marcador-abierto-pin");
+  pin.setAttribute("d", "M18 1C8.6 1 1 8.5 1 17.7c0 12 17 25.2 17 25.2s17-13.2 17-25.2C35 8.5 27.4 1 18 1Z");
+
+  const esfera = document.createElementNS(svg.namespaceURI, "circle");
+  esfera.setAttribute("class", "marcador-svg-centro");
+  esfera.setAttribute("cx", "18");
+  esfera.setAttribute("cy", "18");
+  esfera.setAttribute("r", "10");
+
+  const agujas = document.createElementNS(svg.namespaceURI, "path");
+  agujas.setAttribute("class", "marcador-abierto-agujas");
+  agujas.setAttribute("d", "M18 12v6l4 2.5");
+
+  svg.append(pin, esfera, agujas);
+  return svg;
+}
+
+function crearPopupAbierto(lugar: LugarAbiertoAhora) {
+  const contenido = document.createElement("section");
+  contenido.className = "popup-parada";
+
+  const titulo = document.createElement("h3");
+  titulo.textContent = lugar.nombre;
+  contenido.append(titulo);
+
+  const cierre = horaDelLugar(lugar.cierreEstimado);
+  const estado = document.createElement("p");
+  estado.textContent = `Abierto ahora${cierre ? ` · cierra a las ${cierre}` : ""} · a ${formatearDistancia(lugar.distanciaMetros)}`;
+  contenido.append(estado);
+
+  if (lugar.direccion) {
+    const direccion = document.createElement("p");
+    direccion.textContent = lugar.direccion;
+    contenido.append(direccion);
+  }
+
+  const nota = document.createElement("small");
+  nota.textContent = "Según el horario publicado; no se agrega a tu itinerario.";
+  contenido.append(nota);
+  return contenido;
+}
+
+function encuadrar(mapa: mapboxgl.Map, puntos: { lat: number; lng: number }[]) {
+  if (puntos.length === 0) return;
+  if (puntos.length === 1) {
+    mapa.easeTo({ center: [puntos[0].lng, puntos[0].lat], zoom: 14, duration: 500 });
+    return;
+  }
+  const bounds = new mapboxgl.LngLatBounds();
+  puntos.forEach(({ lat, lng }) => bounds.extend([lng, lat]));
+  mapa.fitBounds(bounds, { padding: 60, maxZoom: 15, duration: 500 });
 }
 
 function crearIconoParada(numero: number): SVGSVGElement {
@@ -45,8 +120,9 @@ function crearIconoParada(numero: number): SVGSVGElement {
 }
 
 function textoClima(dia?: PronosticoDiario): string {
-  if (!dia || dia.estado === "sin_datos") return "Pronóstico no disponible";
+  if (!dia) return "Pronóstico no disponible";
   if (dia.estado === "fuera_de_cobertura") return "Fecha fuera de cobertura del pronóstico";
+  if (dia.estado !== "disponible" && dia.estado !== "parcial") return "Pronóstico no disponible";
   const lluvia = dia.lluviaMm === 0 ? "sin lluvia" : `${dia.lluviaMm} mm de lluvia`;
   return `${Math.round(dia.temperaturaMinimaC)}–${Math.round(dia.temperaturaMaximaC)} °C · ${lluvia}${dia.estado === "parcial" ? " · datos parciales" : ""}`;
 }
@@ -149,7 +225,7 @@ function gradienteRuta(progreso: number) {
   ];
 }
 
-export function Mapa({ paradas = [], paradasCompletadas = [], pronostico, eta = null }: MapaProps) {
+export function Mapa({ paradas = [], paradasCompletadas = [], pronostico, eta = null, abiertos = null }: MapaProps) {
   const contenedorRef = useRef<HTMLDivElement>(null);
   const mapaRef = useRef<mapboxgl.Map | null>(null);
   const marcadoresRef = useRef<mapboxgl.Marker[]>([]);
@@ -161,6 +237,14 @@ export function Mapa({ paradas = [], paradasCompletadas = [], pronostico, eta = 
   completadasRef.current = paradasCompletadas;
   pronosticoRef.current = pronostico;
   etaRef.current = eta;
+  const marcadoresAbiertosRef = useRef(new Map<string, mapboxgl.Marker>());
+  const marcadorReferenciaRef = useRef<mapboxgl.Marker | null>(null);
+  const mostrabaAbiertosRef = useRef(false);
+  const seleccionarRef = useRef(abiertos?.onSeleccionar);
+  seleccionarRef.current = abiertos?.onSeleccionar;
+  const lugaresAbiertos = abiertos?.lugares;
+  const referenciaAbiertos = abiertos?.referencia ?? null;
+  const seleccionadoId = abiertos?.seleccionadoId ?? null;
 
   useEffect(() => {
     if (!contenedorRef.current) return;
@@ -266,6 +350,85 @@ export function Mapa({ paradas = [], paradasCompletadas = [], pronostico, eta = 
     mapa.once("load", actualizarMapa);
     return () => { mapa.off("load", actualizarMapa); };
   }, [paradas, paradasCompletadas, pronostico, eta]);
+
+  // Modo «Abierto ahora»: capa propia de marcadores; las paradas del itinerario no se tocan.
+  useEffect(() => {
+    const mapa = mapaRef.current;
+    if (!mapa) return;
+
+    const actualizarAbiertos = () => {
+      marcadoresAbiertosRef.current.forEach((marcador) => marcador.remove());
+      marcadoresAbiertosRef.current.clear();
+      marcadorReferenciaRef.current?.remove();
+      marcadorReferenciaRef.current = null;
+
+      const lugares = lugaresAbiertos ?? [];
+      const puntos: { lat: number; lng: number }[] = [];
+
+      if (referenciaAbiertos) {
+        const elemento = document.createElement("div");
+        elemento.className = "marcador-referencia";
+        elemento.setAttribute("role", "img");
+        elemento.setAttribute("aria-label", `Punto de búsqueda: ${referenciaAbiertos.etiqueta}`);
+        marcadorReferenciaRef.current = new mapboxgl.Marker({ element: elemento, anchor: "center" })
+          .setLngLat([referenciaAbiertos.lng, referenciaAbiertos.lat])
+          .setPopup(new mapboxgl.Popup({ offset: 14 }).setText(`Búsqueda desde ${referenciaAbiertos.etiqueta}`))
+          .addTo(mapa);
+        puntos.push(referenciaAbiertos);
+      }
+
+      for (const lugar of lugares) {
+        const elemento = document.createElement("div");
+        elemento.className = "marcador-parada marcador-abierto";
+        elemento.append(crearIconoAbierto());
+        elemento.setAttribute("role", "button");
+        elemento.tabIndex = 0;
+        elemento.setAttribute("aria-label", `Abierto ahora: ${lugar.nombre}`);
+        elemento.addEventListener("click", () => seleccionarRef.current?.(lugar.idExterno));
+        elemento.addEventListener("keydown", (evento) => {
+          if (evento.key !== "Enter" && evento.key !== " ") return;
+          evento.preventDefault();
+          seleccionarRef.current?.(lugar.idExterno);
+        });
+
+        const marcador = new mapboxgl.Marker({ element: elemento, anchor: "center" })
+          .setLngLat([lugar.lng, lugar.lat])
+          .setPopup(new mapboxgl.Popup({ offset: 28 }).setDOMContent(crearPopupAbierto(lugar)))
+          .addTo(mapa);
+        marcadoresAbiertosRef.current.set(lugar.idExterno, marcador);
+        puntos.push(lugar);
+      }
+
+      if (puntos.length > 0) {
+        mostrabaAbiertosRef.current = true;
+        encuadrar(mapa, puntos);
+      } else if (mostrabaAbiertosRef.current) {
+        // Al desactivar el modo se vuelve a encuadrar el recorrido del día.
+        mostrabaAbiertosRef.current = false;
+        encuadrar(mapa, paradasRef.current);
+      }
+    };
+
+    if (mapa.isStyleLoaded()) {
+      actualizarAbiertos();
+      return;
+    }
+    mapa.once("load", actualizarAbiertos);
+    return () => { mapa.off("load", actualizarAbiertos); };
+  }, [lugaresAbiertos, referenciaAbiertos]);
+
+  useEffect(() => {
+    const mapa = mapaRef.current;
+    marcadoresAbiertosRef.current.forEach((marcador, idExterno) => {
+      const seleccionado = idExterno === seleccionadoId;
+      marcador.getElement().classList.toggle("marcador-abierto-seleccionado", seleccionado);
+      const popup = marcador.getPopup();
+      if (seleccionado && popup && !popup.isOpen()) marcador.togglePopup();
+      if (!seleccionado && popup?.isOpen()) marcador.togglePopup();
+    });
+    const marcador = seleccionadoId ? marcadoresAbiertosRef.current.get(seleccionadoId) : undefined;
+    if (mapa && marcador) mapa.easeTo({ center: marcador.getLngLat(), duration: 400 });
+  }, [seleccionadoId, lugaresAbiertos]);
 
   return <div ref={contenedorRef} className="mapa" />;
 }

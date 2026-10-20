@@ -97,6 +97,34 @@ describe("POST /api/itinerarios/reoptimizar con medio de transporte", () => {
     assert.equal(respuesta.json().error.codigo, "REOPTIMIZACION_NO_DISPONIBLE");
   });
 
+  test("no envía origen cuando la solicitud no lo indica", async () => {
+    const { app, llamadas } = crearApp(ORDEN_VALIDO);
+
+    await reoptimizar(app, {});
+
+    assert.equal("origen" in llamadas[0].cuerpo, false);
+  });
+
+  test("envía el origen explícito al optimizador", async () => {
+    const { app, llamadas } = crearApp(ORDEN_VALIDO);
+
+    const respuesta = await reoptimizar(app, { origen: { lat: 14.62, lng: -90.51 } });
+
+    assert.equal(respuesta.statusCode, 200, respuesta.body);
+    assert.deepEqual(llamadas[0].cuerpo.origen, { lat: 14.62, lng: -90.51 });
+  });
+
+  for (const origen of [{ lat: 91, lng: 0 }, { lat: 14.6 }, null, "14.6,-90.5"]) {
+    test(`rechaza el origen inválido ${JSON.stringify(origen)} sin llamar al optimizador`, async () => {
+      const { app, llamadas } = crearApp(ORDEN_VALIDO);
+
+      const respuesta = await reoptimizar(app, { origen });
+
+      assert.equal(respuesta.statusCode, 400);
+      assert.equal(llamadas.length, 0);
+    });
+  }
+
   test("conserva 502 ante otros errores del optimizador", async () => {
     const { app } = crearApp(() => respuestaOptimizador({ detail: "respuesta inválida" }, 502));
 

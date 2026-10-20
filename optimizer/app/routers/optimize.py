@@ -27,6 +27,8 @@ SEGUNDOS_POR_MINUTO = 60
 HORIZONTE_SEGUNDOS = 24 * 60 * SEGUNDOS_POR_MINUTO
 ESPERA_MAXIMA_SEGUNDOS = 60 * SEGUNDOS_POR_MINUTO
 TIEMPO_INALCANZABLE = HORIZONTE_SEGUNDOS + 1
+# Nodo de partida sintético: no es una visita y nunca aparece en el orden devuelto.
+ID_ORIGEN = "__origen__"
 
 
 class PronosticoHora(BaseModel):
@@ -48,6 +50,11 @@ class Parada(BaseModel):
     pronostico_horario: list[PronosticoHora] = Field(default_factory=list)
 
 
+class Origen(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+
+
 class OptimizeRequest(BaseModel):
     paradas: list[Parada]
     modo_transporte: ModoTransporte = "auto"
@@ -57,6 +64,7 @@ class ReoptimizeRequest(BaseModel):
     paradas: list[Parada]
     hora_actual_minutos: int
     modo_transporte: ModoTransporte = "auto"
+    origen: Origen | None = None
 
 
 class OptimizeResponse(BaseModel):
@@ -419,11 +427,43 @@ def obtener_matriz_traslados(
         )
 
 
+def parada_origen(origen: Origen) -> Parada:
+    return Parada(
+        id=ID_ORIGEN,
+        lat=origen.lat,
+        lng=origen.lng,
+        hora_apertura="00:00",
+        hora_cierre="24:00",
+        tiempo_estancia_minutos=0,
+    )
+
+
+def validar_sin_origen_reservado(paradas: list[Parada]) -> None:
+    if any(p.id == ID_ORIGEN for p in paradas):
+        raise HTTPException(
+            status_code=422,
+            detail=f"El identificador {ID_ORIGEN} está reservado para el origen."
+        )
+
+
 def resolver_ruta(
     paradas: list[Parada],
     matriz: MatrizTraslados,
     hora_inicio_minutos: int | None = None
 ) -> OptimizeResponse:
+    mejor_orden = resolver_orden(paradas, matriz, hora_inicio_minutos)
+    return OptimizeResponse(
+        orden_optimo=[paradas[i].id for i in mejor_orden],
+        distancia_total_km=round(calcular_distancia_ruta(matriz, mejor_orden), 2)
+    )
+
+
+def resolver_orden(
+    paradas: list[Parada],
+    matriz: MatrizTraslados,
+    hora_inicio_minutos: int | None = None
+) -> list[int]:
+    """Índices de ``paradas`` en el orden elegido; el nodo 0 siempre va primero."""
     if matriz.tamano != len(paradas):
         raise HTTPException(
             status_code=502,
@@ -572,19 +612,7 @@ def resolver_ruta(
         if ruta_climatica is not None:
             mejor_orden = ruta_climatica
 
-    orden_ids = [
-        paradas[i].id for i in mejor_orden
-    ]
-
-    distancia_total = calcular_distancia_ruta(
-        matriz,
-        mejor_orden
-    )
-
-    return OptimizeResponse(
-        orden_optimo=orden_ids,
-        distancia_total_km=round(distancia_total, 2)
-    )
+    return mejor_orden
 
 
 @router.post("/optimize", response_model=OptimizeResponse)
@@ -614,13 +642,28 @@ def reoptimize(
             detail="hora_actual_minutos debe estar entre 0 y 1440."
         )
 
-    matriz = obtener_matriz_traslados(
-        cliente,
-        request.paradas,
-        request.modo_transporte
-    )
-    return resolver_ruta(
-        request.paradas,
+    if request.origen is None:
+        matriz = obtener_matriz_traslados(
+            cliente,
+            request.paradas,
+            request.modo_transporte
+        )
+        return resolver_ruta(
+            request.paradas,
+            matriz,
+            hora_inicio_minutos=request.hora_actual_minutos
+        )
+
+    validar_sin_origen_reservado(request.paradas)
+    paradas = [parada_origen(request.origen), *request.paradas]
+    matriz = obtener_matriz_traslados(cliente, paradas, request.modo_transporte)
+    orden = resolver_orden(
+        paradas,
         matriz,
         hora_inicio_minutos=request.hora_actual_minutos
+    )
+    # La distancia incluye el tramo desde el origen hasta la primera visita.
+    return OptimizeResponse(
+        orden_optimo=[paradas[i].id for i in orden[1:]],
+        distancia_total_km=round(calcular_distancia_ruta(matriz, orden), 2)
     )

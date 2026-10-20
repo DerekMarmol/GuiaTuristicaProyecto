@@ -26,7 +26,9 @@ Edita `backend/.env` y asigna tu clave:
 | `SERPAPI_API_KEY` | Clave de SerpApi (Google Hotels). Si falta, el servidor inicia, muestra un aviso y `POST /api/hoteles/recomendaciones` responde `503` cuando necesita consultar hoteles. El resto de las rutas funciona igual. |
 | `EXCHANGERATE_API_KEY` | Clave de ExchangeRate-API (plan gratuito). Mismo comportamiento que `SERPAPI_API_KEY` si falta. |
 | `PORT` | Puerto HTTP del backend. Valor por defecto: `3000`. |
-| `OPTIMIZER_URL` | URL base del optimizador FastAPI. Por defecto `http://localhost:8000`; el backend llama a `/reoptimize`. |
+| `OPTIMIZER_URL` | URL base del optimizador FastAPI. Por defecto `http://localhost:8000`; el backend llama a `/reoptimize` y a `/reoptimize-clima`. |
+| `CLIMA_REACTIVO_SECRETO` | Opcional. Clave para firmar las propuestas del [reordenamiento reactivo por clima](#reordenamiento-reactivo-por-clima-gui-72). Si falta, se genera una aleatoria por proceso: las propuestas pendientes dejan de valer al reiniciar el servidor. Defínela si hay varias instancias. |
+| `CLIMA_REACTIVO_*` | Opcionales. Umbrales e intervalos del monitoreo del clima; consulta [Configuración](#configuración-del-monitoreo). |
 | `HOST` | Dirección en la que escucha el servidor. Valor por defecto: `::` (todas las interfaces, IPv6 e IPv4). Usa `127.0.0.1` para aceptar solo conexiones locales. |
 | `DATABASE_URL` | Conexión de Prisma a PostgreSQL (no se usa en los endpoints de lugares ni de clima). |
 
@@ -34,7 +36,7 @@ El servidor carga `backend/.env` sin sobrescribir variables que ya estén defini
 
 ### Reoptimización de una ruta en curso
 
-`POST /api/itinerarios/reoptimizar` recibe `tipo` (`clima`, `retraso` o `parada_cancelada`), las paradas pendientes del día, `horaActualMinutos` (minutos desde medianoche), opcionalmente `modoTransporte` (`auto` o `pedestrian`; `auto` si se omite) y, para cancelaciones, `paradaCanceladaId`. El backend elimina la parada cancelada, convierte los campos al contrato del optimizador (`modo_transporte`) y llama `POST {OPTIMIZER_URL}/reoptimize`. El optimizador calcula los traslados con [Valhalla](../docs/valhalla.md). La respuesta devuelve el nuevo orden y las paradas reordenadas.
+`POST /api/itinerarios/reoptimizar` recibe `tipo` (`clima`, `retraso` o `parada_cancelada`), las paradas pendientes del día, `horaActualMinutos` (minutos desde medianoche), opcionalmente `modoTransporte` (`auto` o `pedestrian`; `auto` si se omite), opcionalmente `origen` (`{ lat, lng }` del punto desde el que se reanuda el recorrido; si se omite, la primera parada pendiente es el punto de partida, como antes) y, para cancelaciones, `paradaCanceladaId`. El backend elimina la parada cancelada, convierte los campos al contrato del optimizador (`modo_transporte`) y llama `POST {OPTIMIZER_URL}/reoptimize`. El optimizador calcula los traslados con [Valhalla](../docs/valhalla.md). La respuesta devuelve el nuevo orden y las paradas reordenadas.
 
 El paso 4 del frontend envía `pedestrian` cuando el viaje se planificó «A pie» y `auto` para los demás medios del selector.
 
@@ -55,7 +57,7 @@ npm run build  # compila TypeScript a dist/ (el servidor queda en dist/backend/s
 npm start      # inicia el servidor compilado (requiere npm run build)
 npm run dev    # inicia el servidor con tsx y lo reinicia al detectar cambios
 npm run typecheck  # verifica los tipos de src/ y test/
-npm test       # ejecuta todas las pruebas de test/ con Geoapify, OpenWeather, SerpApi y ExchangeRate-API simulados (no requiere claves ni consume cuotas), incluidas las de clasificación y priorización climática y las de recomendaciones de hoteles y de restaurantes
+npm test       # ejecuta todas las pruebas de test/ con Geoapify, OpenWeather, SerpApi y ExchangeRate-API simulados (no requiere claves ni consume cuotas), incluidas las de clasificación y priorización climática, las de recomendaciones de hoteles y de restaurantes y las del reordenamiento reactivo por clima
 npm run ai:test   # pruebas del módulo de IA (validador, orquestador, validación de estancias y de apertura)
 npm run ai:tipos  # comprobación de tipos estricta del módulo de IA
 ```
@@ -192,7 +194,7 @@ Nunca se asigna un horario por defecto ni se descartan lugares por no tener hora
 El texto se valida con la biblioteca [`opening_hours`](https://github.com/opening-hours/opening_hours.js), el intérprete de referencia de la sintaxis `opening_hours` de OpenStreetMap. Admite horarios distintos por día (`Mo-Fr 09:00-17:00; Sa 10:00-14:00`), varios intervalos en un día (`Mo-Fr 08:00-12:00,14:00-18:00`), turnos que cruzan la medianoche (`Fr-Sa 22:00-03:00`), `24/7`, días cerrados (`Su off`), temporadas, comentarios y horas solares (`sunrise-sunset`). Un día marcado como cerrado (`off`) es un horario publicado y se devuelve como `disponible`; no equivale a un horario ausente.
 
 - La validación comprueba la estructura del texto publicado; no certifica que el establecimiento mantenga actualizado su horario.
-- `GET /api/lugares` no calcula si un lugar está abierto en un momento dado; esa evaluación se hace para la llegada estimada de cada parada en [`POST /api/itinerarios/validar`](#endpoint-post-apiitinerariosvalidar). `valorOriginal` conserva todas las reglas y excepciones; no se reduce a una pareja de apertura y cierre ni a una tabla semanal.
+- `GET /api/lugares` no calcula si un lugar está abierto en un momento dado; esa evaluación se hace para la llegada estimada de cada parada en [`POST /api/itinerarios/validar`](#endpoint-post-apiitinerariosvalidar) y para el momento actual en [`GET /api/lugares/abiertos-ahora`](#endpoint-get-apilugaresabiertos-ahora). `valorOriginal` conserva todas las reglas y excepciones; no se reduce a una pareja de apertura y cierre ni a una tabla semanal.
 - No se inventan ubicación administrativa, festivos ni zona horaria. Las reglas de festivos (`PH`) o vacaciones escolares (`SH`) requieren el país y la región, que no se conocen, por lo que se marcan `no_interpretable` conservando el texto.
 - Si la biblioteca emite advertencias (por ejemplo, formato de 12 horas `9am-5pm`, nombres de días en otro idioma o un `;` final), la biblioteca tuvo que suponer la intención, así que el valor se marca `no_interpretable`.
 
@@ -273,6 +275,175 @@ Comprobación manual de horarios con un límite pequeño (consume hasta 6 crédi
 $respuesta = Invoke-RestMethod -Uri "http://localhost:3000/api/lugares?lat=14.6349&lng=-90.5069&categoria=catering.restaurant&radio=2000&limite=5"
 $respuesta.lugares | Format-Table nombre, @{ n = "estado"; e = { $_.horario.estado } }, @{ n = "horario"; e = { $_.horario.valorOriginal } } -Wrap
 ```
+
+## Endpoint `GET /api/lugares/abiertos-ahora`
+
+Base del modo «Abierto ahora» (GUI-73). Devuelve los lugares cercanos a unas coordenadas cuyo horario publicado en Geoapify indica que están abiertos en el momento de la consulta. Es un endpoint independiente: `GET /api/lugares` conserva sus parámetros, valores por defecto y contrato, y sigue sin calcular la apertura.
+
+`open_now` es una evaluación del horario publicado (`opening_hours` de OpenStreetMap a través de Geoapify), no una confirmación en tiempo real de que el establecimiento esté atendiendo. Cada respuesta indica el instante evaluado (`evaluadoEn`) y el criterio (`criterio: "horarios_publicados"`).
+
+| Parámetro | Obligatorio | Regla |
+| --- | --- | --- |
+| `lat` | Sí | Número decimal entre -90 y 90 |
+| `lng` | Sí | Número decimal entre -180 y 180 |
+| `radio` | No | Entero de 1 a 10000 metros. Por defecto `2000` |
+| `limite` | No | Entero de 1 a 20. Máximo de lugares abiertos devueltos. Por defecto `10` |
+| `categoria` | No | Una de las [categorías admitidas](#categorías-admitidas-en-categoria) |
+| `intereses` | No | Lista de [intereses admitidos](#intereses-admitidos) separados por comas |
+
+Los parámetros se validan con Zod (`src/validacion/abiertosAhora.ts`) con las mismas reglas de formato que `/api/lugares`: notación decimal simple, sin valores vacíos, repetidos, `NaN`, `Infinity` ni exponentes. Además, se rechaza cualquier parámetro no admitido. `categoria` e `intereses` se normalizan y combinan con las mismas funciones de `/api/lugares`. Ante un parámetro inválido se responde `400` sin consultar a Geoapify.
+
+**Búsqueda general.** Si no se envían `categoria` ni `intereses`, se consulta un conjunto acotado de categorías turísticas definido en `CATEGORIAS_TURISTICAS_PREDETERMINADAS` (`src/config/abiertosAhora.ts`): `tourism.attraction`, `tourism.sights`, `entertainment.museum`, `entertainment.culture` y `leisure.park`. Se excluyen hospedaje y gastronomía; para incluirlos, envía `categoria` o `intereses` (por ejemplo `intereses=Gastronomía`). La respuesta indica `categoriasPredeterminadas: true`.
+
+### Proceso
+
+1. Se busca en Geoapify Places con el cliente existente (`crearClienteGeoapify`), centrado en `lat`/`lng` con `filter=circle` y `bias=proximity`. Se piden hasta `min(limite × 3, 30)` candidatos (`limiteCandidatos` en `src/config/abiertosAhora.ts`), porque varios pueden estar cerrados o sin horario.
+2. Se descartan los duplicados y los lugares cuya distancia en línea recta (haversine, `distanciaMetros` de `src/hoteles/geografia.ts`) supera `radio`, y se ordenan por cercanía (empate por `idExterno`). No se usa Valhalla: la distancia es geográfica, no una duración de traslado.
+3. Para cada candidato se obtienen de Place Details el horario (`opening_hours`, validado con `interpretarHorario`) y la zona horaria IANA (`timezone.name`, validada con `esZonaHorariaValida`). Se usa `crearConsultaApertura` (`src/geoapify/enriquecer.ts`), con los mismos límites de concurrencia, ritmo, tiempo de espera y presupuesto que `/api/lugares`.
+4. Se evalúa la apertura con `evaluarAperturaActual` (`src/lugares/aperturaActual.ts`), que traduce el instante actual a la hora local del lugar y aplica `evaluarApertura` de `src/geoapify/horario.ts`.
+5. Se devuelven solo los lugares con `open_now === true`, en orden de cercanía y hasta `limite`.
+
+| Estado de apertura | `open_now` | Se devuelve |
+| --- | --- | --- |
+| `abierto` | `true` | Sí |
+| `cerrado` | `false` | No |
+| `desconocido` | `null` | No |
+
+Un lugar queda como `desconocido` si su horario es `no_publicado`, `no_interpretable` o `error_consulta`, si la biblioteca no puede determinar el estado (`estado_desconocido`: `unknown`, comentarios, horas solares, aperturas abiertas como `10:00+`) o si Place Details no informó una zona IANA válida (`zona_horaria_desconocida`). Nunca se supone que un lugar sin horario está abierto. El contrato TypeScript está en `shared/types/lugaresAbiertos.ts` (`RespuestaLugaresAbiertosAhora`, `LugarAbiertoAhora`, `AperturaActual`, `CoberturaAbiertosAhora`).
+
+### Zona horaria
+
+`opening_hours` describe la hora local del establecimiento. El instante de la consulta (`ahora`, inyectable en `crearApp({ abiertosAhora: { ahora } })`) se convierte a la zona IANA que informa Place Details mediante `Intl.DateTimeFormat`, con las funciones de `src/ai/zonaHoraria.ts`. El resultado no depende de la zona horaria del servidor y respeta el horario de verano de la zona del lugar. Los turnos que cruzan la medianoche, `24/7` y los días `off` se interpretan con la biblioteca `opening_hours`, como en la validación de itinerarios. `cierreEstimado` es el próximo cambio a cerrado dentro de las 48 horas siguientes, en hora local con desplazamiento (`2026-10-19T16:00-06:00`); es `null` si no hay cierre en ese plazo (por ejemplo `24/7`). La búsqueda de Places no informa la zona horaria, por eso se obtiene de Place Details, en la misma consulta que el horario y sin costo adicional.
+
+### Respuesta (200)
+
+```json
+{
+  "evaluadoEn": "2026-10-19T21:02:43.145Z",
+  "criterio": "horarios_publicados",
+  "origen": { "lat": 14.6431, "lng": -90.5133 },
+  "radioMetros": 2000,
+  "limite": 2,
+  "categorias": ["tourism.attraction", "tourism.sights", "entertainment.museum", "entertainment.culture", "leisure.park"],
+  "categoriasPredeterminadas": true,
+  "total": 1,
+  "cobertura": {
+    "candidatosEvaluados": 3,
+    "limiteCandidatos": 6,
+    "busquedaLimitada": false,
+    "abiertos": 1,
+    "cerrados": 0,
+    "desconocidos": 2,
+    "desconocidosPorMotivo": { "no_publicado": 2 }
+  },
+  "lugares": [
+    {
+      "idExterno": "51...",
+      "proveedor": "geoapify",
+      "nombre": "Palacio Nacional de la Cultura",
+      "direccion": "Palacio Nacional de la Cultura, 6a Calle, Zona 1, Guatemala",
+      "lat": 14.6433,
+      "lng": -90.5131,
+      "categorias": ["building", "building.historic", "tourism", "tourism.sights"],
+      "tipo_entorno": "outdoor",
+      "sensibilidad_clima": "alta",
+      "regla_clima": null,
+      "horario": { "estado": "disponible", "valorOriginal": "Mo-Fr 08:00-16:00; Sa-Su 09:00-16:00", "fuente": "geoapify" },
+      "open_now": true,
+      "estadoApertura": "abierto",
+      "evaluadoEn": "2026-10-19T21:02:43.145Z",
+      "zonaHoraria": "America/Guatemala",
+      "horaLocalEvaluacion": "2026-10-19T15:02-06:00",
+      "cierreEstimado": "2026-10-19T16:00-06:00",
+      "distanciaMetros": 32
+    }
+  ]
+}
+```
+
+Los valores de horario, zona, hora local, cierre, distancia y cobertura provienen de una consulta real; el identificador, la dirección, las coordenadas y las categorías se abreviaron o completaron como ilustración.
+
+Cada lugar conserva todos los campos de `LugarInteres` de `/api/lugares`, incluido el objeto `horario`, y agrega `open_now`, `estadoApertura`, `evaluadoEn`, `zonaHoraria`, `horaLocalEvaluacion`, `cierreEstimado` y `distanciaMetros` (redondeada al metro).
+
+**Cobertura.** El resultado se limita a los candidatos consultados. `candidatosEvaluados` cuenta los candidatos dentro del radio; `abiertos`, `cerrados` y `desconocidos` los clasifican (`abiertos` puede superar `total` cuando se recorta por `limite`). `busquedaLimitada: true` indica que Geoapify llenó el cupo de candidatos (`limiteCandidatos`) y puede haber más lugares en el radio que no se evaluaron. Por eso, una lista vacía no significa que no haya ningún lugar abierto en la zona.
+
+### Errores y respuestas vacías
+
+| HTTP | Código | Situación |
+| --- | --- | --- |
+| 400 | `PARAMETRO_INVALIDO` | Parámetros inválidos, repetidos o no admitidos (incluye `detalles` por parámetro) |
+| 502 | `PROVEEDOR_DETALLES_NO_DISPONIBLES` | Había candidatos, pero no se pudo obtener el horario de ninguno (todos con `error_consulta`) |
+| 500, 502, 503, 504 | Los de [`GET /api/lugares`](#errores) | Fallos de la búsqueda principal de Geoapify (sin clave, credenciales, límite de solicitudes, red, respuesta inválida, tiempo agotado) |
+
+- Sin candidatos en el radio, o sin ningún lugar confirmado como abierto, la respuesta es `200` con `lugares: []`, `total: 0` y la cobertura correspondiente.
+- Si fallan los detalles de solo algunos lugares (error HTTP, red o tiempo agotado de 5 s), esos lugares se excluyen y se cuentan en `desconocidosPorMotivo.error_consulta`. Si fallan todos, se responde `502` para no confundir un fallo técnico con «no hay lugares abiertos».
+- Nunca se completan horarios ni se inventan lugares.
+
+### Caché y consumo
+
+- Se guardan en memoria, por `idExterno`, el horario publicado y la zona horaria durante 30 minutos (`VIGENCIA_CACHE_APERTURA_MS`, como máximo 1000 entradas). **No se guarda `open_now`**: se recalcula en cada consulta con el reloj actual, así que un lugar deja de aparecer en cuanto llega su hora de cierre aunque su horario siga en caché. Los fallos de consulta (`error_consulta`) no se guardan. La caché es por proceso y se vacía al reiniciar.
+- Cada solicitud consume 1 crédito de búsqueda más 1 por candidato sin caché: con `limite=10`, hasta 31 créditos la primera vez. Con el ritmo de 4 consultas de detalles por segundo, 30 candidatos tardan unos 7,5 s, dentro del presupuesto de 10 s.
+
+### Ejemplos en PowerShell
+
+Con el servidor iniciado (`npm run dev`). Búsqueda general alrededor del Centro Histórico (consume hasta 7 créditos):
+
+```powershell
+$respuesta = Invoke-RestMethod -Uri "http://localhost:3000/api/lugares/abiertos-ahora?lat=14.6431&lng=-90.5133&radio=2000&limite=2"
+$respuesta | Select-Object evaluadoEn, criterio, radioMetros, total
+$respuesta.cobertura | ConvertTo-Json
+$respuesta.lugares | Format-Table nombre, distanciaMetros, horaLocalEvaluacion, cierreEstimado, @{ n = "horario"; e = { $_.horario.valorOriginal } } -Wrap
+```
+
+Por intereses, codificando los valores:
+
+```powershell
+$parametros = [ordered]@{ lat = "14.6349"; lng = "-90.5069"; intereses = "Cultura,Gastronomía"; radio = "3000"; limite = "5" }
+$consulta = ($parametros.GetEnumerator() | ForEach-Object { "$($_.Key)=$([uri]::EscapeDataString($_.Value))" }) -join "&"
+$respuesta = Invoke-RestMethod -Uri "http://localhost:3000/api/lugares/abiertos-ahora?$consulta"
+$respuesta.lugares | Format-Table nombre, distanciaMetros, cierreEstimado
+```
+
+Solicitud inválida (responde `400` sin consultar a Geoapify):
+
+```powershell
+try {
+  Invoke-RestMethod -Uri "http://localhost:3000/api/lugares/abiertos-ahora?lat=abc&lng=-90.5&radio=0"
+} catch {
+  $_.ErrorDetails.Message | ConvertFrom-Json | ConvertTo-Json -Depth 4
+}
+```
+
+### Limitaciones
+
+- La apertura depende de la calidad de los datos de OpenStreetMap: muchos lugares no publican horario y algunos horarios pueden estar desactualizados.
+- Los festivos (`PH`) y las vacaciones escolares (`SH`) no se evalúan (el horario queda `no_interpretable`), así que un lugar cerrado por un feriado no indicado en su horario puede aparecer como abierto.
+- `evaluarApertura` construye la fecha local del lugar con un `Date` del servidor. Si esa hora local no existe en la zona del servidor (el salto de horario de verano del servidor), el estado queda `desconocido` en ese minuto; en el cambio de hora del servidor, `cierreEstimado` puede diferir una hora. No afecta a servidores en UTC o en zonas sin horario de verano.
+- El resultado se limita a los candidatos evaluados (como máximo 30 por solicitud); consulta `cobertura.busquedaLimitada`.
+- El frontend lo consume con el botón «Abierto ahora» del paso 4; consulta [Frontend: botón «Abierto ahora»](#frontend-botón-abierto-ahora).
+
+### Frontend: botón «Abierto ahora»
+
+El paso 4 (`frontend/src/pages/Paso4Generacion.tsx`) muestra el botón «Abierto ahora» encima del mapa del día. Al activarlo:
+
+1. Pide la ubicación al navegador una sola vez (`src/services/ubicacionActual.ts`). El navegador muestra el permiso la primera vez. Si devuelve una lectura guardada de más de 5 minutos, se pide una nueva una vez más. No se consulta la ubicación de forma continua ni se guarda fuera del estado del modo; al desactivarlo se descarta.
+2. Consulta `GET /api/lugares/abiertos-ahora` con `lat`, `lng`, `radio=2000` y `limite=10` (`src/services/abiertosAhora.ts`), con un tiempo máximo de espera de 25 s. Con el filtro «Mis intereses» agrega `intereses` con los intereses elegidos en el paso 3; por defecto usa la búsqueda general del backend.
+3. Muestra debajo del mapa las tarjetas de los lugares con `open_now === true` (nombre, dirección, categoría, distancia en línea recta, hora de cierre en la hora local del lugar y horario publicado) y los dibuja en el mapa con un marcador verde propio. «Ver en el mapa» y el clic en un marcador seleccionan el mismo lugar en ambos.
+
+Si no se obtiene la ubicación (permiso denegado, navegador sin soporte, tiempo agotado, coordenadas inválidas), se explica el motivo y se puede buscar cerca de una parada del itinerario. Ese punto se identifica siempre como «punto elegido, no es tu ubicación actual».
+
+El estado del modo vive en un controlador separado del itinerario (`src/services/abiertosAhoraEstado.ts`, usado por `src/hooks/useAbiertosAhora.ts`). Ignora los clics repetidos mientras busca, cancela con `AbortController` la consulta en curso al desactivar el modo o al iniciar otra búsqueda, y descarta cualquier respuesta tardía. El modo nunca agrega, quita ni reordena paradas. Al desactivarlo se retiran sus marcadores y el mapa vuelve a encuadrar el recorrido del día. No se integra con la reoptimización: el flujo actual de `POST /api/itinerarios/reoptimizar` solo reordena paradas existentes, así que agregar un lugar abierto al itinerario queda como integración pendiente de GUI-73.
+
+Pruebas: `cd frontend; npm test` ejecuta `test/abiertosAhora.test.ts` (servicio HTTP, geolocalización, controlador del modo y marcado de los componentes con `react-dom/server`). El script de pruebas usa `tsx --test`, que ya estaba en `devDependencies`, para poder importar los componentes `.tsx`.
+
+Prueba manual en el navegador:
+
+```powershell
+cd backend; npm run dev          # terminal 1
+cd frontend; npm run dev         # terminal 2, abre http://localhost:5173
+```
+
+Completa los pasos 1 a 3, pulsa «Abierto ahora» en el paso 4 y acepta el permiso de ubicación. Para probar sin GPS, deniega el permiso y usa «Buscar cerca de una parada del itinerario». Los resultados dependen de la hora: fuera del horario habitual (por ejemplo, de noche) lo normal es la lista vacía con el mensaje «No se encontraron lugares con apertura confirmada cerca de esta ubicación.». Sin `VITE_MAPBOX_TOKEN` el mapa muestra su aviso, pero el botón y las tarjetas funcionan igual.
 
 ## Clasificación climática de lugares
 
@@ -1628,3 +1799,206 @@ Verificación manual del 2026-10-18 con la clave real (3 créditos en total):
 - Una solicitud integrada al endpoint con esa parada, Q500 y 2 comensales respondió `200`: 40 restaurantes dentro de 2000 m (`posiblesResultadosAdicionales: true`), 2 de comida rápida elegibles (Q140 para el grupo), 38 restaurantes genéricos excluidos por presupuesto (escenario general de Q600 para dos) y ninguno sin estimación. La respuesta no contenía la clave.
 
 Pendiente: comprobar con datos reales los errores de clave inválida y de límite de solicitudes (solo se probaron con respuestas simuladas) y revisar periódicamente los rangos del catálogo.
+
+## Reordenamiento reactivo por clima (GUI-72)
+
+Mientras el usuario recorre el itinerario del día, el backend revisa el clima de la zona y, si detecta lluvia significativa, tormenta o un aumento importante del riesgo **respecto a la revisión anterior**, propone sustituir las visitas exteriores afectadas por alternativas techadas cercanas. La propuesta nunca se aplica sola: el usuario la acepta o la rechaza.
+
+Se reutiliza todo lo existente: el cliente de OpenWeather (ahora también con clima actual), la clasificación `indoor`/`outdoor`, Geoapify Places y Place Details con su concurrencia limitada, la interpretación de horarios de `opening_hours`, el optimizador FastAPI con OR-Tools y la matriz de Valhalla. No hay proveedores nuevos, ni persistencia, ni procesos en segundo plano en el servidor.
+
+### Flujo
+
+1. Mientras el paso 4 está abierto, el día mostrado es **hoy** y quedan paradas pendientes, el frontend llama a `POST /api/itinerarios/clima-reactivo/evaluar` al abrirlo y luego cada 12 minutos (configurable). Al cambiar de día, completar todas las paradas o salir del paso, el monitoreo se detiene.
+2. El backend consulta OpenWeather en la **ubicación relevante del recorrido**: la ubicación que el usuario compartió explícitamente (si tiene menos de 30 minutos), si no la parada en curso y, si no, la próxima parada pendiente. Nunca usa el centro del destino.
+3. Evalúa el riesgo y lo compara con la `referencia` de la revisión anterior, que el cliente devuelve tal como la recibió.
+4. Si hay un empeoramiento relevante (`requierePropuesta: true`), el frontend pide `POST .../propuesta`. El backend vuelve a evaluar con los mismos datos (en caché), calcula con Valhalla el horario estimado de cada parada pendiente, identifica las afectadas, busca alternativas en Geoapify, verifica sus horarios y pide al optimizador el nuevo recorrido.
+5. El frontend muestra la propuesta. Al aceptar, llama a `POST .../aceptar`; el backend verifica la firma, la vigencia y que el itinerario no haya cambiado, y devuelve las paradas pendientes nuevas. Al rechazar, no se llama al backend y el itinerario queda igual.
+
+### Clima actual y pronóstico
+
+| Fuente | Endpoint de OpenWeather | Qué aporta | Cómo se usa |
+| --- | --- | --- | --- |
+| Clima actual | `GET /data/2.5/weather` | Código de condición observado (`weather[].id`), lluvia de la última hora (`rain.1h`), hora de la observación (`dt`) y zona horaria (`timezone`) | Una tormenta o lluvia **observada** se identifica por su código y sus milímetros, nunca por una probabilidad. Se considera vigente durante los 60 minutos siguientes. Si la observación tiene más de 90 minutos, se informa como desactualizada y no se usa para decidir |
+| Pronóstico | `GET /data/2.5/forecast` (ya usado por `GET /api/clima/pronostico`) | Intervalos de 3 horas con probabilidad de precipitación (`pop`), código de condición y lluvia acumulada (`rain.3h`) | Solo cuentan los intervalos que se solapan con las próximas 6 horas. Una probabilidad es riesgo, no lluvia observada |
+
+La disponibilidad del clima actual se comprobó con la clave configurada (HTTP 200 con código, `rain.1h` y `timezone`). Las fechas y horas del destino se calculan con el desplazamiento `timezone` que devuelve OpenWeather, no con la zona horaria del servidor. El monitoreo solo se activa si la `fecha` del itinerario coincide con la fecha actual del destino.
+
+### Niveles de riesgo y condiciones que disparan una propuesta
+
+| Nivel | Observado | Pronosticado (intervalo en las próximas 6 h) |
+| --- | --- | --- |
+| `favorable` | Sin lluvia (códigos 800–804, 6xx, 7xx) | `pop` menor que el umbral sin lluvia |
+| `lluvia_ligera` | Llovizna (3xx) o lluvia ligera (500, 520) | `pop` menor que el umbral con código de lluvia |
+| `riesgo_elevado` | — | `pop` ≥ umbral (70 %) |
+| `lluvia_significativa` | Lluvia moderada o intensa (501–504, 511, 521, 522, 531) o `rain.1h` ≥ 2.5 mm | `pop` ≥ umbral con lluvia moderada o intensa o `rain.3h` ≥ 7.5 mm |
+| `tormenta` | Tormenta eléctrica (2xx) | `pop` ≥ umbral con código 2xx |
+
+Si falta `pop`, el intervalo solo cuenta como tormenta (código 2xx) o lluvia significativa (`rain.3h` ≥ 7.5 mm). Los códigos son los [grupos oficiales de OpenWeather](https://openweathermap.org/weather-conditions).
+
+**Disparo y control de duplicados** (`decidir` en `src/clima/reactivo/deteccion.ts`):
+
+- Solo se propone desde `riesgo_elevado` y únicamente si el nivel actual es **mayor** que el de la revisión anterior (sin revisión previa se compara contra `favorable`). Una lluvia que sigue igual no genera propuestas nuevas.
+- Cada evento tiene un `eventoId` (nivel, origen, condición y bloque de 3 horas). El mismo evento nunca se propone dos veces.
+- Después de una propuesta hay una espera mínima de 30 minutos antes de proponer otra por un riesgo igual o menor al notificado; una tormenta sí se notifica durante la espera si antes solo se notificó lluvia.
+- Si no hay datos vigentes de ninguna fuente, el motivo es `datos_insuficientes`: no se asume buen tiempo ni se cambia la referencia.
+- La `referencia` la calcula el servidor y el cliente la devuelve sin modificarla. Solo describe niveles ya evaluados por el servidor; la decisión siempre usa datos que el backend consulta a OpenWeather, no clima enviado por el cliente.
+- Las solicitudes simultáneas de propuesta para el mismo itinerario y evento comparten una sola ejecución.
+
+### Paradas afectadas
+
+- Las visitas `completada` y `cancelada` no se tocan ni se vuelven a incluir. La visita `en_curso` se conserva, el recorrido parte desde ella y su hora de fin programada (`horaFinProgramada`) marca el inicio.
+- La clasificación de cada parada usa, en este orden: `tipo_entorno` y `sensibilidad_clima` enviados por el itinerario, sus `categorias` con las reglas de `src/config/entornoClima.ts`, o la regla por defecto del proyecto (exterior, sensibilidad alta), que se informa como `supuesta`.
+- Una parada se considera afectada si es exterior y su horario estimado por Valhalla se solapa con una señal de riesgo: sensibilidad `alta` desde `riesgo_elevado`; `media` solo con `lluvia_significativa` o `tormenta`; `baja` nunca. Las interiores se conservan.
+- Se buscan alternativas para las 3 primeras afectadas; las demás se listan con una advertencia.
+
+### Alternativas techadas
+
+- **Categorías** (`CATEGORIAS_ALTERNATIVAS_INTERIORES`): `entertainment.museum`, `entertainment.culture` (incluye galerías, centros de arte y teatros), `entertainment.planetarium` y `entertainment.aquarium`. Además, la regla del proyecto debe clasificarlas como `indoor`. No se proponen restaurantes, hoteles, bares, centros comerciales ni otros lugares solo por ser `indoor`.
+- **Búsqueda**: una consulta a Geoapify Places por cada parada afectada, centrada en esa parada, con radio de 2000 m. Solo si no se reúnen 3 candidatos se repite con 5000 m. Se usan hasta 20 resultados por consulta.
+- **Filtros**: identificador, nombre, coordenadas y categorías válidas (el mismo `transformarLugares` de `GET /api/lugares`); dentro del radio; que no sea una parada del itinerario, completada o cancelada (mismo `placeId`, a menos de 30 m o con el mismo nombre a menos de 150 m); sin duplicados.
+- **Orden**: primero los que coinciden con los intereses del usuario (`CATEGORIAS_POR_INTERES`) y después por cercanía en línea recta, que solo sirve para elegir a qué candidatos consultar el horario.
+- **Horarios**: solo se consultan con Place Details los 4 mejores candidatos de cada parada, con la concurrencia y el presupuesto de tiempo existentes. `confirmada` exige un horario publicado e interpretable con una ventana abierta hoy de al menos la duración de la visita (mínimo 30 minutos) a partir de la hora de inicio. `horario_no_confirmado` (no publicado, no interpretable o error de consulta) y `cerrada_en_el_horario` se muestran como información y **nunca se envían al optimizador**.
+- **Consumo**: como máximo 6 búsquedas (6 créditos) y 12 consultas de detalles por propuesta; `evaluar` no consume créditos de Geoapify.
+
+### Valhalla y OR-Tools
+
+El backend no calcula traslados: los pide a `POST {OPTIMIZER_URL}/reoptimize-clima` (contrato en [optimizer/API.md](../optimizer/API.md)). El optimizador pide **una sola** matriz de tiempos y distancias a Valhalla con el origen, las paradas pendientes y los candidatos, en el modo `auto` o `pedestrian` del viaje, y evalúa cada combinación sobre submatrices de esa matriz. Si Valhalla no responde o no hay ruta, se devuelve el error correspondiente; nunca se usan distancias en línea recta ni velocidades fijas.
+
+- **Origen**: la ubicación compartida, la parada en curso o la última parada completada. El optimizador lo agrega como nodo 0 sintético (sin estancia, sin horario y fuera del orden devuelto), de modo que calcula el traslado real hasta la primera visita y no reinicia el recorrido desde la primera parada original. Si no hay ninguna ubicación conocida, la primera visita es el punto de partida y se advierte.
+- **Hora de inicio**: la hora actual del destino (o el fin de la visita en curso).
+- **Selección**: por cada parada afectada se prueba cada candidato confirmado (máximo 3) con OR-Tools y se elige la ruta viable con menor tiempo de traslado. Un lugar no se usa para dos paradas, las no afectadas se conservan y una afectada sin alternativa viable se mantiene, con una advertencia. Son como máximo 3 × 3 + 2 resoluciones.
+- **Comparación**: la respuesta incluye la ruta actual (orden sin cambios, con horarios estimados) y la propuesta, con horarios, traslados y distancia por la red vial o peatonal. Si no existe una ruta completa que respete los horarios, la propuesta queda como `sin_solucion_viable` y no se declara viable.
+
+### Endpoints
+
+Todos están bajo `/api/itinerarios/clima-reactivo`, aceptan JSON de hasta 64 KB y usan el formato de errores común. Los contratos TypeScript están en `shared/types/climaReactivo.ts`.
+
+**Solicitud de `evaluar` y `propuesta`:**
+
+```json
+{
+  "itinerario": {
+    "id": "it-1",
+    "fecha": "2026-11-20",
+    "paradas": [
+      { "id": "catedral", "nombre": "Catedral", "lat": 14.5586, "lng": -90.7295, "horaApertura": "08:00", "horaCierre": "18:00", "tiempoEstanciaMinutos": 30, "estado": "completada" },
+      { "id": "cerro", "nombre": "Cerro de la Cruz", "lat": 14.5672, "lng": -90.7322, "horaApertura": "06:00", "horaCierre": "18:00", "tiempoEstanciaMinutos": 60, "estado": "pendiente", "categorias": ["tourism.attraction.viewpoint"] }
+    ]
+  },
+  "modoTransporte": "pedestrian",
+  "intereses": ["Cultura"],
+  "ubicacionActual": { "lat": 14.5590, "lng": -90.7300, "registradaEn": "2026-11-20T16:02:00Z" },
+  "referencia": null
+}
+```
+
+| Campo | Regla |
+| --- | --- |
+| `itinerario.paradas[].estado` | `completada`, `en_curso` (como máximo una), `pendiente` o `cancelada` |
+| `itinerario.paradas[]` | 1 a 25, `id` únicos, coordenadas válidas, horas `HH:MM`; `placeId`, `categorias`, `tipo_entorno`, `sensibilidad_clima` y `horaFinProgramada` son opcionales |
+| `modoTransporte` | `auto` (por defecto) o `pedestrian` |
+| `intereses` | Opcional; los mismos valores de `GET /api/lugares` |
+| `ubicacionActual` | Opcional; solo si el usuario la compartió. Se ignora si tiene más de 30 minutos |
+| `referencia` | La que devolvió la revisión anterior, sin cambios; `null` en la primera |
+
+**Respuesta de `evaluar` (200)**: `estado` (`activo`, `itinerario_no_activo` o `sin_paradas_pendientes`), `evaluacion` (fuente, ubicación usada, momento de la consulta, observación, señales del pronóstico, `nivel`, `senalPrincipal`, `eventoId` y umbrales), `requierePropuesta`, `motivo`, `mensaje`, `referencia`, `proximaEvaluacionSegundos` y `advertencias`.
+
+**Respuesta de `propuesta` (200)**: lo mismo más `propuesta` (o `null` si ya no hace falta):
+
+| `propuesta.estado` | Significado | ¿Se puede aceptar? |
+| --- | --- | --- |
+| `pendiente` | Hay al menos una sustitución y una ruta viable | Sí, con `token` |
+| `sin_cambios` | Ninguna parada pendiente coincide con el riesgo | No |
+| `sin_alternativas` | No hay alternativas techadas con horario confirmado o ninguna es viable | No |
+| `sin_solucion_viable` | Con las alternativas no existe un recorrido completo que respete los horarios | No |
+
+Ejemplo ilustrativo con datos **ficticios** (abreviado):
+
+```json
+{
+  "id": "6f1c…", "estado": "pendiente", "creadaEn": "2026-11-20T16:05:00.000Z", "venceEn": "2026-11-20T16:25:00.000Z",
+  "evento": { "nivel": "tormenta", "senalPrincipal": { "origen": "observado", "condicion": "tormenta", "codigoOpenWeather": 211 } },
+  "origen": { "lat": 14.5586, "lng": -90.7295, "fuente": "ultima_parada_completada" },
+  "horaInicio": "10:05",
+  "paradasAfectadas": [{ "paradaId": "cerro", "nombre": "Cerro de la Cruz", "inicioEstimado": "10:23", "motivo": "Lugar exterior con sensibilidad alta al clima; tormenta eléctrica reportada en la zona…" }],
+  "sustituciones": [{ "paradaOriginalId": "cerro", "alternativaId": "51ab…", "alternativaNombre": "Museo de ejemplo", "razon": "… horario confirmado 09:00–17:00 … menor tiempo de traslado según Valhalla (pedestrian)." }],
+  "conservadas": [],
+  "rutaAnterior": { "orden": ["cerro"], "viable": true, "distanciaKm": 1.54, "trasladoMinutos": 18, "visitas": [] },
+  "rutaPropuesta": { "orden": ["51ab…"], "viable": true, "distanciaKm": 0.62, "trasladoMinutos": 8, "visitas": [{ "paradaId": "51ab…", "nombre": "Museo de ejemplo", "tipo": "sustituta", "inicio": "10:13", "fin": "11:13", "trasladoMinutos": 8, "distanciaKm": 0.62 }] },
+  "paradasPendientesPropuestas": [{ "id": "51ab…", "placeId": "51ab…", "nombre": "Museo de ejemplo", "horaApertura": "09:00", "horaCierre": "17:00", "tiempoEstanciaMinutos": 60, "tipo_entorno": "indoor", "horaInicioProgramada": "10:13" }],
+  "advertencias": [{ "codigo": "SEGURIDAD", "mensaje": "…no garantizan la seguridad del trayecto…" }],
+  "token": "eyJ2Ijox….firma"
+}
+```
+
+**Aceptar** (`POST .../aceptar` con `{ "token", "itinerario" }`): devuelve `paradasPendientes` en el orden propuesto. El cliente conserva sus paradas no pendientes en su lugar y agrega esas al final; las completadas no se modifican.
+
+| Situación | Respuesta |
+| --- | --- |
+| El itinerario es el mismo con el que se generó la propuesta y no venció (20 minutos) | `200`, `yaAplicada: false` |
+| El itinerario ya tiene aplicada la propuesta | `200`, `yaAplicada: true` (idempotente) |
+| Cambió el itinerario (otra parada completada, cancelada, reordenada o de otro día) | `409 PROPUESTA_OBSOLETA` |
+| Venció | `410 PROPUESTA_VENCIDA` |
+| Token alterado, de otra instancia o de un reinicio sin `CLIMA_REACTIVO_SECRETO` | `400 PROPUESTA_INVALIDA` |
+
+El token es una firma HMAC-SHA256 del estado del itinerario (huella), del resultado y de las paradas propuestas. El servidor no guarda propuestas.
+
+### Errores
+
+| HTTP | Código | Cuándo |
+| --- | --- | --- |
+| 400 | `PARAMETRO_INVALIDO` | Cuerpo inválido; no se consulta ningún proveedor |
+| 503 | `SERVICIO_NO_CONFIGURADO` | Falta `OPENWEATHER_API_KEY` |
+| 502/503/504 | `PROVEEDOR_*` | OpenWeather falló en las **dos** consultas (si falla una, se evalúa con la otra y se advierte), o Geoapify falló en todas las búsquedas de alternativas. Un fallo nunca se presenta como «sin lluvia» ni como «sin alternativas» |
+| 502 | `OPTIMIZADOR_NO_DISPONIBLE` / `RESPUESTA_OPTIMIZADOR_INVALIDA` | No se pudo conectar con el optimizador o devolvió un orden con paradas omitidas, agregadas o sustituciones no solicitadas |
+| 503 | `SERVICIO_RUTAS_NO_DISPONIBLE` | Valhalla no está disponible |
+| 409 | `REOPTIMIZACION_NO_DISPONIBLE` | Valhalla no encuentra ruta (fuera de cobertura o sin conexión para el modo elegido) |
+
+Ante cualquier error, el itinerario actual se conserva y el frontend vuelve a intentar en la siguiente revisión.
+
+### Configuración del monitoreo
+
+Valores por defecto en `src/config/climaReactivo.ts`; se pueden cambiar con variables de entorno, que se validan al iniciar (un valor fuera de rango impide arrancar con un mensaje claro):
+
+| Variable | Por defecto | Rango |
+| --- | --- | --- |
+| `CLIMA_REACTIVO_UMBRAL_PROBABILIDAD` | `0.7` | 0.05 a 1 |
+| `CLIMA_REACTIVO_UMBRAL_LLUVIA_1H_MM` | `2.5` | 0.1 a 100 |
+| `CLIMA_REACTIVO_UMBRAL_LLUVIA_3H_MM` | `7.5` | 0.1 a 300 |
+| `CLIMA_REACTIVO_HORIZONTE_HORAS` | `6` | 1 a 24 |
+| `CLIMA_REACTIVO_INTERVALO_MINUTOS` | `12` | 10 a 60 (OpenWeather actualiza el clima actual cada 10 minutos) |
+| `CLIMA_REACTIVO_ESPERA_PROPUESTAS_MINUTOS` | `30` | 0 a 240 |
+| `CLIMA_REACTIVO_VIGENCIA_PROPUESTA_MINUTOS` | `20` | 5 a 120 |
+| `CLIMA_REACTIVO_RADIO_INICIAL_M` | `2000` | 100 a 5000 |
+| `CLIMA_REACTIVO_RADIO_MAXIMO_M` | `5000` | 100 a 5000, no menor que el inicial |
+| `CLIMA_REACTIVO_SECRETO` | aleatorio por proceso | Texto |
+
+**Consumo de OpenWeather**: cada revisión hace como máximo 2 consultas (clima actual y pronóstico), que se guardan en caché 10 minutos por zona de unos 110 m y se comparten entre solicitudes simultáneas. Con el intervalo de 12 minutos son unas 10 consultas por hora y por itinerario activo, muy por debajo del límite de 60 por minuto del plan gratuito. La caché es por proceso y no garantiza una cuota global.
+
+### Frontend
+
+- `src/hooks/useMonitoreoClima.ts` revisa el clima al abrir el paso 4 y luego con el intervalo que indica el backend, solo si el día mostrado es hoy y quedan paradas pendientes. No lanza revisiones simultáneas, descarta respuestas tardías de un día anterior o de una revisión invalidada y se detiene al cambiar de día o salir del paso. Solo funciona con la aplicación abierta: no hay notificaciones en segundo plano.
+- `src/components/PropuestaClima.tsx` muestra el nivel de riesgo, la fuente y la hora de la consulta, las paradas afectadas, los cambios con su razón, el recorrido actual frente al propuesto, la lista de alternativas («Ver alternativas») y las advertencias. «Aceptar cambios» y «Mantener mi itinerario» solo aparecen con una propuesta aplicable.
+- «Usar mi ubicación actual» pide la posición del navegador una sola vez y solo al pulsarlo; sin ella se usa la última parada confirmada.
+- Al aceptar, el frontend comprueba que el itinerario no cambió mientras esperaba la respuesta y actualiza únicamente las paradas pendientes del día (el mapa se redibuja con el nuevo orden). Si el usuario completó o canceló una parada después de recibir la propuesta, esta se marca como desactualizada.
+- Las plantillas del itinerario de demostración (`src/services/itinerario.ts`) ahora incluyen categorías de Geoapify para que el backend pueda clasificarlas.
+
+### Pruebas
+
+Todas simulan OpenWeather, Geoapify, el optimizador y Valhalla; no consumen cuotas.
+
+```powershell
+cd backend;   npm test      # incluye test/climaReactivo*.test.ts
+cd frontend;  npm test      # node --test (Node 22.6+), test/climaReactivo.test.ts
+cd optimizer; .\venv\Scripts\python.exe -m pytest tests/test_reoptimizacion_clima.py
+```
+
+### Limitaciones
+
+- **Solo con la aplicación abierta** y solo el día del itinerario. Si el usuario cierra la pestaña, no hay seguimiento ni avisos.
+- **Horarios de OpenStreetMap.** En una prueba real en Antigua Guatemala, los 4 museos y galerías encontrados cerca del Cerro de la Cruz tenían el horario `no_publicado`, por lo que la propuesta fue `sin_alternativas`. Es el comportamiento esperado (no se inventan horarios), pero en zonas con pocos datos el sistema propondrá pocas sustituciones.
+- **Una sola ubicación de clima por revisión** (la del punto actual o la próxima parada); paradas muy alejadas entre sí pueden tener otro clima.
+- **El itinerario del frontend no persiste el estado `en_curso`**: el paso 4 envía las paradas como completadas o pendientes.
+- La estancia de una alternativa es la de la parada sustituida (mínimo 30 minutos), no una duración publicada por el lugar.
+- La firma con clave aleatoria por proceso invalida las propuestas al reiniciar; con varias instancias hay que definir `CLIMA_REACTIVO_SECRETO`.
+- La propuesta reduce la exposición a la lluvia; **no es una garantía de seguridad** ante tormentas.
