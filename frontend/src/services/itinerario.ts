@@ -444,3 +444,113 @@ export async function generarItinerario(
 
   return construirItinerarios(viaje);
 }
+
+export interface ResultadoGuardado {
+  exito: boolean;
+  guardadoEn: "servidor" | "local";
+  id?: string;
+  mensaje: string;
+}
+
+const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || "http://localhost:3000";
+
+export async function guardarPlanViaje(
+  viaje: ViajeBorrador,
+  itinerarios: Itinerario[]
+): Promise<ResultadoGuardado> {
+  const token =
+    localStorage.getItem("token") ||
+    sessionStorage.getItem("token") ||
+    localStorage.getItem("jwt");
+
+  // Construir el payload que espera el backend
+  const payload = {
+    destino: viaje.destino || "Destino Turístico",
+    tipoViaje: viaje.tipoViaje || "solo",
+    lat: viaje.lat ?? 14.6349,
+    lng: viaje.lng ?? -90.5069,
+    presupuesto: viaje.presupuesto ?? 0,
+    transporte: viaje.transporte || "Automovil",
+    intereses: viaje.intereses || [],
+    fechaInicio: viaje.fechaInicio || new Date().toISOString(),
+    fechaFin: viaje.fechaFin || new Date().toISOString(),
+    hospedaje: viaje.hospedaje ?? false,
+    nombreHotel: viaje.nombreHotel || undefined,
+    dias: itinerarios.map((it) => ({
+      numeroDia: it.numeroDia,
+      fecha: it.fecha,
+      paradas: it.paradas.map((p) => {
+        const tipoEntorno =
+          p.tipo_entorno === "indoor" ? "Bajo Techo" : "Al aire libre";
+        const sensibilidad = p.sensibilidad_clima || "media";
+
+        return {
+          nombre: p.nombre,
+          lat: p.lat,
+          lng: p.lng,
+          horaApertura: p.horaApertura || "08:00",
+          horaCierre: p.horaCierre || "18:00",
+          tiempoEstanciaMinutos: p.tiempoEstanciaMinutos || 60,
+          placeId: p.placeId || null,
+          restriccion: {
+            tipoEntorno,
+            sensibilidadClima: sensibilidad,
+          },
+        };
+      }),
+    })),
+  };
+
+  // 1. Criterio de aceptación: Si no está autenticado, no se pierde el plan (respaldo local)
+  if (!token) {
+    localStorage.setItem("plan_viaje_pendiente", JSON.stringify(payload));
+    return {
+      exito: true,
+      guardadoEn: "local",
+      mensaje: "Plan guardado localmente. Inicia sesión para registrarlo en tu cuenta.",
+    };
+  }
+
+  // 2. Si está autenticado, enviar la petición al endpoint seguro del backend
+  try {
+    const respuesta = await fetch(`${API_BASE_URL}/api/itinerarios/guardar`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const datos = await respuesta.json();
+
+    if (respuesta.status === 201) {
+      localStorage.setItem("ultimo_viaje_id", datos.id);
+      localStorage.removeItem("plan_viaje_pendiente");
+      return {
+        exito: true,
+        guardadoEn: "servidor",
+        id: datos.id,
+        mensaje: "¡Itinerario guardado exitosamente en tu cuenta!",
+      };
+    }
+
+    if (respuesta.status === 401) {
+      localStorage.setItem("plan_viaje_pendiente", JSON.stringify(payload));
+      return {
+        exito: false,
+        guardadoEn: "local",
+        mensaje: "Tu sesión expiró. El plan se respaldó localmente; inicia sesión para sincronizarlo.",
+      };
+    }
+
+    throw new Error(datos.mensaje || "Error al procesar el guardado");
+  } catch (error) {
+    localStorage.setItem("plan_viaje_pendiente", JSON.stringify(payload));
+    return {
+      exito: false,
+      guardadoEn: "local",
+      mensaje: "Sin conexión con el servidor. Tu plan quedó resguardado en el navegador.",
+    };
+  }
+}
