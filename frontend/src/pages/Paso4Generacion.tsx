@@ -20,6 +20,7 @@ import { aplicarParadasPropuestas, construirItinerarioActivo, firmaItinerario } 
 
 import {
   generarItinerario,
+  guardarPlanViaje,
   PASOS_GENERACION,
 } from "../services/itinerario";
 import type { ParadaConHorario } from "../services/itinerario";
@@ -137,6 +138,42 @@ export default function Paso4Generacion() {
   const [inicioSeguimiento, setInicioSeguimiento] = useState<number | null>(null);
   const [tiempoActual, setTiempoActual] = useState(() => Date.now());
   const [etaMapa, setEtaMapa] = useState<RespuestaEta | null>(null);
+  // Estados para el guardado del plan
+  const [guardando, setGuardando] = useState(false);
+  const [idGuardado, setIdGuardado] = useState<string | null>(null);
+  const [notificacionGuardado, setNotificacionGuardado] = useState<{
+    tipo: "exito" | "local" | "error";
+    texto: string;
+  } | null>(null);
+
+  async function manejarGuardarPlan() {
+    if (!itinerarios || guardando) return;
+    setGuardando(true);
+    setNotificacionGuardado(null);
+
+    try {
+      const resultado = await guardarPlanViaje(viaje, itinerarios);
+      if (resultado.guardadoEn === "servidor") {
+        setIdGuardado(resultado.id || null);
+        setNotificacionGuardado({
+          tipo: "exito",
+          texto: `${resultado.mensaje} (ID: ${resultado.id})`,
+        });
+      } else {
+        setNotificacionGuardado({
+          tipo: "local",
+          texto: resultado.mensaje,
+        });
+      }
+    } catch (err) {
+      setNotificacionGuardado({
+        tipo: "error",
+        texto: err instanceof Error ? err.message : "Error al guardar el plan",
+      });
+    } finally {
+      setGuardando(false);
+    }
+  }
 
   useEffect(() => {
     const intervalo = window.setInterval(() => setTiempoActual(Date.now()), 60_000);
@@ -443,7 +480,6 @@ export default function Paso4Generacion() {
         obtenerAlertaHorario(parada as ParadaConHorario)
       )
     : [];
-
   return (
     <div className="card">
       <Stepper actual={4} />
@@ -1094,6 +1130,24 @@ export default function Paso4Generacion() {
           )}
 
           {/* Acciones finales */}
+   {/* Notificación de guardado */}
+          {notificacionGuardado && (
+            <p
+              className={
+                notificacionGuardado.tipo === "exito"
+                  ? "aviso-plan-actualizado"
+                  : notificacionGuardado.tipo === "local"
+                  ? "nota"
+                  : "aviso-error"
+              }
+              role="status"
+              aria-live="polite"
+            >
+              {notificacionGuardado.texto}
+            </p>
+          )}
+
+          {/* Acciones finales */}
           <div className="acciones">
             <button
               type="button"
@@ -1105,10 +1159,23 @@ export default function Paso4Generacion() {
 
             <button
               type="button"
-              className="btn-primario"
+              className="btn-secundario"
               onClick={regenerar}
             >
               Regenerar
+            </button>
+
+            <button
+              type="button"
+              className="btn-primario"
+              disabled={guardando}
+              onClick={manejarGuardarPlan}
+            >
+              {guardando
+                ? "Guardando..."
+                : idGuardado
+                ? "✓ Plan guardado"
+                : "Guardar plan"}
             </button>
           </div>
 
