@@ -40,6 +40,7 @@ import { rutaEta } from "./eta/rutaEta";
 import { crearAgenteChat } from "./chat/agente";
 import { crearClienteChatGemini, type ClienteChat } from "./chat/clienteChat";
 import { crearRutaChat } from "./chat/rutaChat";
+import { crearReoptimizadorChat, type ClienteOptimizador } from "./chat/optimizador";
 
 export interface OpcionesApp {
   apiKey?: string;
@@ -83,8 +84,13 @@ export interface OpcionesApp {
   chat?: {
     cliente?: ClienteChat;
   };
+  optimizador?: {
+    cliente?: ClienteOptimizador;
+    url?: string;
+    fetchImpl?: typeof fetch;
+    tiempoEsperaMs?: number;
+  };
   generacion?: {
-    // null fuerza el planificador sin IA aunque exista GEMINI_API_KEY.
     cliente?: ClienteLLM | null;
   };
 }
@@ -100,10 +106,9 @@ export function crearApp({
   restaurantes = {},
   climaReactivo = {},
   chat = {},
+  optimizador = {},
   generacion = {},
 }: OpcionesApp = {}): FastifyInstance {
-  // Igual que con Express: rutas sin distinguir mayúsculas y con o sin barra final.
-  // frameworkErrors da el mismo formato de error a fallos previos al enrutamiento, como una URL mal formada.
   const app = Fastify({
     routerOptions: { ignoreTrailingSlash: true, caseSensitive: false },
     frameworkErrors: manejarErrores,
@@ -134,8 +139,12 @@ export function crearApp({
   });
   app.register(crearRutaLugares(buscarLugares, enriquecerHorarios, buscarAbiertosAhora), { prefix: "/api/lugares" });
   const clienteChat = chat.cliente ?? (process.env.GEMINI_API_KEY ? crearClienteChatGemini() : undefined);
-  app.register(crearRutaChat(crearAgenteChat({ cliente: clienteChat })), { prefix: "/api/chat" });
-
+  const reoptimizadorChat =
+    optimizador.cliente ??
+    crearReoptimizadorChat(
+      crearClienteOptimizador({ url: optimizador.url, fetchImpl: optimizador.fetchImpl, tiempoEsperaMs: optimizador.tiempoEsperaMs }),
+    );
+  app.register(crearRutaChat(crearAgenteChat({ cliente: clienteChat, optimizador: reoptimizadorChat })), { prefix: "/api/chat" });
   const obtenerPronostico = crearClienteOpenWeather({
     apiKey: clima.apiKey === undefined ? process.env.OPENWEATHER_API_KEY : clima.apiKey,
     fetch: clima.fetch,
