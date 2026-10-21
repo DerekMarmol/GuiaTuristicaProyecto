@@ -10,6 +10,8 @@ mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 const SOURCE_RUTA = "ruta-itinerario";
 const LAYER_BORDE_RUTA = "ruta-itinerario-borde";
 const LAYER_GRADIENTE_RUTA = "ruta-itinerario-gradiente";
+const SOURCE_PARTIDA = "tramo-partida";
+const LAYER_PARTIDA = "tramo-partida-linea";
 
 export interface ReferenciaMapa {
   lat: number;
@@ -24,12 +26,23 @@ export interface CapaAbiertosAhora {
   onSeleccionar: (idExterno: string) => void;
 }
 
+// GUI-107: desde dónde sale el usuario (su ubicación o un punto que marcó en el mapa).
+export interface PartidaMapa {
+  lat: number;
+  lng: number;
+  etiqueta: string;
+}
+
 interface MapaProps {
   paradas?: Parada[];
   paradasCompletadas?: string[];
   pronostico?: PronosticoDiario;
   eta?: RespuestaEta | null;
   abiertos?: CapaAbiertosAhora | null;
+  partida?: PartidaMapa | null;
+  // Mientras es true, tocar el mapa elige el punto de partida.
+  eligiendoPartida?: boolean;
+  onElegirPartida?: (punto: { lat: number; lng: number }) => void;
 }
 
 function crearIconoAbierto(): SVGSVGElement {
@@ -225,7 +238,33 @@ function gradienteRuta(progreso: number) {
   ];
 }
 
-export function Mapa({ paradas = [], paradasCompletadas = [], pronostico, eta = null, abiertos = null }: MapaProps) {
+function crearGeoJsonPartida(partida: PartidaMapa | null, primera: Parada | undefined) {
+  if (!partida || !primera) {
+    return { type: "FeatureCollection" as const, features: [] };
+  }
+  return {
+    type: "FeatureCollection" as const,
+    features: [{
+      type: "Feature" as const,
+      properties: {},
+      geometry: {
+        type: "LineString" as const,
+        coordinates: [[partida.lng, partida.lat], [primera.lng, primera.lat]] as [number, number][],
+      },
+    }],
+  };
+}
+
+export function Mapa({
+  paradas = [],
+  paradasCompletadas = [],
+  pronostico,
+  eta = null,
+  abiertos = null,
+  partida = null,
+  eligiendoPartida = false,
+  onElegirPartida,
+}: MapaProps) {
   const contenedorRef = useRef<HTMLDivElement>(null);
   const mapaRef = useRef<mapboxgl.Map | null>(null);
   const marcadoresRef = useRef<mapboxgl.Marker[]>([]);
@@ -237,6 +276,11 @@ export function Mapa({ paradas = [], paradasCompletadas = [], pronostico, eta = 
   completadasRef.current = paradasCompletadas;
   pronosticoRef.current = pronostico;
   etaRef.current = eta;
+  const partidaRef = useRef(partida);
+  partidaRef.current = partida;
+  const marcadorPartidaRef = useRef<mapboxgl.Marker | null>(null);
+  const elegirPartidaRef = useRef(onElegirPartida);
+  elegirPartidaRef.current = onElegirPartida;
   const marcadoresAbiertosRef = useRef(new Map<string, mapboxgl.Marker>());
   const marcadorReferenciaRef = useRef<mapboxgl.Marker | null>(null);
   const mostrabaAbiertosRef = useRef(false);
@@ -335,11 +379,7 @@ export function Mapa({ paradas = [], paradasCompletadas = [], pronostico, eta = 
         bounds.extend([parada.lng, parada.lat]);
       });
 
-      if (actuales.length === 1) {
-        mapa.easeTo({ center: [actuales[0].lng, actuales[0].lat], zoom: 14, duration: 500 });
-      } else {
-        mapa.fitBounds(bounds, { padding: 60, maxZoom: 15, duration: 500 });
-      }
+      encuadrar(mapa, partidaRef.current ? [...actuales, partidaRef.current] : actuales);
     };
 
     if (mapa.isStyleLoaded()) {
@@ -350,6 +390,65 @@ export function Mapa({ paradas = [], paradasCompletadas = [], pronostico, eta = 
     mapa.once("load", actualizarMapa);
     return () => { mapa.off("load", actualizarMapa); };
   }, [paradas, paradasCompletadas, pronostico, eta]);
+
+  // GUI-107: marcador del punto de partida y tramo punteado hasta la primera parada.
+  useEffect(() => {
+    const mapa = mapaRef.current;
+    if (!mapa) return;
+
+    const actualizarPartida = () => {
+      const primera = paradasRef.current[0];
+      const datos = crearGeoJsonPartida(partida, primera);
+      const fuente = mapa.getSource(SOURCE_PARTIDA) as mapboxgl.GeoJSONSource | undefined;
+      if (fuente) {
+        fuente.setData(datos);
+      } else {
+        mapa.addSource(SOURCE_PARTIDA, { type: "geojson", data: datos });
+        mapa.addLayer({
+          id: LAYER_PARTIDA,
+          type: "line",
+          source: SOURCE_PARTIDA,
+          layout: { "line-cap": "round" },
+          paint: { "line-color": "#2786a8", "line-width": 3, "line-dasharray": [1.5, 1.5], "line-opacity": 0.9 },
+        });
+      }
+
+      marcadorPartidaRef.current?.remove();
+      marcadorPartidaRef.current = null;
+      if (!partida) return;
+
+      const elemento = document.createElement("div");
+      elemento.className = "marcador-partida";
+      elemento.setAttribute("role", "img");
+      elemento.setAttribute("aria-label", partida.etiqueta);
+      marcadorPartidaRef.current = new mapboxgl.Marker({ element: elemento, anchor: "center" })
+        .setLngLat([partida.lng, partida.lat])
+        .setPopup(new mapboxgl.Popup({ offset: 14 }).setText(partida.etiqueta))
+        .addTo(mapa);
+      encuadrar(mapa, [...paradasRef.current, partida]);
+    };
+
+    if (mapa.isStyleLoaded()) {
+      actualizarPartida();
+      return;
+    }
+    mapa.once("load", actualizarPartida);
+    return () => { mapa.off("load", actualizarPartida); };
+  }, [partida?.lat, partida?.lng, partida?.etiqueta, paradas]);
+
+  useEffect(() => {
+    const mapa = mapaRef.current;
+    if (!mapa || !eligiendoPartida) return;
+
+    const alTocar = (evento: mapboxgl.MapMouseEvent) => elegirPartidaRef.current?.({ lat: evento.lngLat.lat, lng: evento.lngLat.lng });
+    const lienzo = mapa.getCanvas();
+    lienzo.style.cursor = "crosshair";
+    mapa.on("click", alTocar);
+    return () => {
+      mapa.off("click", alTocar);
+      lienzo.style.cursor = "";
+    };
+  }, [eligiendoPartida]);
 
   // Modo «Abierto ahora»: capa propia de marcadores; las paradas del itinerario no se tocan.
   useEffect(() => {

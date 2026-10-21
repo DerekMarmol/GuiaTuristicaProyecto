@@ -37,6 +37,7 @@ import usuariosRoutes from "./routes/usuarios.routes";
 import { manejarErrores } from "./errores";
 import type { FuncionFetch } from "./tipos";
 import { rutaEta } from "./eta/rutaEta";
+import { crearRutaTraslado } from "./routes/traslado";
 import { crearAgenteChat } from "./chat/agente";
 import { crearClienteChatGemini, type ClienteChat } from "./chat/clienteChat";
 import { crearRutaChat } from "./chat/rutaChat";
@@ -171,6 +172,7 @@ export function crearApp({
   app.register(crearRutaItinerarios(validarPropuesta, priorizarPorClima, generarItinerario), { prefix: "/api/itinerarios" });
   app.register(crearRutaReoptimizacion(), { prefix: "/api/itinerarios" });
   app.register(rutaEta, { prefix: "/api/itinerarios" });
+  app.register(crearRutaTraslado(), { prefix: "/api/itinerarios" });
 
   app.register(crearRutaPronosticoClima(consultarClima), { prefix: "/api/clima/pronostico" });
 

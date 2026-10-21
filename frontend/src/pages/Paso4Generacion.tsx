@@ -20,6 +20,9 @@ import { aplicarParadasPropuestas, construirItinerarioActivo, fechaLocal, firmaI
 import { BarraAbiertosAhora, ResultadosAbiertosAhora, describirReferencia, type FiltroAbiertos } from "../components/AbiertosAhora";
 import type { CapaAbiertosAhora } from "../components/Mapa";
 import { useAbiertosAhora } from "../hooks/useAbiertosAhora";
+import { usePuntoPartida } from "../hooks/usePuntoPartida";
+import { BarraPuntoPartida, TrasladoDesdePartida } from "../components/PuntoPartida";
+import { etiquetaPartida } from "../services/puntoPartida";
 import { coordenadasValidas, lugaresParaMapa } from "../services/abiertosAhora";
 
 import {
@@ -259,6 +262,8 @@ async function manejarExportarPlan() {
         paradaCanceladaId,
         probabilidadLluvia,
         modoTransporte: modoTransporteRuta(viaje.transporte),
+        // Solo la ubicación real sirve de origen a mitad del día; un punto marcado (el hotel) no.
+        ...(partida.puntoUtil?.fuente === "ubicacion" ? { origen: { lat: partida.puntoUtil.lat, lng: partida.puntoUtil.lng } } : {}),
       });
       const paradas = [
         ...diaSolicitado.paradas.filter((p) => completadas.has(p.id)),
@@ -428,12 +433,20 @@ async function manejarExportarPlan() {
     void solicitarReoptimizacion("clima", undefined, 100);
   }, [dia, estadoPronostico, pronostico, reoptimizando]);
 
+  // GUI-107: punto de partida del usuario y traslado hasta la primera parada.
+  const partida = usePuntoPartida(dia?.paradas[0] ?? null, fase === "listo");
+  const trasladoInicio = partida.puntoUtil ? partida.traslado : null;
+
   // GUI-89: tomar el tiempo real del itinerario cuando existe.
   // Si no viene informado, reutilizar la misma estimación visual de GUI-34.
-  // Cada parada guarda el traslado desde la anterior: el primer tramo es el de la segunda parada.
-  const tiempoTrasladoActual = dia?.paradas.length && dia.paradas.length > 1
-    ? obtenerTiempoTraslado(dia.paradas[1], 1, viaje.transporte)
-    : null;
+  // Cada parada guarda el traslado desde la anterior. Con punto de partida, el primer tramo es el que
+  // lleva a la primera parada; sin él, el que lleva a la segunda.
+  const tiempoTrasladoActual = trasladoInicio
+    ? { minutos: Math.max(1, trasladoInicio.tiempoBaseMinutos), estimado: false }
+    : dia?.paradas.length && dia.paradas.length > 1
+      ? obtenerTiempoTraslado(dia.paradas[1], 1, viaje.transporte)
+      : null;
+  const paradasEta = dia ? (trasladoInicio ? dia.paradas : dia.paradas.slice(1)) : [];
   const trasladoDisponible = tiempoTrasladoActual !== null;
   const trasladoEstimado = tiempoTrasladoActual?.estimado ?? false;
 
@@ -764,6 +777,20 @@ async function manejarExportarPlan() {
             onReintentar={abiertos.reintentar}
           />
 
+          {/* GUI-107: punto de partida */}
+          <BarraPuntoPartida
+            punto={partida.punto}
+            estado={partida.estado}
+            mensaje={partida.mensaje}
+            eligiendo={partida.eligiendo}
+            lejos={partida.lejos}
+            distanciaKm={partida.distanciaKm}
+            destino={viaje.destino}
+            onUsarUbicacion={() => void partida.usarUbicacion()}
+            onElegirEnMapa={() => partida.setEligiendo(true)}
+            onCancelarEleccion={() => partida.setEligiendo(false)}
+          />
+
           {/* Mapa */}
           <div
             className="mapa-dia"
@@ -776,6 +803,9 @@ async function manejarExportarPlan() {
               pronostico={pronostico?.dias.find((d) => d.fecha === dia.fecha)}
               eta={etaMapa}
               abiertos={capaAbiertos}
+              partida={partida.puntoUtil ? { ...partida.puntoUtil, etiqueta: etiquetaPartida(partida.puntoUtil) } : null}
+              eligiendoPartida={partida.eligiendo}
+              onElegirPartida={partida.elegirEnMapa}
             />
           </div>
           <div className="leyenda-ruta" aria-label="Leyenda del progreso de la ruta">
@@ -794,7 +824,7 @@ async function manejarExportarPlan() {
           <PanelTelemetria />
 
           {/* GUI-89: seguimiento manual del traslado y recálculo de ETA */}
-          {dia.paradas.length > 1 && (
+          {paradasEta.length > 0 && (
             <section aria-label="Seguimiento del traslado">
               <button
                 type="button"
@@ -833,9 +863,9 @@ async function manejarExportarPlan() {
                     tiempoTrasladoPrevistoMinutos: tiempoTrasladoActual!.minutos,
                     // La primera ETA corresponde a la segunda parada.
                     // Los siguientes tramos incluyen traslado desde la parada anterior.
-                    tramos: dia.paradas.slice(1).map((parada, indice) => {
+                    tramos: paradasEta.map((parada, indice) => {
                       const traslado = indice > 0
-                        ? obtenerTiempoTraslado(parada, indice + 1, viaje.transporte)
+                        ? obtenerTiempoTraslado(parada, dia.paradas.indexOf(parada), viaje.transporte)
                         : null;
                       return {
                         paradaId: parada.id,
@@ -850,6 +880,15 @@ async function manejarExportarPlan() {
             </section>
           )}
 
+
+          {partida.puntoUtil && trasladoInicio && dia.paradas[0] && (
+            <TrasladoDesdePartida
+              punto={partida.puntoUtil}
+              traslado={trasladoInicio}
+              nombreParada={dia.paradas[0].nombre}
+              llegada={(dia.paradas[0] as ParadaConHorario).horaInicioProgramada}
+            />
+          )}
 
           {/* Paradas */}
           <ol

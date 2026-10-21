@@ -13,12 +13,15 @@ export async function reoptimizarRuta({
   paradaCanceladaId,
   probabilidadLluvia,
   modoTransporte,
+  origen,
 }: {
   tipo: TipoEventoRuta;
   paradas: Parada[];
   paradaCanceladaId?: string;
   probabilidadLluvia?: number;
   modoTransporte?: ModoTransporteRuta;
+  // Ubicación actual del usuario: el optimizador ordena las paradas pendientes empezando desde ahí.
+  origen?: { lat: number; lng: number };
 }): Promise<Parada[]> {
   const hora = new Date();
   const respuesta = await fetch("/api/itinerarios/reoptimizar", {
@@ -30,6 +33,7 @@ export async function reoptimizarRuta({
       paradaCanceladaId,
       probabilidadLluvia,
       modoTransporte,
+      origen,
       horaActualMinutos: hora.getHours() * 60 + hora.getMinutes(),
     }),
   });
