@@ -2,6 +2,8 @@ import type { FastifyPluginAsync } from "fastify";
 import { ErrorApi } from "../errores";
 import type { ResultadoPropuesta } from "../ai/propuesta";
 import type { ResultadoPrioridadClima } from "../ai/prioridadClima";
+import type { GenerarItinerario } from "../itinerarios/generacion";
+import { validarSolicitudGeneracion } from "../validacion/generacion";
 import { PrismaClient } from "../../generated/prisma";
 
 const prisma = new PrismaClient();
@@ -23,7 +25,11 @@ function esErrorCuerpo(err: unknown): boolean {
   return err instanceof Error && "code" in err && typeof err.code === "string" && ERRORES_CUERPO.has(err.code);
 }
 
-export function crearRutaItinerarios(validarPropuesta: ValidarPropuesta, priorizarPorClima: PriorizarPorClima): FastifyPluginAsync {
+export function crearRutaItinerarios(
+  validarPropuesta: ValidarPropuesta,
+  priorizarPorClima: PriorizarPorClima,
+  generarItinerario: GenerarItinerario,
+): FastifyPluginAsync {
   return async (app) => {
     // Lo que se relanza aquí lo atiende el manejador de errores general de la aplicación.
     app.setErrorHandler((err) => {
@@ -31,6 +37,10 @@ export function crearRutaItinerarios(validarPropuesta: ValidarPropuesta, prioriz
         throw new ErrorApi(400, "PARAMETRO_INVALIDO", "El cuerpo de la solicitud debe ser un JSON válido de hasta 100 KB.");
       }
       throw err;
+    });
+
+    app.post("/generar", { bodyLimit: LIMITE_CUERPO_BYTES }, async (req) => {
+      return generarItinerario(validarSolicitudGeneracion(req.body));
     });
 
     app.post("/validar", { bodyLimit: LIMITE_CUERPO_BYTES }, async (req) => {
