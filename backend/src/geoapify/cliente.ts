@@ -27,7 +27,7 @@ function formatearCoordenada(valor: number): string {
   return valor.toFixed(7).replace(/\.?0+$/, "");
 }
 
-function errorPorEstado(estado: number): ErrorApi {
+export function errorPorEstado(estado: number): ErrorApi {
   if (estado === 401 || estado === 403) {
     return new ErrorApi(
       502,
@@ -45,7 +45,7 @@ function errorPorEstado(estado: number): ErrorApi {
   return new ErrorApi(502, "PROVEEDOR_ERROR", "El proveedor de lugares respondió con un error.");
 }
 
-function errorTiempoAgotado(): ErrorApi {
+export function errorTiempoAgotado(): ErrorApi {
   return new ErrorApi(504, "PROVEEDOR_TIEMPO_AGOTADO", "El proveedor de lugares tardó demasiado en responder.");
 }
 

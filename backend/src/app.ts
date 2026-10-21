@@ -8,6 +8,9 @@ import { crearRutaLugares } from "./routes/lugares";
 import { crearRutaItinerarios } from "./routes/itinerarios";
 import { crearRutaReoptimizacion } from "./routes/reoptimizacion";
 import { crearValidadorPropuestas } from "./ai/propuesta";
+import { crearClienteGemini, type ClienteLLM } from "./ai/cliente";
+import { crearGeocodificador } from "./geoapify/geocodificacion";
+import { crearGeneradorItinerario } from "./itinerarios/generacion";
 import { crearPriorizadorClima } from "./ai/prioridadClima";
 import { crearClienteClimaActual, crearClienteOpenWeather } from "./openweather/cliente";
 import { leerConfiguracionClimaReactivo, type ConfiguracionClimaReactivo } from "./config/climaReactivo";
@@ -79,6 +82,10 @@ export interface OpcionesApp {
   chat?: {
     cliente?: ClienteChat;
   };
+  generacion?: {
+    // null fuerza el planificador sin IA aunque exista GEMINI_API_KEY.
+    cliente?: ClienteLLM | null;
+  };
 }
 
 export function crearApp({
@@ -92,6 +99,7 @@ export function crearApp({
   restaurantes = {},
   climaReactivo = {},
   chat = {},
+  generacion = {},
 }: OpcionesApp = {}): FastifyInstance {
   // Igual que con Express: rutas sin distinguir mayúsculas y con o sin barra final.
   // frameworkErrors da el mismo formato de error a fallos previos al enrutamiento, como una URL mal formada.
@@ -137,7 +145,16 @@ export function crearApp({
   const resolverLugares = crearResolvedorLugares(opcionesDetalles);
   const validarPropuesta = crearValidadorPropuestas({ resolverLugares });
   const priorizarPorClima = crearPriorizadorClima({ resolverLugares, consultarClima });
-  app.register(crearRutaItinerarios(validarPropuesta, priorizarPorClima), { prefix: "/api/itinerarios" });
+  const generarItinerario = crearGeneradorItinerario({
+    geocodificar: crearGeocodificador({ apiKey, fetch, tiempoEsperaMs }),
+    buscarLugares,
+    enriquecerHorarios,
+    cliente:
+      generacion.cliente === undefined
+        ? process.env.GEMINI_API_KEY ? crearClienteGemini() : undefined
+        : generacion.cliente ?? undefined,
+  });
+  app.register(crearRutaItinerarios(validarPropuesta, priorizarPorClima, generarItinerario), { prefix: "/api/itinerarios" });
   app.register(crearRutaReoptimizacion(), { prefix: "/api/itinerarios" });
   app.register(rutaEta, { prefix: "/api/itinerarios" });
 
