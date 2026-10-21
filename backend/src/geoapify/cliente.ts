@@ -1,9 +1,11 @@
 import { ErrorApi } from "../errores";
 import type { FuncionFetch } from "../tipos";
 import { transformarLugares, type Lugar } from "./transformar";
+import { cacheService } from "../lib/redis";
 
 export const URL_PLACES = "https://api.geoapify.com/v2/places";
 const TIEMPO_ESPERA_MS = 10000;
+export const TTL_PLACES_SEGUNDOS = 86400;
 
 export interface ConsultaBusqueda {
   lat: number;
@@ -60,6 +62,18 @@ export function crearConsultaPlaces({
     if (!clave) {
       throw new ErrorApi(500, "SERVICIO_NO_CONFIGURADO", "El servicio de lugares no está configurado.");
     }
+    //Clave determinista en Redis basada en coordenadas
+    const categoriasOrdenadas = [...categorias].sort().join(",");
+    const claveCache = `cache:geoapify:places:${lat.toFixed(3)}:${lng.toFixed(3)}:${radio}:${limite}:${categoriasOrdenadas}`;
+
+    try {
+      const datosEnCache = await cacheService.get(claveCache);
+      if (datosEnCache) {
+        return datosEnCache;
+      }
+    } catch {
+      // Continuar si Redis no está disponible temporalmente
+    }
 
     const longitud = formatearCoordenada(lng);
     const latitud = formatearCoordenada(lat);
@@ -95,14 +109,22 @@ export function crearConsultaPlaces({
         throw errorPorEstado(respuesta.status);
       }
 
+
+      let datos: unknown;
       try {
-        return (await respuesta.json()) as unknown;
+        datos = (await respuesta.json()) as unknown;
       } catch {
         if (controlador.signal.aborted) {
           throw errorTiempoAgotado();
         }
         throw new ErrorApi(502, "PROVEEDOR_RESPUESTA_INVALIDA", "El proveedor de lugares devolvió una respuesta que no es JSON válido.");
       }
+      try {
+        await cacheService.set(claveCache, datos, TTL_PLACES_SEGUNDOS);
+      } catch {
+        // Si la caché no está disponible, no se interrumpe la operación
+      }
+      return datos;
     } finally {
       clearTimeout(temporizador);
     }

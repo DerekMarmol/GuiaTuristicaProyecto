@@ -1,10 +1,12 @@
 import { ErrorApi } from "../errores";
 import type { FuncionFetch } from "../tipos";
 import { interpretarClimaActual, interpretarPronostico, type ClimaActual, type Pronostico } from "./transformar";
+import { cacheService } from "../lib/redis";
 
 export const URL_PRONOSTICO = "https://api.openweathermap.org/data/2.5/forecast";
 export const URL_CLIMA_ACTUAL = "https://api.openweathermap.org/data/2.5/weather";
 export const TIEMPO_ESPERA_MS = 10000;
+export const TTL_CLIMA_SEGUNDOS = 1800;
 
 type Ubicacion = { lat: number; lng: number };
 
@@ -52,6 +54,18 @@ function crearSolicitud({ apiKey, fetch: fetchImpl = globalThis.fetch, tiempoEsp
       throw new ErrorApi(503, "SERVICIO_NO_CONFIGURADO", "El servicio de clima no está configurado.");
     }
 
+    const tipo = direccion.includes("forecast") ? "pronostico" : "actual";
+    const claveCache = `cache:openweather:${tipo}:${lat.toFixed(2)}:${lng.toFixed(2)}`;
+
+    try {
+      const datosEnCache = await cacheService.get(claveCache);
+      if (datosEnCache) {
+        return datosEnCache;
+      }
+    } catch {
+      // Si la caché no está disponible, continúa a la API sin interrumpir la operación
+    }
+
     const url = new URL(direccion);
     url.search = new URLSearchParams({
       lat: formatearCoordenada(lat),
@@ -82,15 +96,22 @@ function crearSolicitud({ apiKey, fetch: fetchImpl = globalThis.fetch, tiempoEsp
         respuesta.body?.cancel().catch(() => {});
         throw errorPorEstado(respuesta.status);
       }
-
+      
+      let datos: unknown;
       try {
-        return (await respuesta.json()) as unknown;
+        datos = (await respuesta.json()) as unknown;
       } catch {
         if (controlador.signal.aborted) {
           throw errorTiempoAgotado();
         }
         throw new ErrorApi(502, "PROVEEDOR_RESPUESTA_INVALIDA", "El proveedor de clima devolvió una respuesta que no es JSON válido.");
       }
+      try {
+        await cacheService.set(claveCache, datos, TTL_CLIMA_SEGUNDOS);
+      } catch {
+        // Si la caché no está disponible, no se interrumpe la operación
+      }   
+      return datos;
     } finally {
       clearTimeout(temporizador);
     }
