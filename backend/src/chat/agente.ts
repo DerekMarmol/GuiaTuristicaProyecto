@@ -17,6 +17,9 @@ const SolicitudChatSchema = z.object({
   mensaje: z.string().trim().min(1).max(500),
   horaActual: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
   presupuestoRestante: z.number().min(0).optional(),
+  modoTransporte: z.enum(["auto", "pedestrian"]).optional(),
+  // Ubicación actual del viajero; sin ella la ruta arranca en la primera parada pendiente.
+  origen: z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).optional(),
   paradas: z
     .array(
       z.object({
@@ -94,6 +97,7 @@ export function construirPrompt(s: SolicitudChat): string {
     .join("\n\n");
 }
 
+/** Descarta los ajustes que no se pueden aplicar: paradas inventadas o datos incompletos. */
 export function depurarAjustes(ajustes: Ajuste[], idsValidos: Set<string>): Ajuste[] {
   return ajustes.filter((a) => {
     if (a.tipo === "reordenar") return true;
@@ -137,7 +141,7 @@ export function crearHerramientas(
         p.lng === undefined ||
         !p.horaApertura ||
         !p.horaCierre ||
-        !p.tiempoEstanciaMinutos
+        p.tiempoEstanciaMinutos === undefined
       ) {
         incompletas.push(p.nombre);
       } else {
@@ -157,7 +161,12 @@ export function crearHerramientas(
 
     let resultado;
     try {
-      resultado = await optimizador.reoptimizar({ paradas, horaActualMinutos: horaAMinutos(solicitud.horaActual) });
+      resultado = await optimizador.reoptimizar({
+        paradas,
+        horaActualMinutos: horaAMinutos(solicitud.horaActual),
+        modoTransporte: solicitud.modoTransporte,
+        origen: solicitud.origen,
+      });
     } catch (err) {
       console.error("Error al consultar el optimizador:", err instanceof Error ? err.message : err);
       return { ok: false, error: "El optimizador no está disponible ahora. Intenta de nuevo en un momento." };

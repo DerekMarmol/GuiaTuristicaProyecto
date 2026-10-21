@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ModoTransporteRuta } from "../../../shared/types";
 import { ErrorApi } from "../errores";
 import type { LlamarOptimizador } from "../optimizador/cliente";
 
@@ -16,7 +17,12 @@ export type ResultadoReoptimizacion =
   | { alcanza: false; detalle: string };
 
 export interface ClienteOptimizador {
-  reoptimizar(args: { paradas: ParadaOptimizador[]; horaActualMinutos: number }): Promise<ResultadoReoptimizacion>;
+  reoptimizar(args: {
+    paradas: ParadaOptimizador[];
+    horaActualMinutos: number;
+    modoTransporte?: ModoTransporteRuta;
+    origen?: { lat: number; lng: number };
+  }): Promise<ResultadoReoptimizacion>;
 }
 
 export class ErrorOptimizador extends Error {
@@ -31,10 +37,9 @@ const RespuestaSchema = z.object({
   distancia_total_km: z.number(),
 });
 
-
 export function crearReoptimizadorChat(llamarOptimizador: LlamarOptimizador): ClienteOptimizador {
   return {
-    async reoptimizar({ paradas, horaActualMinutos }) {
+    async reoptimizar({ paradas, horaActualMinutos, modoTransporte, origen }) {
       let datos: unknown;
       try {
         datos = await llamarOptimizador("/reoptimize", {
@@ -47,9 +52,12 @@ export function crearReoptimizadorChat(llamarOptimizador: LlamarOptimizador): Cl
             tiempo_estancia_minutos: p.tiempoEstanciaMinutos,
           })),
           hora_actual_minutos: horaActualMinutos,
+          modo_transporte: modoTransporte ?? "auto",
+          ...(origen ? { origen: { lat: origen.lat, lng: origen.lng } } : {}),
         });
       } catch (err) {
-        if (err instanceof ErrorApi && err.codigo === "REOPTIMIZACION_NO_DISPONIBLE") {
+        // Solo el 409 (el optimizador respondió 422) significa que no hay orden viable; el 502 es una caída.
+        if (err instanceof ErrorApi && err.codigo === "REOPTIMIZACION_NO_DISPONIBLE" && err.estado === 409) {
           return { alcanza: false, detalle: err.message };
         }
         throw new ErrorOptimizador(err instanceof ErrorApi ? err.message : "No fue posible consultar al optimizador.");
