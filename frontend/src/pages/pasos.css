@@ -445,3 +445,8 @@
 @media (max-width: 390px) {
   .eta-cifras { grid-template-columns: 1fr; }
 }
+
+/* GUI-107: punto de partida del usuario */
+.punto-partida { margin: .8rem 0; }
+.marcador-partida { width: 1.1rem; height: 1.1rem; border: 3px solid #fff; border-radius: 50%; background: #2786a8; box-shadow: 0 0 0 6px rgba(39, 134, 168, .3); animation: pulso-partida 2s ease-in-out infinite; }
+@keyframes pulso-partida { 50% { box-shadow: 0 0 0 10px rgba(39, 134, 168, .12); } }

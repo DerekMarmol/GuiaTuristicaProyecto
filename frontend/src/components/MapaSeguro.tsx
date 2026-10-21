@@ -1,6 +1,6 @@
 import { Component, useEffect, useState, type ReactNode } from "react";
 import type { Parada, PronosticoDiario } from "../../../shared/types";
-import { Mapa, type CapaAbiertosAhora } from "./Mapa";
+import { Mapa, type CapaAbiertosAhora, type PartidaMapa } from "./Mapa";
 import type { RespuestaEta } from "../services/eta";
 
 // Sin token de Mapbox el mapa no puede cargar: se muestra un aviso en lugar de romper toda la app.
@@ -54,19 +54,31 @@ function useEnLinea() {
   return enLinea;
 }
 
-export function MapaSeguro({ paradas, paradasCompletadas, pronostico, eta, abiertos }: {
+export function MapaSeguro({ paradas, paradasCompletadas, pronostico, eta, abiertos, partida, eligiendoPartida, onElegirPartida }: {
   paradas?: Parada[];
   paradasCompletadas?: string[];
   pronostico?: PronosticoDiario;
   eta?: RespuestaEta | null;
   abiertos?: CapaAbiertosAhora | null;
+  partida?: PartidaMapa | null;
+  eligiendoPartida?: boolean;
+  onElegirPartida?: (punto: { lat: number; lng: number }) => void;
 }) {
   const enLinea = useEnLinea();
   if (!hayToken) return <Aviso />;
   if (!enLinea) return <Aviso sinConexion />;
   return (
     <LimiteDeError>
-      <Mapa paradas={paradas} paradasCompletadas={paradasCompletadas} pronostico={pronostico} eta={eta} abiertos={abiertos} />
+      <Mapa
+        paradas={paradas}
+        paradasCompletadas={paradasCompletadas}
+        pronostico={pronostico}
+        eta={eta}
+        abiertos={abiertos}
+        partida={partida}
+        eligiendoPartida={eligiendoPartida}
+        onElegirPartida={onElegirPartida}
+      />
     </LimiteDeError>
   );
 }
