@@ -22,6 +22,7 @@ import type { CapaAbiertosAhora } from "../components/Mapa";
 import { useAbiertosAhora } from "../hooks/useAbiertosAhora";
 import { usePuntoPartida } from "../hooks/usePuntoPartida";
 import { BarraPuntoPartida, TrasladoDesdePartida } from "../components/PuntoPartida";
+import NavegacionPaso4, { type SeccionPaso4 } from "../components/NavegacionPaso4";
 import { etiquetaPartida } from "../services/puntoPartida";
 import { coordenadasValidas, lugaresParaMapa } from "../services/abiertosAhora";
 
@@ -139,6 +140,16 @@ export default function Paso4Generacion() {
   const [advertencias, setAdvertencias] = useState<string[]>([]);
   const [intento, setIntento] = useState(0);
   const [diaActivo, setDiaActivo] = useState(0);
+  const [seccion, setSeccion] = useState<SeccionPaso4>("itinerario");
+  const cabeceraRef = useRef<HTMLDivElement>(null);
+
+  // Al cambiar de sección se deja la cabecera de días arriba: el encabezado de la app y el indicador de
+  // pasos salen de la pantalla y la sección (por ejemplo, el mapa) aprovecha todo el alto.
+  function cambiarSeccion(nueva: SeccionPaso4) {
+    setSeccion(nueva);
+    const cabecera = cabeceraRef.current;
+    window.scrollTo({ top: cabecera ? cabecera.getBoundingClientRect().top + window.scrollY : 0 });
+  }
   const [votos, setVotos] = useState<Record<string, Voto>>({});
   const [copiado, setCopiado] = useState("");
   const [calificando, setCalificando] = useState<string | null>(null);
@@ -363,6 +374,7 @@ async function manejarExportarPlan() {
   }, [itinerarios]);
 
   function regenerar() {
+    setSeccion("itinerario");
     setInicioSeguimiento(null);
     setItinerarios(null);
     setIntento((n) => n + 1);
@@ -647,11 +659,32 @@ async function manejarExportarPlan() {
       {/* ITINERARIO GENERADO */}
       {fase === "listo" && itinerarios && dia && (
         <>
-          <h2>Tu itinerario para {viaje.destino}</h2>
-
-          {advertencias.map((texto) => (
-            <p key={texto} className="nota">{texto}</p>
-          ))}
+          {/* GUI-110: el paso 4 se divide en secciones con navegación inferior. El título y los días
+              quedan arriba y sirven para todas las secciones. */}
+          <div className="paso4-cabecera" ref={cabeceraRef}>
+            <h2 className="paso4-titulo">Tu itinerario para {viaje.destino}</h2>
+            {/* Selector de días */}
+            <div
+              className="dias"
+              role="tablist"
+              aria-label="Días del viaje"
+            >
+              {itinerarios.map((it, i) => (
+                <button
+                  key={it.id}
+                  type="button"
+                  role="tab"
+                  id={`tab-${it.id}`}
+                  aria-selected={i === diaActivo}
+                  aria-controls="panel-dia"
+                  className="dia"
+                  onClick={() => { setDiaActivo(i); setInicioSeguimiento(null); setEtaMapa(null); }}
+                >
+                  Día {it.numeroDia} · {fechaCorta(it.fecha)}
+                </button>
+              ))}
+            </div>
+          </div>
 
           {avisoReoptimizacion && (
             <p className={reoptimizando || avisoReoptimizacion.startsWith("El plan") ? "aviso-plan-actualizado" : "aviso-error"} role="status" aria-live="polite">
@@ -659,682 +692,682 @@ async function manejarExportarPlan() {
             </p>
           )}
 
-          <ul className="datos">
-            <li className="dato">
-              {dias} {dias === 1 ? "día" : "días"}
-            </li>
+          {seccion === "itinerario" && (
+            <section className="paso4-seccion" aria-label="Itinerario">
+              {advertencias.map((texto) => (
+                <p key={texto} className="nota">{texto}</p>
+              ))}
 
-            {viaje.tipoViaje && (
-              <li className="dato">
-                {TIPOS[viaje.tipoViaje]}
-              </li>
-            )}
+              <ul className="datos">
+                <li className="dato">
+                  {dias} {dias === 1 ? "día" : "días"}
+                </li>
 
-            {viaje.presupuesto !== undefined && (
-              <li className="dato">
-                {MONEDA}{" "}
-                {viaje.presupuesto.toLocaleString("es-GT")}{" "}
-                en total
-              </li>
-            )}
-
-            {viaje.transporte && (
-              <li className="dato">
-                {viaje.transporte}
-              </li>
-            )}
-          </ul>
-
-          {/* Hospedaje */}
-          {!viaje.sinHotel && (
-            <p className="nota">
-              {viaje.hospedaje
-                ? `Cada día sale desde: ${viaje.nombreHotel}.`
-                : "Hospedaje: te sugeriremos opciones cerca de este itinerario."}
-            </p>
-          )}
-
-          {/* Selector de días */}
-          <div
-            className="dias"
-            role="tablist"
-            aria-label="Días del viaje"
-          >
-            {itinerarios.map((it, i) => (
-              <button
-                key={it.id}
-                type="button"
-                role="tab"
-                id={`tab-${it.id}`}
-                aria-selected={i === diaActivo}
-                aria-controls="panel-dia"
-                className="dia"
-                onClick={() => { setDiaActivo(i); setInicioSeguimiento(null); setEtaMapa(null); }}
-              >
-                Día {it.numeroDia} · {fechaCorta(it.fecha)}
-              </button>
-            ))}
-          </div>
-
-          {/* Clima del día */}
-          <section aria-label={`Clima del día ${dia.numeroDia}`}>
-            <IndicadorClima
-              estado={estadoPronostico}
-              dia={pronostico?.dias.find((d) => d.fecha === dia.fecha)}
-              ahora={esHoy ? climaAhora : null}
-            />
-          </section>
-          {monitoreo.activo || monitoreo.propuesta ? (
-            <PropuestaClima
-              estado={monitoreo.estado}
-              nivel={monitoreo.evaluacion?.evaluacion?.nivel ?? null}
-              senal={monitoreo.evaluacion?.evaluacion?.senalPrincipal ?? null}
-              consultadoEn={monitoreo.evaluacion?.evaluacion?.consultadoEn ?? null}
-              mensajeEvaluacion={monitoreo.evaluacion?.mensaje ?? null}
-              error={monitoreo.error}
-              proximaRevision={monitoreo.proximaRevision}
-              estadoUbicacion={monitoreo.estadoUbicacion}
-              propuesta={monitoreo.propuesta}
-              obsoleta={monitoreo.propuestaObsoleta}
-              aplicando={aplicandoClima}
-              onVerificar={() => void monitoreo.verificar()}
-              onCompartirUbicacion={monitoreo.compartirUbicacion}
-              onDejarDeCompartir={monitoreo.dejarDeCompartir}
-              onAceptar={() => void aceptarPropuestaDeClima()}
-              onRechazar={monitoreo.descartarPropuesta}
-            />
-          ) : (
-            <p className="nota">El monitoreo del clima durante el recorrido se activa el día del itinerario mientras queden paradas pendientes.</p>
-          )}
-          <div className="acciones-ruta">
-            <button type="button" className="btn-secundario" disabled={reoptimizando || dia.paradas.length === 0}
-              onClick={() => void solicitarReoptimizacion("retraso")}>
-              {reoptimizando ? "Actualizando ruta…" : "Reportar retraso y recalcular"}
-            </button>
-          </div>
-
-          {/* Presupuesto del día */}
-          <PanelPresupuesto
-            numeroDia={dia.numeroDia}
-            presupuestoDiario={presupuestoDiario}
-            gastosDelDia={gastos.filter((g) => g.numeroDia === dia.numeroDia)}
-            totalGastadoViaje={gastos.reduce((s, g) => s + g.monto, 0)}
-            presupuestoTotal={viaje.presupuesto}
-            onAgregar={agregarGasto}
-            onEliminar={eliminarGasto}
-          />
-
-          {/* GUI-73: botón «Abierto ahora» */}
-          <BarraAbiertosAhora
-            estado={estadoAbiertos}
-            filtro={filtroAbiertos}
-            interesesViaje={interesesViaje}
-            puntos={puntosReferencia}
-            onAlternar={abiertos.alternar}
-            onCambiarFiltro={setFiltroAbiertos}
-            onActualizarUbicacion={abiertos.actualizarUbicacion}
-            onUsarPunto={(p) => abiertos.usarPuntoManual({ lat: p.lat, lng: p.lng, etiqueta: `la parada ${p.nombre}` })}
-            onReintentar={abiertos.reintentar}
-          />
-
-          {/* GUI-107: punto de partida */}
-          <BarraPuntoPartida
-            punto={partida.punto}
-            estado={partida.estado}
-            mensaje={partida.mensaje}
-            eligiendo={partida.eligiendo}
-            lejos={partida.lejos}
-            distanciaKm={partida.distanciaKm}
-            destino={viaje.destino}
-            onUsarUbicacion={() => void partida.usarUbicacion()}
-            onElegirEnMapa={() => partida.setEligiendo(true)}
-            onCancelarEleccion={() => partida.setEligiendo(false)}
-          />
-
-          {/* Mapa */}
-          <div
-            className="mapa-dia"
-            role="region"
-            aria-label={`Mapa de las paradas del día ${dia.numeroDia}`}
-          >
-            <MapaSeguro
-              paradas={dia.paradas}
-              paradasCompletadas={idsParadasCompletadas}
-              pronostico={pronostico?.dias.find((d) => d.fecha === dia.fecha)}
-              eta={etaMapa}
-              abiertos={capaAbiertos}
-              partida={partida.puntoUtil ? { ...partida.puntoUtil, etiqueta: etiquetaPartida(partida.puntoUtil) } : null}
-              eligiendoPartida={partida.eligiendo}
-              onElegirPartida={partida.elegirEnMapa}
-            />
-          </div>
-          <div className="leyenda-ruta" aria-label="Leyenda del progreso de la ruta">
-            <span><i className="leyenda-ruta-completada" /> Recorrido completado</span>
-            <span><i className="leyenda-ruta-pendiente" /> Recorrido pendiente</span>
-            {capaAbiertos && capaAbiertos.lugares.length > 0 && <span><i className="leyenda-abierto" /> Abierto ahora</span>}
-          </div>
-
-          <ResultadosAbiertosAhora
-            estado={estadoAbiertos}
-            seleccionadoId={abiertoSeleccionado}
-            onSeleccionar={setAbiertoSeleccionado}
-          />
-
-          {/* Telemetría GPS del recorrido */}
-          <PanelTelemetria />
-
-          {/* GUI-89: seguimiento manual del traslado y recálculo de ETA */}
-          {paradasEta.length > 0 && (
-            <section aria-label="Seguimiento del traslado">
-              <button
-                type="button"
-                className="btn-secundario"
-                onClick={() => {
-                  setInicioSeguimiento(Date.now());
-                  setTiempoActual(Date.now());
-                }}
-              >
-                {inicioSeguimiento === null ? "Iniciar traslado" : "Reiniciar traslado"}
-              </button>
-
-              {inicioSeguimiento === null ? (
-                <p className="nota">Inicia el traslado para calcular el tiempo transcurrido.</p>
-              ) : !trasladoDisponible ? (
-                <p className="nota">
-                  No hay un tiempo de traslado previsto válido para calcular la ETA.
-                </p>
-              ) : (
-                <>
-                {trasladoEstimado && (
-                  <p className="nota">
-                    ETA aproximada: el itinerario no proporcionó un tiempo de traslado real.
-                    Se utiliza la estimación que aparece en «Traslado y margen de seguridad».
-                  </p>
+                {viaje.tipoViaje && (
+                  <li className="dato">
+                    {TIPOS[viaje.tipoViaje]}
+                  </li>
                 )}
-                <PanelEta
-                  key={dia.id}
-                  onResultado={setEtaMapa}
-                  solicitud={{
-                    horaActual: new Date(tiempoActual).toISOString(),
-                    tiempoTranscurridoMinutos: Math.max(
-                      0,
-                      Math.floor((tiempoActual - inicioSeguimiento) / 60_000)
-                    ),
-                    tiempoTrasladoPrevistoMinutos: tiempoTrasladoActual!.minutos,
-                    // La primera ETA corresponde a la segunda parada.
-                    // Los siguientes tramos incluyen traslado desde la parada anterior.
-                    tramos: paradasEta.map((parada, indice) => {
-                      const traslado = indice > 0
-                        ? obtenerTiempoTraslado(parada, dia.paradas.indexOf(parada), viaje.transporte)
-                        : null;
-                      return {
-                        paradaId: parada.id,
-                        tiempoTrasladoMinutos: indice === 0 ? 0 : traslado?.minutos ?? 0,
-                        tiempoEstanciaMinutos: parada.tiempoEstanciaMinutos,
-                      };
-                    }),
-                  }}
-                />
-                </>
+
+                {viaje.presupuesto !== undefined && (
+                  <li className="dato">
+                    {MONEDA}{" "}
+                    {viaje.presupuesto.toLocaleString("es-GT")}{" "}
+                    en total
+                  </li>
+                )}
+
+                {viaje.transporte && (
+                  <li className="dato">
+                    {viaje.transporte}
+                  </li>
+                )}
+              </ul>
+
+              {/* Hospedaje */}
+              {!viaje.sinHotel && (
+                <p className="nota">
+                  {viaje.hospedaje
+                    ? `Cada día sale desde: ${viaje.nombreHotel}.`
+                    : "Hospedaje: te sugeriremos opciones cerca de este itinerario."}
+                </p>
               )}
-            </section>
-          )}
 
+              {/* Clima del día */}
+              <section aria-label={`Clima del día ${dia.numeroDia}`}>
+                <IndicadorClima
+                  estado={estadoPronostico}
+                  dia={pronostico?.dias.find((d) => d.fecha === dia.fecha)}
+                  ahora={esHoy ? climaAhora : null}
+                />
+              </section>
 
-          {partida.puntoUtil && trasladoInicio && dia.paradas[0] && (
-            <TrasladoDesdePartida
-              punto={partida.puntoUtil}
-              traslado={trasladoInicio}
-              nombreParada={dia.paradas[0].nombre}
-              llegada={(dia.paradas[0] as ParadaConHorario).horaInicioProgramada}
-            />
-          )}
+              {partida.puntoUtil && trasladoInicio && dia.paradas[0] && (
+                <TrasladoDesdePartida
+                  punto={partida.puntoUtil}
+                  traslado={trasladoInicio}
+                  nombreParada={dia.paradas[0].nombre}
+                  llegada={(dia.paradas[0] as ParadaConHorario).horaInicioProgramada}
+                />
+              )}
 
-          {/* Paradas */}
-          <ol
-            className="paradas"
-            id="panel-dia"
-            role="tabpanel"
-            aria-labelledby={`tab-${dia.id}`}
-          >
-            {dia.paradas.map((p, i) => {
-              const voto = votos[p.id];
-              const paradaHorario = p as ParadaConHorario;
-              const alerta = alertasHorario[i];
-              const descartada =
-                paradaHorario.estadoHorario === "descartada";
-              const visitada = paradasVisitadas[dia.id]?.includes(p.id) ?? false;
+              {/* Paradas */}
+              <ol
+                className="paradas"
+                id="panel-dia"
+                role="tabpanel"
+                aria-labelledby={`tab-${dia.id}`}
+              >
+                {dia.paradas.map((p, i) => {
+                  const voto = votos[p.id];
+                  const paradaHorario = p as ParadaConHorario;
+                  const alerta = alertasHorario[i];
+                  const descartada =
+                    paradaHorario.estadoHorario === "descartada";
+                  const visitada = paradasVisitadas[dia.id]?.includes(p.id) ?? false;
 
-              return (
-                <div key={p.id || i}>
-                  <li className={`parada${visitadas[p.id] || calificaciones[p.id] ? " visitada" : ""}`}>
-                    {/* Hora */}
-                    <div className="hora">
-                      {descartada
-                        ? "Sin visita"
-                        : horarios[i]?.inicio}
+                  return (
+                    <div key={p.id || i}>
+                      <li className={`parada${visitadas[p.id] || calificaciones[p.id] ? " visitada" : ""}`}>
+                        {/* Hora */}
+                        <div className="hora">
+                          {descartada
+                            ? "Sin visita"
+                            : horarios[i]?.inicio}
 
-                      <small>
-                        {descartada
-                          ? "Descartada"
-                          : `a ${horarios[i]?.fin}`}
-                      </small>
-                    </div>
+                          <small>
+                            {descartada
+                              ? "Descartada"
+                              : `a ${horarios[i]?.fin}`}
+                          </small>
+                        </div>
 
-                    {/* Información del lugar */}
-                    <div>
-                      <h3>
-                        {p.nombre}
-                        {(visitadas[p.id] || calificaciones[p.id]) && (
-                          <span className="sello-visitada">Visitada</span>
-                        )}
-                      </h3>
+                        {/* Información del lugar */}
+                        <div>
+                          <h3>
+                            {p.nombre}
+                            {(visitadas[p.id] || calificaciones[p.id]) && (
+                              <span className="sello-visitada">Visitada</span>
+                            )}
+                          </h3>
 
-                      <p>
-                        Abre {p.horaApertura} ·
-                        Cierra {p.horaCierre}
-                        {paradaHorario.horarioEstimado && " (horario estimado)"} ·
-                        Estancia{" "}
-                        {p.tiempoEstanciaMinutos} min
-                      </p>
+                          <p>
+                            Abre {p.horaApertura} ·
+                            Cierra {p.horaCierre}
+                            {paradaHorario.horarioEstimado && " (horario estimado)"} ·
+                            Estancia{" "}
+                            {p.tiempoEstanciaMinutos} min
+                          </p>
 
-                      {paradaHorario.motivo && <p className="nota">{paradaHorario.motivo}</p>}
+                          {paradaHorario.motivo && <p className="nota">{paradaHorario.motivo}</p>}
 
-                      {!descartada && !visitada && (
-                        <button type="button" className="accion-parada" onClick={() => marcarVisitada(dia.id, p.id)}>
-                          Marcar como visitada
-                        </button>
-                      )}
-
-                      {!descartada && !visitada && (
-                        <button type="button" className="accion-parada" disabled={reoptimizando}
-                          onClick={() => void solicitarReoptimizacion("parada_cancelada", p.id)}>
-                          Cancelar parada y recalcular
-                        </button>
-                      )}
-                      {visitada && <p className="estado-parada-visitada">Visita completada</p>}
-
-                      {/* GUI-38: alerta de horario */}
-                      {alerta && (
-                        <AlertaHorario
-                          nombreLugar={p.nombre}
-                          estado={alerta.estado}
-                          mensaje={alerta.mensaje}
-                        />
-                      )}
-
-                      {/* Calificación post-actividad */}
-                      {!descartada && (
-                        <div className="visita-acciones">
-                          {calificando === p.id ? (
-                            <CalificacionParada
-                              paradaId={p.id}
-                              nombre={p.nombre}
-                              inicial={calificaciones[p.id]}
-                              onCancelar={() => setCalificando(null)}
-                              onGuardar={(c) => {
-                                guardarCalificacion(c);
-                                setVisitadas((v) => ({ ...v, [p.id]: true }));
-                                setCalificando(null);
-                              }}
-                            />
-                          ) : calificaciones[p.id] ? (
-                            <ResumenCalificacion
-                              c={calificaciones[p.id]}
-                              onEditar={() => setCalificando(p.id)}
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              className="btn-visita"
-                              onClick={() => setCalificando(p.id)}
-                            >
-                              Ya visité este lugar · Calificar
+                          {!descartada && !visitada && (
+                            <button type="button" className="accion-parada" onClick={() => marcarVisitada(dia.id, p.id)}>
+                              Marcar como visitada
                             </button>
                           )}
-                        </div>
-                      )}
 
-                      {/* Votaciones */}
-                      {esGrupo && !descartada && (
-                        <div className="votos">
-                          <button
-                            type="button"
-                            className="voto favor"
-                            aria-pressed={voto === "favor"}
-                            onClick={() =>
-                              votar(p.id, "favor")
-                            }
-                          >
-                            A favor (
-                            {voto === "favor" ? 1 : 0})
-                          </button>
+                          {!descartada && !visitada && (
+                            <button type="button" className="accion-parada" disabled={reoptimizando}
+                              onClick={() => void solicitarReoptimizacion("parada_cancelada", p.id)}>
+                              Cancelar parada y recalcular
+                            </button>
+                          )}
+                          {visitada && <p className="estado-parada-visitada">Visita completada</p>}
 
-                          <button
-                            type="button"
-                            className="voto contra"
-                            aria-pressed={voto === "contra"}
-                            onClick={() =>
-                              votar(p.id, "contra")
-                            }
-                          >
-                            En contra (
-                            {voto === "contra" ? 1 : 0})
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </li>
+                          {/* GUI-38: alerta de horario */}
+                          {alerta && (
+                            <AlertaHorario
+                              nombreLugar={p.nombre}
+                              estado={alerta.estado}
+                              mensaje={alerta.mensaje}
+                            />
+                          )}
 
-                  {/* GUI-34: Traslado y margen de seguridad */}
-                  {i < dia.paradas.length - 1 &&
-                    !descartada &&
-                    (() => {
-                      // El tramo hacia la siguiente parada está guardado en esa parada.
-                      const siguiente = dia.paradas[i + 1];
-                      const h =
-                        (siguiente as any).holgura ||
-                        (siguiente as any).desgloseHolgura ||
-                        (siguiente as any).traslado?.holgura;
-
-                      const desglose = h?.desgloseHolgura;
-
-                      const tipoDetectado = String(
-                        h?.tipoTraslado ||
-                          (siguiente as any).tipoTraslado ||
-                          viaje.transporte ||
-                          ""
-                      ).toLowerCase();
-
-                      let modoKey = "auto";
-
-                      if (
-                        tipoDetectado.includes("pie") ||
-                        tipoDetectado.includes("camin")
-                      ) {
-                        modoKey = "pie";
-                      } else if (
-                        tipoDetectado.includes("bus") ||
-                        tipoDetectado.includes("colectivo")
-                      ) {
-                        modoKey = "bus";
-                      } else if (
-                        tipoDetectado.includes("moto")
-                      ) {
-                        modoKey = "moto";
-                      } else if (
-                        tipoDetectado.includes("aereo") ||
-                        tipoDetectado.includes("avion") ||
-                        tipoDetectado.includes("vuelo")
-                      ) {
-                        modoKey = "aereo";
-                      }
-
-                      const configTransporte =
-                        TRANSPORTE_CONFIG[modoKey] ||
-                        TRANSPORTE_CONFIG.auto;
-
-                      const semillaId = siguiente.id
-                        ? siguiente.id
-                            .split("")
-                            .reduce(
-                              (
-                                acc: number,
-                                char: string
-                              ) =>
-                                acc + char.charCodeAt(0),
-                              0
-                            )
-                        : 0;
-
-                      const tiemposPorTipo: Record<
-                        string,
-                        number[]
-                      > = {
-                        pie: [10, 15, 8, 12, 20],
-                        moto: [12, 18, 15, 22, 10],
-                        auto: [15, 25, 18, 30, 20],
-                        bus: [20, 35, 25, 40, 30],
-                        aereo: [45, 60, 50, 90, 75],
-                      };
-
-                      const listaTiempos =
-                        tiemposPorTipo[modoKey] ||
-                        tiemposPorTipo.auto;
-
-                      const baseSugerida =
-                        listaTiempos[
-                          (i + semillaId) %
-                            listaTiempos.length
-                        ];
-
-                      const tiempoBase =
-                        h?.tiempoBaseMinutos ??
-                        (siguiente as any).tiempoTrasladoMinutos ??
-                        obtenerTiempoTraslado(siguiente, i + 1, viaje.transporte)?.minutos ??
-                        baseSugerida;
-
-                      const tiempoAdicionalDefault =
-                        modoKey === "aereo"
-                          ? 60
-                          : modoKey === "bus"
-                          ? 15
-                          : modoKey === "pie"
-                          ? 5
-                          : modoKey === "moto"
-                          ? 8
-                          : 10;
-
-                      const margenEstandar =
-                        desglose?.margenEstandar ?? 10;
-
-                      const estacionamiento =
-                        desglose
-                          ?.estacionamientoOAdicional ??
-                        tiempoAdicionalDefault;
-
-                      const imprevistos =
-                        desglose?.imprevistos ??
-                        Math.round(tiempoBase * 0.1);
-
-                      const totalRecomendado =
-                        h?.tiempoTotalConHolgura ??
-                        tiempoBase +
-                          margenEstandar +
-                          estacionamiento +
-                          imprevistos;
-
-                      return (
-                        <div className="bloque-traslado-holgura">
-                          <div className="tarjeta-holgura">
-                            <div className="encabezado-holgura">
-                              TRASLADO Y MARGEN DE SEGURIDAD
+                          {/* Calificación post-actividad */}
+                          {!descartada && (
+                            <div className="visita-acciones">
+                              {calificando === p.id ? (
+                                <CalificacionParada
+                                  paradaId={p.id}
+                                  nombre={p.nombre}
+                                  inicial={calificaciones[p.id]}
+                                  onCancelar={() => setCalificando(null)}
+                                  onGuardar={(c) => {
+                                    guardarCalificacion(c);
+                                    setVisitadas((v) => ({ ...v, [p.id]: true }));
+                                    setCalificando(null);
+                                  }}
+                                />
+                              ) : calificaciones[p.id] ? (
+                                <ResumenCalificacion
+                                  c={calificaciones[p.id]}
+                                  onEditar={() => setCalificando(p.id)}
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn-visita"
+                                  onClick={() => setCalificando(p.id)}
+                                >
+                                  Ya visité este lugar · Calificar
+                                </button>
+                              )}
                             </div>
+                          )}
 
-                            <ul className="desglose-lista">
-                              <li>
-                                <span>
-                                  Tiempo base de traslado
-                                </span>
-                                <strong>
-                                  {tiempoBase} min
-                                </strong>
-                              </li>
+                          {/* Votaciones */}
+                          {esGrupo && !descartada && (
+                            <div className="votos">
+                              <button
+                                type="button"
+                                className="voto favor"
+                                aria-pressed={voto === "favor"}
+                                onClick={() =>
+                                  votar(p.id, "favor")
+                                }
+                              >
+                                A favor (
+                                {voto === "favor" ? 1 : 0})
+                              </button>
 
-                              <li>
-                                <span>
-                                  Margen estándar
-                                </span>
-                                <strong>
-                                  +{margenEstandar} min
-                                </strong>
-                              </li>
-
-                              <li>
-                                <span>
-                                  {
-                                    configTransporte.etiquetaEstacionamiento
-                                  }
-                                </span>
-                                <strong>
-                                  +{estacionamiento} min
-                                </strong>
-                              </li>
-
-                              <li>
-                                <span>
-                                  Imprevistos / Tráfico
-                                </span>
-                                <strong>
-                                  +{imprevistos} min
-                                </strong>
-                              </li>
-
-                              <li>
-                                <span>
-                                  <strong>
-                                    Tiempo total recomendado
-                                  </strong>
-                                </span>
-                                <strong>
-                                  {totalRecomendado} min
-                                </strong>
-                              </li>
-                            </ul>
-                          </div>
+                              <button
+                                type="button"
+                                className="voto contra"
+                                aria-pressed={voto === "contra"}
+                                onClick={() =>
+                                  votar(p.id, "contra")
+                                }
+                              >
+                                En contra (
+                                {voto === "contra" ? 1 : 0})
+                              </button>
+                            </div>
+                          )}
                         </div>
-                      );
-                    })()}
-                </div>
-              );
-            })}
-          </ol>
+                      </li>
 
-          {/* Recomendaciones */}
-          <Recomendaciones
-            viaje={viaje}
-            itinerarios={itinerarios}
-            dia={dia}
-            mostrarHoteles={mostrarHoteles}
-          />
+                      {/* GUI-34: Traslado y margen de seguridad */}
+                      {i < dia.paradas.length - 1 &&
+                        !descartada &&
+                        (() => {
+                          // El tramo hacia la siguiente parada está guardado en esa parada.
+                          const siguiente = dia.paradas[i + 1];
+                          const h =
+                            (siguiente as any).holgura ||
+                            (siguiente as any).desgloseHolgura ||
+                            (siguiente as any).traslado?.holgura;
 
-          {/* Votación grupal */}
-          {esGrupo && (
-            <section
-              className="votacion"
-              aria-labelledby="t-votacion"
-            >
-              <h3
-                id="t-votacion"
-                style={{
-                  margin: 0,
-                  font: "700 1rem var(--font-ui)",
-                  textTransform: "uppercase",
-                  letterSpacing: ".1em",
-                }}
-              >
-                Votación del grupo
-              </h3>
+                          const desglose = h?.desgloseHolgura;
 
-              <p className="nota">
-                Comparte este enlace para que tu grupo
-                vote las paradas.
-              </p>
+                          const tipoDetectado = String(
+                            h?.tipoTraslado ||
+                              (siguiente as any).tipoTraslado ||
+                              viaje.transporte ||
+                              ""
+                          ).toLowerCase();
 
-              <div className="enlace-grupo">
-                <input
-                  ref={enlaceRef}
-                  type="text"
-                  readOnly
-                  value={enlace}
-                  aria-label="Enlace para invitar al grupo"
-                  onFocus={(e) =>
-                    e.currentTarget.select()
+                          let modoKey = "auto";
+
+                          if (
+                            tipoDetectado.includes("pie") ||
+                            tipoDetectado.includes("camin")
+                          ) {
+                            modoKey = "pie";
+                          } else if (
+                            tipoDetectado.includes("bus") ||
+                            tipoDetectado.includes("colectivo")
+                          ) {
+                            modoKey = "bus";
+                          } else if (
+                            tipoDetectado.includes("moto")
+                          ) {
+                            modoKey = "moto";
+                          } else if (
+                            tipoDetectado.includes("aereo") ||
+                            tipoDetectado.includes("avion") ||
+                            tipoDetectado.includes("vuelo")
+                          ) {
+                            modoKey = "aereo";
+                          }
+
+                          const configTransporte =
+                            TRANSPORTE_CONFIG[modoKey] ||
+                            TRANSPORTE_CONFIG.auto;
+
+                          const semillaId = siguiente.id
+                            ? siguiente.id
+                                .split("")
+                                .reduce(
+                                  (
+                                    acc: number,
+                                    char: string
+                                  ) =>
+                                    acc + char.charCodeAt(0),
+                                  0
+                                )
+                            : 0;
+
+                          const tiemposPorTipo: Record<
+                            string,
+                            number[]
+                          > = {
+                            pie: [10, 15, 8, 12, 20],
+                            moto: [12, 18, 15, 22, 10],
+                            auto: [15, 25, 18, 30, 20],
+                            bus: [20, 35, 25, 40, 30],
+                            aereo: [45, 60, 50, 90, 75],
+                          };
+
+                          const listaTiempos =
+                            tiemposPorTipo[modoKey] ||
+                            tiemposPorTipo.auto;
+
+                          const baseSugerida =
+                            listaTiempos[
+                              (i + semillaId) %
+                                listaTiempos.length
+                            ];
+
+                          const tiempoBase =
+                            h?.tiempoBaseMinutos ??
+                            (siguiente as any).tiempoTrasladoMinutos ??
+                            obtenerTiempoTraslado(siguiente, i + 1, viaje.transporte)?.minutos ??
+                            baseSugerida;
+
+                          const tiempoAdicionalDefault =
+                            modoKey === "aereo"
+                              ? 60
+                              : modoKey === "bus"
+                              ? 15
+                              : modoKey === "pie"
+                              ? 5
+                              : modoKey === "moto"
+                              ? 8
+                              : 10;
+
+                          const margenEstandar =
+                            desglose?.margenEstandar ?? 10;
+
+                          const estacionamiento =
+                            desglose
+                              ?.estacionamientoOAdicional ??
+                            tiempoAdicionalDefault;
+
+                          const imprevistos =
+                            desglose?.imprevistos ??
+                            Math.round(tiempoBase * 0.1);
+
+                          const totalRecomendado =
+                            h?.tiempoTotalConHolgura ??
+                            tiempoBase +
+                              margenEstandar +
+                              estacionamiento +
+                              imprevistos;
+
+                          return (
+                            <div className="bloque-traslado-holgura">
+                              <div className="tarjeta-holgura">
+                                <div className="encabezado-holgura">
+                                  TRASLADO Y MARGEN DE SEGURIDAD
+                                </div>
+
+                                <ul className="desglose-lista">
+                                  <li>
+                                    <span>
+                                      Tiempo base de traslado
+                                    </span>
+                                    <strong>
+                                      {tiempoBase} min
+                                    </strong>
+                                  </li>
+
+                                  <li>
+                                    <span>
+                                      Margen estándar
+                                    </span>
+                                    <strong>
+                                      +{margenEstandar} min
+                                    </strong>
+                                  </li>
+
+                                  <li>
+                                    <span>
+                                      {
+                                        configTransporte.etiquetaEstacionamiento
+                                      }
+                                    </span>
+                                    <strong>
+                                      +{estacionamiento} min
+                                    </strong>
+                                  </li>
+
+                                  <li>
+                                    <span>
+                                      Imprevistos / Tráfico
+                                    </span>
+                                    <strong>
+                                      +{imprevistos} min
+                                    </strong>
+                                  </li>
+
+                                  <li>
+                                    <span>
+                                      <strong>
+                                        Tiempo total recomendado
+                                      </strong>
+                                    </span>
+                                    <strong>
+                                      {totalRecomendado} min
+                                    </strong>
+                                  </li>
+                                </ul>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                    </div>
+                  );
+                })}
+              </ol>
+
+              {/* Votación grupal */}
+              {esGrupo && (
+                <section
+                  className="votacion"
+                  aria-labelledby="t-votacion"
+                >
+                  <h3
+                    id="t-votacion"
+                    style={{
+                      margin: 0,
+                      font: "700 1rem var(--font-ui)",
+                      textTransform: "uppercase",
+                      letterSpacing: ".1em",
+                    }}
+                  >
+                    Votación del grupo
+                  </h3>
+
+                  <p className="nota">
+                    Comparte este enlace para que tu grupo
+                    vote las paradas.
+                  </p>
+
+                  <div className="enlace-grupo">
+                    <input
+                      ref={enlaceRef}
+                      type="text"
+                      readOnly
+                      value={enlace}
+                      aria-label="Enlace para invitar al grupo"
+                      onFocus={(e) =>
+                        e.currentTarget.select()
+                      }
+                    />
+
+                    <button
+                      type="button"
+                      className="btn-secundario"
+                      onClick={copiar}
+                    >
+                      Copiar
+                    </button>
+                  </div>
+
+                  <p className="nota" role="status">
+                    {copiado ||
+                      "Vista previa: por ahora solo cuenta tu voto en este dispositivo."}
+                  </p>
+                </section>
+              )}
+
+              {/* Notificación de guardado */}
+              {notificacionGuardado && (
+                <p
+                  className={
+                    notificacionGuardado.tipo === "exito"
+                      ? "aviso-plan-actualizado"
+                      : notificacionGuardado.tipo === "local"
+                      ? "nota"
+                      : "aviso-error"
                   }
-                />
+                  role="status"
+                  aria-live="polite"
+                >
+                  {notificacionGuardado.texto}
+                </p>
+              )}
+
+              {/* Acciones finales */}
+              <div className="acciones">
+                <button
+                  type="button"
+                  className="btn-secundario"
+                  onClick={() => irAPaso(3)}
+                >
+                  Atrás
+                </button>
 
                 <button
                   type="button"
                   className="btn-secundario"
-                  onClick={copiar}
+                  onClick={regenerar}
                 >
-                  Copiar
+                  Regenerar
+                </button>
+
+                <button
+               type="button"
+               className="btn-secundario"
+               disabled={exportando}
+               onClick={manejarExportarPlan}
+             >
+               {exportando ? "Exportando..." : "⬇ Exportar"}
+             </button>
+
+                <button
+                  type="button"
+                  className="btn-primario"
+                  disabled={guardando}
+                  onClick={manejarGuardarPlan}
+                >
+                  {guardando
+                    ? "Guardando..."
+                    : idGuardado
+                    ? "✓ Plan guardado"
+                    : "Guardar plan"}
                 </button>
               </div>
 
-              <p className="nota" role="status">
-                {copiado ||
-                  "Vista previa: por ahora solo cuenta tu voto en este dispositivo."}
-              </p>
+              <button
+                type="button"
+                className="enlace"
+                onClick={reiniciar}
+              >
+                Empezar un viaje nuevo
+              </button>
             </section>
           )}
 
-          {/* Acciones finales */}
-   {/* Notificación de guardado */}
-          {notificacionGuardado && (
-            <p
-              className={
-                notificacionGuardado.tipo === "exito"
-                  ? "aviso-plan-actualizado"
-                  : notificacionGuardado.tipo === "local"
-                  ? "nota"
-                  : "aviso-error"
-              }
-              role="status"
-              aria-live="polite"
-            >
-              {notificacionGuardado.texto}
-            </p>
+          {seccion === "mapa" && (
+            <section className="paso4-seccion seccion-mapa" aria-label="Mapa">
+            {/* Mapa */}
+              <div
+                className="mapa-dia"
+                role="region"
+                aria-label={`Mapa de las paradas del día ${dia.numeroDia}`}
+              >
+                <MapaSeguro
+                  paradas={dia.paradas}
+                  paradasCompletadas={idsParadasCompletadas}
+                  pronostico={pronostico?.dias.find((d) => d.fecha === dia.fecha)}
+                  eta={etaMapa}
+                  abiertos={capaAbiertos}
+                  partida={partida.puntoUtil ? { ...partida.puntoUtil, etiqueta: etiquetaPartida(partida.puntoUtil) } : null}
+                  eligiendoPartida={partida.eligiendo}
+                  onElegirPartida={partida.elegirEnMapa}
+                />
+              </div>
+              <div className="leyenda-ruta" aria-label="Leyenda del progreso de la ruta">
+                <span><i className="leyenda-ruta-completada" /> Recorrido completado</span>
+                <span><i className="leyenda-ruta-pendiente" /> Recorrido pendiente</span>
+                {capaAbiertos && capaAbiertos.lugares.length > 0 && <span><i className="leyenda-abierto" /> Abierto ahora</span>}
+              </div>
+
+              {/* GUI-107: punto de partida */}
+              <BarraPuntoPartida
+                punto={partida.punto}
+                estado={partida.estado}
+                mensaje={partida.mensaje}
+                eligiendo={partida.eligiendo}
+                lejos={partida.lejos}
+                distanciaKm={partida.distanciaKm}
+                destino={viaje.destino}
+                onUsarUbicacion={() => void partida.usarUbicacion()}
+                onElegirEnMapa={() => partida.setEligiendo(true)}
+                onCancelarEleccion={() => partida.setEligiendo(false)}
+              />
+
+              {/* GUI-73: botón «Abierto ahora» */}
+              <BarraAbiertosAhora
+                estado={estadoAbiertos}
+                filtro={filtroAbiertos}
+                interesesViaje={interesesViaje}
+                puntos={puntosReferencia}
+                onAlternar={abiertos.alternar}
+                onCambiarFiltro={setFiltroAbiertos}
+                onActualizarUbicacion={abiertos.actualizarUbicacion}
+                onUsarPunto={(p) => abiertos.usarPuntoManual({ lat: p.lat, lng: p.lng, etiqueta: `la parada ${p.nombre}` })}
+                onReintentar={abiertos.reintentar}
+              />
+
+              <ResultadosAbiertosAhora
+                estado={estadoAbiertos}
+                seleccionadoId={abiertoSeleccionado}
+                onSeleccionar={setAbiertoSeleccionado}
+              />
+            </section>
           )}
 
-          {/* Acciones finales */}
-          <div className="acciones">
-            <button
-              type="button"
-              className="btn-secundario"
-              onClick={() => irAPaso(3)}
-            >
-              Atrás
-            </button>
+          {seccion === "dormir" && (
+            <section className="paso4-seccion" aria-label="Dónde dormir y comer">
+              {/* Recomendaciones */}
+              <Recomendaciones
+                viaje={viaje}
+                itinerarios={itinerarios}
+                dia={dia}
+                mostrarHoteles={mostrarHoteles}
+              />
+            </section>
+          )}
 
-            <button
-              type="button"
-              className="btn-secundario"
-              onClick={regenerar}
-            >
-              Regenerar
-            </button>
+          {seccion === "ruta" && (
+            <section className="paso4-seccion" aria-label="En ruta">
+              {monitoreo.activo || monitoreo.propuesta ? (
+                <PropuestaClima
+                  estado={monitoreo.estado}
+                  nivel={monitoreo.evaluacion?.evaluacion?.nivel ?? null}
+                  senal={monitoreo.evaluacion?.evaluacion?.senalPrincipal ?? null}
+                  consultadoEn={monitoreo.evaluacion?.evaluacion?.consultadoEn ?? null}
+                  mensajeEvaluacion={monitoreo.evaluacion?.mensaje ?? null}
+                  error={monitoreo.error}
+                  proximaRevision={monitoreo.proximaRevision}
+                  estadoUbicacion={monitoreo.estadoUbicacion}
+                  propuesta={monitoreo.propuesta}
+                  obsoleta={monitoreo.propuestaObsoleta}
+                  aplicando={aplicandoClima}
+                  onVerificar={() => void monitoreo.verificar()}
+                  onCompartirUbicacion={monitoreo.compartirUbicacion}
+                  onDejarDeCompartir={monitoreo.dejarDeCompartir}
+                  onAceptar={() => void aceptarPropuestaDeClima()}
+                  onRechazar={monitoreo.descartarPropuesta}
+                />
+              ) : (
+                <p className="nota">El monitoreo del clima durante el recorrido se activa el día del itinerario mientras queden paradas pendientes.</p>
+              )}
 
-            <button
-           type="button"
-           className="btn-secundario"
-           disabled={exportando}
-           onClick={manejarExportarPlan}
-         >
-           {exportando ? "Exportando..." : "⬇ Exportar"}
-         </button>
+              <div className="acciones-ruta">
+                <button type="button" className="btn-secundario" disabled={reoptimizando || dia.paradas.length === 0}
+                  onClick={() => void solicitarReoptimizacion("retraso")}>
+                  {reoptimizando ? "Actualizando ruta…" : "Reportar retraso y recalcular"}
+                </button>
+              </div>
 
-            <button
-              type="button"
-              className="btn-primario"
-              disabled={guardando}
-              onClick={manejarGuardarPlan}
-            >
-              {guardando
-                ? "Guardando..."
-                : idGuardado
-                ? "✓ Plan guardado"
-                : "Guardar plan"}
-            </button>
-          </div>
+              {/* GUI-89: seguimiento manual del traslado y recálculo de ETA */}
+              {paradasEta.length > 0 && (
+                <section aria-label="Seguimiento del traslado">
+                  <button
+                    type="button"
+                    className="btn-secundario"
+                    onClick={() => {
+                      setInicioSeguimiento(Date.now());
+                      setTiempoActual(Date.now());
+                    }}
+                  >
+                    {inicioSeguimiento === null ? "Iniciar traslado" : "Reiniciar traslado"}
+                  </button>
 
-          <button
-            type="button"
-            className="enlace"
-            onClick={reiniciar}
-          >
-            Empezar un viaje nuevo
-          </button>
+                  {inicioSeguimiento === null ? (
+                    <p className="nota">Inicia el traslado para calcular el tiempo transcurrido.</p>
+                  ) : !trasladoDisponible ? (
+                    <p className="nota">
+                      No hay un tiempo de traslado previsto válido para calcular la ETA.
+                    </p>
+                  ) : (
+                    <>
+                    {trasladoEstimado && (
+                      <p className="nota">
+                        ETA aproximada: el itinerario no proporcionó un tiempo de traslado real.
+                        Se utiliza la estimación que aparece en «Traslado y margen de seguridad».
+                      </p>
+                    )}
+                    <PanelEta
+                      key={dia.id}
+                      onResultado={setEtaMapa}
+                      solicitud={{
+                        horaActual: new Date(tiempoActual).toISOString(),
+                        tiempoTranscurridoMinutos: Math.max(
+                          0,
+                          Math.floor((tiempoActual - inicioSeguimiento) / 60_000)
+                        ),
+                        tiempoTrasladoPrevistoMinutos: tiempoTrasladoActual!.minutos,
+                        // La primera ETA corresponde a la segunda parada.
+                        // Los siguientes tramos incluyen traslado desde la parada anterior.
+                        tramos: paradasEta.map((parada, indice) => {
+                          const traslado = indice > 0
+                            ? obtenerTiempoTraslado(parada, dia.paradas.indexOf(parada), viaje.transporte)
+                            : null;
+                          return {
+                            paradaId: parada.id,
+                            tiempoTrasladoMinutos: indice === 0 ? 0 : traslado?.minutos ?? 0,
+                            tiempoEstanciaMinutos: parada.tiempoEstanciaMinutos,
+                          };
+                        }),
+                      }}
+                    />
+                    </>
+                  )}
+                </section>
+              )}
+
+              {/* Telemetría GPS del recorrido */}
+              <PanelTelemetria />
+
+              {/* Presupuesto del día */}
+              <PanelPresupuesto
+                numeroDia={dia.numeroDia}
+                presupuestoDiario={presupuestoDiario}
+                gastosDelDia={gastos.filter((g) => g.numeroDia === dia.numeroDia)}
+                totalGastadoViaje={gastos.reduce((s, g) => s + g.monto, 0)}
+                presupuestoTotal={viaje.presupuesto}
+                onAgregar={agregarGasto}
+                onEliminar={eliminarGasto}
+              />
+            </section>
+          )}
+
+          <NavegacionPaso4 actual={seccion} mostrarHoteles={mostrarHoteles} onCambiar={cambiarSeccion} />
         </>
       )}
     </div>

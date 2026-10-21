@@ -450,3 +450,50 @@
 .punto-partida { margin: .8rem 0; }
 .marcador-partida { width: 1.1rem; height: 1.1rem; border: 3px solid #fff; border-radius: 50%; background: #2786a8; box-shadow: 0 0 0 6px rgba(39, 134, 168, .3); animation: pulso-partida 2s ease-in-out infinite; }
 @keyframes pulso-partida { 50% { box-shadow: 0 0 0 10px rgba(39, 134, 168, .12); } }
+
+/* GUI-110: paso 4 en secciones con navegación inferior (mobile-first) */
+:root { --alto-nav-inferior: calc(4.2rem + env(safe-area-inset-bottom, 0px)); }
+
+/* overflow: clip recorta igual que hidden pero no rompe la cabecera fija (sticky). */
+.card:has(.paso4-cabecera) { overflow: clip; }
+
+.paso4-cabecera {
+  position: sticky; top: 0; z-index: 6;
+  margin: 0 -1.5rem; padding: .7rem 1.5rem .2rem;
+  background: var(--papel); border-bottom: 1px solid var(--linea);
+}
+.paso4-titulo { margin: .2rem 0 0; font-size: clamp(1.2rem, 5vw, 1.6rem); }
+.paso4-cabecera .dias { margin-top: .6rem; flex-wrap: nowrap; scrollbar-width: none; }
+.paso4-cabecera .dias::-webkit-scrollbar { display: none; }
+.paso4-seccion { padding-top: .4rem; }
+
+/* El mapa ocupa casi toda la pantalla: lo que queda descontando cabecera y navegación. */
+.seccion-mapa .mapa-dia { margin-top: .6rem; }
+.seccion-mapa .mapa { height: max(320px, calc(100dvh - 12rem - var(--alto-nav-inferior))); }
+
+.nav-inferior {
+  position: fixed; left: 50%; bottom: 0; z-index: 15; transform: translateX(-50%);
+  width: min(560px, 100%); display: grid; grid-template-columns: repeat(4, 1fr);
+  padding: .35rem .4rem calc(.35rem + env(safe-area-inset-bottom, 0px));
+  border: 1px solid var(--linea); border-bottom: 0; border-radius: 18px 18px 0 0;
+  background: var(--papel); box-shadow: 0 -8px 24px -12px rgba(74, 53, 96, .35);
+}
+.nav-inferior-boton {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .2rem;
+  min-height: 3.4rem; padding: .3rem .2rem; border: 0; border-radius: 12px;
+  background: transparent; color: var(--suave); cursor: pointer;
+  font: 600 .72rem/1.1 var(--font-ui); letter-spacing: .04em; text-transform: uppercase; text-align: center;
+}
+.nav-inferior-boton svg { width: 1.5rem; height: 1.5rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.nav-inferior-boton[aria-current="page"] { color: var(--ciruela); background: var(--arena); }
+.nav-inferior-boton:focus-visible { outline: 3px solid var(--agua-osc); outline-offset: -3px; }
+
+/* Con la navegación inferior visible, el contenido y el chat flotante no quedan debajo de ella. */
+body:has(.nav-inferior) .contenedor { padding-bottom: calc(var(--alto-nav-inferior) + 1.5rem); }
+body:has(.nav-inferior) .chat { bottom: calc(var(--alto-nav-inferior) + .8rem); }
+
+@media (max-width: 480px) {
+  .contenedor { width: calc(100% - 1rem); }
+  .card { padding: 1.5rem 1rem 1rem; }
+  .paso4-cabecera { margin: 0 -1rem; padding-inline: 1rem; }
+}
