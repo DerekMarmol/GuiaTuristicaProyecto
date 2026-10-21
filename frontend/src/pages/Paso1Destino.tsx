@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type MouseEvent } from "react";
 import { useViaje } from "../context/ViajeContext";
 import Stepper from "../components/Stepper";
 
@@ -14,6 +14,17 @@ function hoyISO() {
   const mes = String(d.getMonth() + 1).padStart(2, "0");
   const dia = String(d.getDate()).padStart(2, "0");
   return `${d.getFullYear()}-${mes}-${dia}`;
+}
+
+// GUI-109: en Chrome (incluida la vista de teléfono de DevTools) tocar el campo solo selecciona el día o el
+// mes para escribirlo; el calendario abre únicamente desde el icono pequeño. Se abre al tocar cualquier
+// parte del campo. Escribir la fecha con el teclado sigue funcionando.
+function abrirCalendario(evento: MouseEvent<HTMLInputElement>) {
+  try {
+    evento.currentTarget.showPicker?.();
+  } catch {
+    // El navegador puede rechazarlo (por ejemplo, dentro de un iframe); el campo sigue funcionando.
+  }
 }
 
 export default function Paso1Destino() {
@@ -69,6 +80,7 @@ export default function Paso1Destino() {
             type="date"
             min={hoy}
             value={fechaInicio}
+            onClick={abrirCalendario}
             onChange={(e) => {
               setFechaInicio(e.target.value);
               if (fechaFin && e.target.value > fechaFin) setFechaFin("");
@@ -84,6 +96,7 @@ export default function Paso1Destino() {
             type="date"
             min={fechaInicio || hoy}
             value={fechaFin}
+            onClick={abrirCalendario}
             onChange={(e) => setFechaFin(e.target.value)}
             aria-invalid={!!errores.fechaFin}
           />
