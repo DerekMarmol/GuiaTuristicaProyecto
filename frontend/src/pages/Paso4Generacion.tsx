@@ -117,6 +117,7 @@ export default function Paso4Generacion() {
     viaje,
     itinerarios,
     setItinerarios,
+    fijarUbicacionDestino,
     irAPaso,
     reiniciar,
     calificaciones,
@@ -133,6 +134,7 @@ export default function Paso4Generacion() {
   );
   const [progreso, setProgreso] = useState(0);
   const [error, setError] = useState("");
+  const [advertencias, setAdvertencias] = useState<string[]>([]);
   const [intento, setIntento] = useState(0);
   const [diaActivo, setDiaActivo] = useState(0);
   const [votos, setVotos] = useState<Record<string, Voto>>({});
@@ -282,29 +284,34 @@ async function manejarExportarPlan() {
       return;
     }
 
-    let cancelado = false;
+    // Abortar la solicitud si el paso se desmonta o se regenera evita pagar dos veces la generación.
+    const controlador = new AbortController();
+    const cancelado = () => controlador.signal.aborted;
 
     setFase("generando");
     setProgreso(0);
     setError("");
+    setAdvertencias([]);
 
     generarItinerario(viaje, (n) => {
-      if (!cancelado) {
+      if (!cancelado()) {
         setProgreso(n);
       }
-    })
+    }, controlador.signal)
       .then((resultado) => {
-        if (cancelado) return;
+        if (cancelado()) return;
 
-        setItinerarios(resultado);
+        setItinerarios(resultado.itinerarios);
+        fijarUbicacionDestino(resultado.destino.lat, resultado.destino.lng);
+        setAdvertencias(resultado.advertencias);
         // TODO(backend): cargar los gastos reales (Lucía) en lugar de simularlos.
-        setGastos(generarGastosSimulados(resultado, presupuestoDiario));
+        setGastos(generarGastosSimulados(resultado.itinerarios, presupuestoDiario));
         setDiaActivo(0);
         setVotos({});
         setFase("listo");
       })
       .catch((err) => {
-        if (cancelado) return;
+        if (cancelado()) return;
 
         setError(
           err instanceof Error
@@ -314,9 +321,7 @@ async function manejarExportarPlan() {
         setFase("error");
       });
 
-    return () => {
-      cancelado = true;
-    };
+    return () => controlador.abort();
   }, [intento]);
 
   // Pronóstico de OpenWeather: una sola consulta para todas las fechas del itinerario
@@ -409,8 +414,9 @@ async function manejarExportarPlan() {
 
   // GUI-89: tomar el tiempo real del itinerario cuando existe.
   // Si no viene informado, reutilizar la misma estimación visual de GUI-34.
+  // Cada parada guarda el traslado desde la anterior: el primer tramo es el de la segunda parada.
   const tiempoTrasladoActual = dia?.paradas.length && dia.paradas.length > 1
-    ? obtenerTiempoTraslado(dia.paradas[0], 0, viaje.transporte)
+    ? obtenerTiempoTraslado(dia.paradas[1], 1, viaje.transporte)
     : null;
   const trasladoDisponible = tiempoTrasladoActual !== null;
   const trasladoEstimado = tiempoTrasladoActual?.estimado ?? false;
@@ -622,6 +628,10 @@ async function manejarExportarPlan() {
         <>
           <h2>Tu itinerario para {viaje.destino}</h2>
 
+          {advertencias.map((texto) => (
+            <p key={texto} className="nota">{texto}</p>
+          ))}
+
           {avisoReoptimizacion && (
             <p className={reoptimizando || avisoReoptimizacion.startsWith("El plan") ? "aviso-plan-actualizado" : "aviso-error"} role="status" aria-live="polite">
               {reoptimizando ? "Actualizando el plan…" : avisoReoptimizacion}
@@ -815,9 +825,8 @@ async function manejarExportarPlan() {
                     // La primera ETA corresponde a la segunda parada.
                     // Los siguientes tramos incluyen traslado desde la parada anterior.
                     tramos: dia.paradas.slice(1).map((parada, indice) => {
-                      const origen = indice > 0 ? dia.paradas[indice] : null;
-                      const traslado = origen
-                        ? obtenerTiempoTraslado(origen, indice, viaje.transporte)
+                      const traslado = indice > 0
+                        ? obtenerTiempoTraslado(parada, indice + 1, viaje.transporte)
                         : null;
                       return {
                         paradaId: parada.id,
@@ -875,10 +884,13 @@ async function manejarExportarPlan() {
 
                       <p>
                         Abre {p.horaApertura} ·
-                        Cierra {p.horaCierre} ·
+                        Cierra {p.horaCierre}
+                        {paradaHorario.horarioEstimado && " (horario estimado)"} ·
                         Estancia{" "}
                         {p.tiempoEstanciaMinutos} min
                       </p>
+
+                      {paradaHorario.motivo && <p className="nota">{paradaHorario.motivo}</p>}
 
                       {!descartada && !visitada && (
                         <button type="button" className="accion-parada" onClick={() => marcarVisitada(dia.id, p.id)}>
@@ -970,16 +982,18 @@ async function manejarExportarPlan() {
                   {i < dia.paradas.length - 1 &&
                     !descartada &&
                     (() => {
+                      // El tramo hacia la siguiente parada está guardado en esa parada.
+                      const siguiente = dia.paradas[i + 1];
                       const h =
-                        (p as any).holgura ||
-                        (p as any).desgloseHolgura ||
-                        (p as any).traslado?.holgura;
+                        (siguiente as any).holgura ||
+                        (siguiente as any).desgloseHolgura ||
+                        (siguiente as any).traslado?.holgura;
 
                       const desglose = h?.desgloseHolgura;
 
                       const tipoDetectado = String(
                         h?.tipoTraslado ||
-                          (p as any).tipoTraslado ||
+                          (siguiente as any).tipoTraslado ||
                           viaje.transporte ||
                           ""
                       ).toLowerCase();
@@ -1012,8 +1026,8 @@ async function manejarExportarPlan() {
                         TRANSPORTE_CONFIG[modoKey] ||
                         TRANSPORTE_CONFIG.auto;
 
-                      const semillaId = p.id
-                        ? p.id
+                      const semillaId = siguiente.id
+                        ? siguiente.id
                             .split("")
                             .reduce(
                               (
@@ -1048,8 +1062,8 @@ async function manejarExportarPlan() {
 
                       const tiempoBase =
                         h?.tiempoBaseMinutos ??
-                        (p as any).tiempoTrasladoMinutos ??
-                        obtenerTiempoTraslado(p, i, viaje.transporte)?.minutos ??
+                        (siguiente as any).tiempoTrasladoMinutos ??
+                        obtenerTiempoTraslado(siguiente, i + 1, viaje.transporte)?.minutos ??
                         baseSugerida;
 
                       const tiempoAdicionalDefault =

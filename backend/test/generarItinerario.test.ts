@@ -19,6 +19,8 @@ interface ParadaRespuesta {
   lat: number;
   lng: number;
   llegada: string;
+  horaApertura?: string;
+  horaCierre?: string;
   categorias?: string[];
   tipo_entorno?: string;
   horarioEstimado: boolean;
@@ -204,8 +206,14 @@ describe("POST /api/itinerarios/generar", () => {
       assert.deepEqual(parada.categorias, real.categories);
       assert.ok(parada.tipo_entorno, "trae la clasificación climática");
       assert.equal(parada.horarioEstimado, real.opening_hours === undefined);
+      assert.match(parada.horaApertura ?? "", /^\d{2}:\d{2}$/, "toda parada trae la apertura del día");
+      assert.match(parada.horaCierre ?? "", /^\d{2}:\d{2}$/, "toda parada trae el cierre del día");
     }
     assert.ok(paradas.some((p) => p.placeId.startsWith("pb-playa")), "incluye una playa");
+    const conHorarioReal = paradas.find((p) => p.placeId === "pb-restaurante");
+    if (conHorarioReal) {
+      assert.deepEqual([conHorarioReal.horaApertura, conHorarioReal.horaCierre], ["07:00", "21:00"]);
+    }
     assert.ok(cuerpo.advertencias.some((a) => a.includes("se usó uno típico")));
   });
 
