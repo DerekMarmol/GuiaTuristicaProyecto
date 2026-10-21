@@ -7,6 +7,8 @@ import { ErrorApi } from "../errores";
 import type { BuscarLugares } from "../geoapify/cliente";
 import type { EnriquecerHorarios } from "../geoapify/enriquecer";
 import type { DestinoGeocodificado, Geocodificar } from "../geoapify/geocodificacion";
+import { ventanasDelDia } from "../geoapify/horario";
+import { minutosDesdeHora } from "../ai/validacionEstancia";
 import type { SolicitudGeneracion } from "../validacion/generacion";
 import { buscarCandidatos, type Candidato } from "./candidatos";
 import { planificarSinIA } from "./planRespaldo";
@@ -34,20 +36,43 @@ export interface ItinerarioGenerado {
 
 export type GenerarItinerario = (solicitud: SolicitudGeneracion) => Promise<ItinerarioGenerado>;
 
+function aHora(minutos: number): string {
+  const acotados = Math.min(minutos, 23 * 60 + 59);
+  return `${String(Math.floor(acotados / 60)).padStart(2, "0")}:${String(acotados % 60).padStart(2, "0")}`;
+}
+
+// Apertura y cierre del día de la visita, a partir del horario publicado: el frontend (tarjeta, mapa y
+// monitoreo del clima) muestra un par de horas, no la regla completa de OpenStreetMap.
+function horarioDelDia(parada: ItinerarioIA["paradas"][number], fecha: string): { horaApertura?: string; horaCierre?: string } {
+  if (parada.horaApertura && parada.horaCierre) {
+    return {};
+  }
+  const [anio, mes, dia] = fecha.split("-").map(Number);
+  const resultado = ventanasDelDia(parada.horario, { anio, mes, dia });
+  if (resultado.estado !== "disponible" || resultado.ventanas.length === 0) {
+    return {};
+  }
+  const llegada = minutosDesdeHora(parada.llegada.slice(11, 16));
+  const ventana =
+    resultado.ventanas.find((v) => v.inicioMinutos <= llegada && llegada < v.finMinutos) ?? resultado.ventanas[0];
+  return { horaApertura: aHora(ventana.inicioMinutos), horaCierre: aHora(ventana.finMinutos) };
+}
+
 // Agrega a cada parada la clasificación climática del lugar, que el frontend usa para el monitoreo del clima,
-// y si su horario es estimado, para que el frontend pida confirmarlo.
+// su horario del día y si ese horario es estimado, para que el frontend pida confirmarlo.
 function completarParadas(itinerarios: ItinerarioIA[], candidatos: Candidato[]): ItinerarioGeneradoDia[] {
   const porId = new Map(candidatos.map((c) => [c.placeId, c]));
   return itinerarios.map((it) => ({
     ...it,
     paradas: it.paradas.map((parada) => {
       const candidato = porId.get(parada.placeId);
+      const base = { ...parada, ...horarioDelDia(parada, it.fecha) };
       if (!candidato) {
-        return { ...parada, horarioEstimado: false };
+        return { ...base, horarioEstimado: false };
       }
       const { lugar } = candidato;
       return {
-        ...parada,
+        ...base,
         categorias: lugar.categorias,
         tipo_entorno: lugar.tipo_entorno,
         sensibilidad_clima: lugar.sensibilidad_clima,

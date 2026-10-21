@@ -20,6 +20,7 @@ interface ViajeContextValue {
   agregarGasto: (g: Omit<Gasto, "id">) => void;
   eliminarGasto: (id: string) => void;
   actualizarViaje: (datos: ViajeBorrador) => void;
+  fijarUbicacionDestino: (lat: number, lng: number) => void;
   irAPaso: (paso: number) => void;
   setItinerarios: Dispatch<SetStateAction<Itinerario[] | null>>;
   reiniciar: () => void;
@@ -64,6 +65,10 @@ export function ViajeProvider({ children }: { children: ReactNode }) {
     setItinerarios(null); // si cambian los datos, el itinerario anterior ya no sirve
   };
 
+  // Coordenadas del destino que resuelve el backend al generar. No toca el itinerario recién creado.
+  const fijarUbicacionDestino = (lat: number, lng: number) =>
+    setViaje((anterior) => ({ ...anterior, lat, lng }));
+
   const reiniciar = () => {
     setViaje({});
     setItinerarios(null);
@@ -76,7 +81,7 @@ export function ViajeProvider({ children }: { children: ReactNode }) {
         viaje, paso, itinerarios,
         calificaciones, guardarCalificacion,
         gastos, setGastos, agregarGasto, eliminarGasto,
-        actualizarViaje, irAPaso: setPaso, setItinerarios, reiniciar,
+        actualizarViaje, fijarUbicacionDestino, irAPaso: setPaso, setItinerarios, reiniciar,
       }}
     >
       {children}
