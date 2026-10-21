@@ -1,98 +1,152 @@
-import type { Itinerario } from "../../../shared/types";
+import type {
+  Itinerario,
+  RespuestaRecomendacionesHoteles,
+  RespuestaRecomendacionesRestaurantes,
+  Viaje,
+} from "../../../shared/types";
 import type { ViajeBorrador } from "../context/ViajeContext";
-import type { Lugar } from "../types/recomendacion";
-import { centroide, distanciaKm } from "../utils/distancia";
+import type { HotelRecomendacion, RecomendacionesHoteles, RecomendacionesRestaurantes, RestauranteRecomendacion } from "../types/recomendacion";
 
-export const PORCENTAJE_HOTEL = 0.4;
-export const PORCENTAJE_COMIDA = 0.15;
+const PRESUPUESTO_DIARIO_POR_DEFECTO = 500;
+// El backend acepta hasta 25 paradas para ubicar el centro de los hoteles.
+const MAX_PARADAS_HOTELES = 25;
 
-export function limitesPresupuesto(presupuestoDiario?: number) {
-  if (!presupuestoDiario) return { hotel: Infinity, comida: Infinity };
+// Personas por habitación (hoteles) y por mesa (restaurantes) según con quién viaja.
+const PERSONAS_POR_TIPO: Record<Viaje["tipoViaje"], number> = { solo: 1, pareja: 2, familia: 4, amigos: 3 };
+
+export function personasDelViaje(tipoViaje: ViajeBorrador["tipoViaje"]): number {
+  return tipoViaje ? PERSONAS_POR_TIPO[tipoViaje] : 1;
+}
+
+function presupuestoDiario(viaje: ViajeBorrador): number {
+  return viaje.presupuestoDiario && viaje.presupuestoDiario > 0 ? viaje.presupuestoDiario : PRESUPUESTO_DIARIO_POR_DEFECTO;
+}
+
+async function consultar<T>(ruta: string, cuerpo: unknown, signal: AbortSignal | undefined, errorPorDefecto: string): Promise<T> {
+  let respuesta: Response;
+  try {
+    respuesta = await fetch(ruta, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(cuerpo),
+      signal,
+    });
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    throw new Error("No se pudo conectar con el servidor. Inténtalo de nuevo en unos segundos.");
+  }
+  const datos = await respuesta.json().catch(() => null);
+  if (!respuesta.ok) {
+    throw new Error(datos?.error?.mensaje ?? errorPorDefecto);
+  }
+  return datos as T;
+}
+
+const aKm = (metros: number) => Math.round(metros / 100) / 10;
+
+// El backend explica con términos técnicos por qué no hay hoteles; aquí se dice qué puede hacer el usuario.
+function mensajeSinHoteles(respuesta: RespuestaRecomendacionesHoteles): string | null {
+  switch (respuesta.motivo) {
+    case null:
+      return null;
+    case "sin_hoteles_en_presupuesto":
+      return `Ningún hotel cercano baja de Q ${respuesta.presupuestoHospedaje.toLocaleString("es-GT")} por noche. Puedes subir tu presupuesto diario en el paso 3.`;
+    case "sin_hoteles_encontrados":
+    case "sin_hoteles_con_precio":
+    case "sin_hoteles_en_radio":
+      return "No encontramos hoteles con precio publicado cerca de tu ruta.";
+    default:
+      return respuesta.mensaje;
+  }
+}
+
+// Hoteles cerca del centro de todo el itinerario para la primera noche. El backend ya filtra por el
+// 40 % del presupuesto diario, así que todo lo que devuelve entra en el presupuesto.
+export async function buscarHoteles(
+  viaje: ViajeBorrador,
+  itinerarios: Itinerario[],
+  signal?: AbortSignal
+): Promise<RecomendacionesHoteles> {
+  const respuesta = await consultar<RespuestaRecomendacionesHoteles>(
+    "/api/hoteles/recomendaciones",
+    {
+      fecha: itinerarios[0]?.fecha ?? viaje.fechaInicio,
+      destino: viaje.destino,
+      paradas: itinerarios.flatMap((it) => it.paradas).slice(0, MAX_PARADAS_HOTELES).map(({ lat, lng }) => ({ lat, lng })),
+      presupuestoDiario: presupuestoDiario(viaje),
+      moneda: "GTQ",
+      ocupacion: personasDelViaje(viaje.tipoViaje),
+      hospedaje: viaje.hospedaje ?? false,
+      sinHotel: viaje.sinHotel ?? false,
+    },
+    signal,
+    "No se pudieron consultar los hoteles."
+  );
+
+  const hoteles: HotelRecomendacion[] = respuesta.hoteles.map((h) => ({
+    id: h.idExterno,
+    nombre: h.nombre,
+    lat: h.lat,
+    lng: h.lng,
+    precio: Math.round(h.tarifa.importe),
+    distanciaKm: aKm(h.distanciaLineaRectaMetros),
+  }));
   return {
-    hotel: Math.round(presupuestoDiario * PORCENTAJE_HOTEL),
-    comida: Math.round(presupuestoDiario * PORCENTAJE_COMIDA),
+    hoteles: hoteles.sort((a, b) => a.distanciaKm - b.distanciaKm),
+    presupuestoHospedaje: respuesta.presupuestoHospedaje,
+    personas: respuesta.ocupacion,
+    mensaje: mensajeSinHoteles(respuesta),
   };
 }
 
-interface Plantilla {
-  nombre: string;
-  descripcion: string;
-  precio: number;
-  calificacion: number;
-  dLat: number;
-  dLng: number;
-}
+// Restaurantes cerca de las paradas de un día. Un mismo restaurante puede quedar cerca de varias
+// paradas: se muestra una vez, con la parada más cercana.
+export async function buscarRestaurantes(
+  viaje: ViajeBorrador,
+  dia: Itinerario,
+  signal?: AbortSignal
+): Promise<RecomendacionesRestaurantes> {
+  const respuesta = await consultar<RespuestaRecomendacionesRestaurantes>(
+    "/api/restaurantes/recomendaciones",
+    {
+      fecha: dia.fecha,
+      paradas: dia.paradas.map(({ id, lat, lng }) => ({ id, lat, lng })),
+      presupuestoDiario: presupuestoDiario(viaje),
+      moneda: "GTQ",
+      comensales: personasDelViaje(viaje.tipoViaje),
+    },
+    signal,
+    "No se pudieron consultar los restaurantes."
+  );
 
-// Datos de ejemplo. Se reemplazan por los lugares reales cuando el backend esté listo.
-const HOTELES: Plantilla[] = [
-  { nombre: "Hotel Casa Colonial {d}", descripcion: "Patio interior y desayuno incluido.", precio: 420, calificacion: 4.7, dLat: 0.003, dLng: -0.002 },
-  { nombre: "Posada del Centro", descripcion: "Habitaciones sencillas a pasos de la plaza.", precio: 160, calificacion: 4.3, dLat: -0.002, dLng: 0.003 },
-  { nombre: "Hostal Viajero", descripcion: "Dormitorios y cuartos privados, ambiente social.", precio: 90, calificacion: 4.1, dLat: 0.004, dLng: 0.002 },
-  { nombre: "Hotel Plaza Mayor", descripcion: "Servicio completo con restaurante y estacionamiento.", precio: 580, calificacion: 4.5, dLat: -0.004, dLng: -0.003 },
-  { nombre: "Boutique Los Arcos", descripcion: "Diseño local y terraza con vista.", precio: 720, calificacion: 4.8, dLat: 0.001, dLng: -0.005 },
-  { nombre: "Casa de Huéspedes Ana", descripcion: "Hospedaje familiar con cocina compartida.", precio: 130, calificacion: 4.4, dLat: -0.006, dLng: 0.001 },
-];
-
-const RESTAURANTES: Plantilla[] = [
-  { nombre: "Comedor Doña Marta", descripcion: "Comida casera del día.", precio: 35, calificacion: 4.4, dLat: 0, dLng: 0 },
-  { nombre: "Café del Parque", descripcion: "Desayunos y café de la región.", precio: 55, calificacion: 4.3, dLat: 0, dLng: 0 },
-  { nombre: "Cocina Tradicional {d}", descripcion: "Platillos típicos en una casa colonial.", precio: 80, calificacion: 4.6, dLat: 0, dLng: 0 },
-  { nombre: "Parrilla El Fogón", descripcion: "Carnes a la leña y guarniciones.", precio: 120, calificacion: 4.2, dLat: 0, dLng: 0 },
-  { nombre: "Terraza Mirador", descripcion: "Cena con vista a la ciudad.", precio: 160, calificacion: 4.5, dLat: 0, dLng: 0 },
-  { nombre: "Mesa Contemporánea", descripcion: "Menú de autor con ingredientes locales.", precio: 220, calificacion: 4.7, dLat: 0, dLng: 0 },
-  { nombre: "Tacos y Antojitos", descripcion: "Antojitos para comer de paso.", precio: 28, calificacion: 4.0, dLat: 0, dLng: 0 },
-  { nombre: "Pizzería de la Plaza", descripcion: "Pizza al horno de leña.", precio: 70, calificacion: 4.1, dLat: 0, dLng: 0 },
-];
-
-// Posiciones (en grados) alrededor del centro del día donde caen los restaurantes de ejemplo.
-const OFFSETS_REST = [
-  [0.0015, 0.001],
-  [-0.0012, 0.002],
-  [0.002, -0.0015],
-  [-0.002, -0.001],
-  [0.0008, 0.0028],
-];
-const RESTAURANTES_POR_DIA = OFFSETS_REST.length;
-
-export function construirRecomendaciones(viaje: ViajeBorrador, itinerarios: Itinerario[]): Lugar[] {
-  const destino = viaje.destino ?? "tu destino";
-  const nombre = (t: string) => t.replace("{d}", destino);
-  const todas = itinerarios.flatMap((it) => it.paradas);
-  const centroViaje = centroide(todas);
-  const lugares: Lugar[] = [];
-
-  HOTELES.forEach((h, i) => {
-    const punto = { lat: centroViaje.lat + h.dLat, lng: centroViaje.lng + h.dLng };
-    lugares.push({
-      id: `hotel-${i + 1}`,
-      tipo: "hotel",
-      nombre: nombre(h.nombre),
-      descripcion: h.descripcion,
-      ...punto,
-      precio: h.precio,
-      calificacion: h.calificacion,
-      distanciaKm: distanciaKm(centroViaje, punto),
-    });
-  });
-
-  itinerarios.forEach((it) => {
-    const centroDia = centroide(it.paradas);
-    for (let k = 0; k < RESTAURANTES_POR_DIA; k++) {
-      const r = RESTAURANTES[((it.numeroDia - 1) * 3 + k) % RESTAURANTES.length];
-      const punto = { lat: centroDia.lat + OFFSETS_REST[k][0], lng: centroDia.lng + OFFSETS_REST[k][1] };
-      lugares.push({
-        id: `rest-${it.numeroDia}-${k + 1}`,
-        tipo: "restaurante",
-        nombre: nombre(r.nombre),
-        descripcion: r.descripcion,
-        ...punto,
-        precio: r.precio,
-        calificacion: r.calificacion,
-        distanciaKm: distanciaKm(centroDia, punto),
-        dia: it.numeroDia,
-      });
+  const nombreParada = new Map(dia.paradas.map((p) => [p.id, p.nombre]));
+  const porId = new Map<string, RestauranteRecomendacion>();
+  for (const parada of respuesta.paradas) {
+    for (const r of parada.restaurantes) {
+      const candidato: RestauranteRecomendacion = {
+        id: r.idExterno,
+        nombre: r.nombre,
+        lat: r.lat,
+        lng: r.lng,
+        precioMinimo: r.tarifaReferencial.minimo,
+        precioMaximo: r.tarifaReferencial.maximo,
+        distanciaKm: aKm(r.distanciaLineaRectaMetros),
+        cercaDe: nombreParada.get(parada.id) ?? null,
+      };
+      const actual = porId.get(r.idExterno);
+      if (!actual || candidato.distanciaKm < actual.distanciaKm) {
+        porId.set(r.idExterno, candidato);
+      }
     }
-  });
+  }
 
-  return lugares;
+  const fallidas = respuesta.paradas.filter((p) => p.estado === "fallida").length;
+  const sinResultados = respuesta.paradas.find((p) => p.mensaje)?.mensaje ?? null;
+  return {
+    restaurantes: [...porId.values()].sort((a, b) => a.distanciaKm - b.distanciaKm),
+    presupuestoPorPersona: respuesta.presupuestoPorPersona,
+    personas: respuesta.comensales,
+    mensaje: respuesta.mensaje ?? (porId.size === 0 ? sinResultados : null),
+    incompleto: fallidas > 0,
+  };
 }

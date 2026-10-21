@@ -1128,7 +1128,7 @@ El resultado depende del pronóstico real. Si OpenWeather indica lluvia para la 
 
 ## Endpoint `POST /api/hoteles/recomendaciones`
 
-Recomienda hoteles cercanos a la zona del itinerario de **un día** cuyo precio referencial, convertido a quetzales, no supera el 40 % del presupuesto diario. Los hoteles y sus precios provienen de [SerpApi Google Hotels API](https://serpapi.com/google-hotels-api) (motor `google_hotels`) y la tasa USD → GTQ, del [endpoint estándar de ExchangeRate-API](https://www.exchangerate-api.com/docs/standard-requests) (plan gratuito con clave). No reserva, no cobra, no comprueba disponibilidad, no guarda nada y el frontend todavía no lo consume.
+Recomienda hoteles cercanos a la zona del itinerario de **un día** cuyo precio referencial, convertido a quetzales, no supera el 40 % del presupuesto diario. Los hoteles y sus precios provienen de [SerpApi Google Hotels API](https://serpapi.com/google-hotels-api) (motor `google_hotels`) y la tasa USD → GTQ, del [endpoint estándar de ExchangeRate-API](https://www.exchangerate-api.com/docs/standard-requests) (plan gratuito con clave). No reserva, no cobra, no comprueba disponibilidad ni guarda nada. Lo consume la pestaña «Hoteles» del paso 4 del frontend, para la primera noche y con todas las paradas del viaje.
 
 > **El precio es referencial.** Es el importe estructurado que publica Google Hotels a través de SerpApi en el momento de la consulta: puede estar redondeado, cambiar después de la consulta o diferir del importe final de una reserva. El filtro del 40 % garantiza que el **importe referencial convertido** no supera el presupuesto de hospedaje; no garantiza el cargo final.
 
@@ -1563,7 +1563,7 @@ Las pruebas automáticas simulan ambos proveedores y no usan claves reales ni co
 
 ## Endpoint `POST /api/restaurantes/recomendaciones`
 
-Recomienda restaurantes cercanos a **cada parada** del itinerario de un día cuyo costo referencial de **una comida principal** para el grupo no supera el 30 % del presupuesto diario. Los establecimientos provienen de [Geoapify Places API](https://apidocs.geoapify.com/docs/places/) y los precios, de un catálogo propio de rangos estadísticos en quetzales construido con fuentes públicas (Numbeo y Preciosmundi). No reserva, no cobra, no hace pedidos, no guarda nada y el frontend todavía no lo consume.
+Recomienda restaurantes cercanos a **cada parada** del itinerario de un día cuyo costo referencial de **una comida principal** para el grupo no supera el 30 % del presupuesto diario. Los establecimientos provienen de [Geoapify Places API](https://apidocs.geoapify.com/docs/places/) y los precios, de un catálogo propio de rangos estadísticos en quetzales construido con fuentes públicas (Numbeo y Preciosmundi). No reserva, no cobra, no hace pedidos ni guarda nada. Lo consume la pestaña «Restaurantes» del paso 4 del frontend, una vez por día del itinerario.
 
 > **Los precios son referenciales.** Ningún restaurante publica su precio a través de Geoapify. Cada establecimiento recibe un **rango de mercado** según su categoría, no su menú. El filtro garantiza que el **costo referencial máximo** del grupo no supera el presupuesto de alimentación; no garantiza el importe real de la cuenta.
 
