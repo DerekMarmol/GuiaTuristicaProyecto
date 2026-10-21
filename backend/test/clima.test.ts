@@ -997,3 +997,36 @@ describe("GET /api/clima/pronostico - configuración", () => {
     }
   });
 });
+
+describe("GET /api/clima/actual", () => {
+  interface CuerpoActual {
+    observadoEn: string;
+    temperaturaC: number | null;
+    descripcion: string | null;
+    lluvia1hMm: number | null;
+    error?: { codigo: string };
+  }
+
+  test("devuelve la temperatura observada ahora en las coordenadas pedidas", async () => {
+    simular(() => respuestaJson({ dt: 1792360800, timezone: -21600, weather: [{ id: 803, description: "nubes rotas" }], main: { temp: 29.2 } }));
+
+    const resultado = await consultar<CuerpoActual>("/api/clima/actual?lat=15.7275&lng=-88.5952");
+
+    assert.equal(resultado.estado, 200);
+    assert.equal(llamadas[0].url.origin + llamadas[0].url.pathname, "https://api.openweathermap.org/data/2.5/weather");
+    assert.equal(llamadas[0].url.searchParams.get("lat"), "15.7275");
+    assert.deepEqual(
+      { ...resultado.cuerpo, ubicacion: undefined },
+      { ubicacion: undefined, observadoEn: "2026-10-18T22:00:00.000Z", temperaturaC: 29.2, descripcion: "nubes rotas", lluvia1hMm: null },
+    );
+    verificarSinSecretos(resultado.texto);
+  });
+
+  test("valida las coordenadas", async () => {
+    const resultado = await consultar<CuerpoActual>("/api/clima/actual?lat=100");
+
+    assert.equal(resultado.estado, 400);
+    assert.equal(resultado.cuerpo.error?.codigo, "PARAMETRO_INVALIDO");
+    assert.equal(llamadas.length, 0);
+  });
+});

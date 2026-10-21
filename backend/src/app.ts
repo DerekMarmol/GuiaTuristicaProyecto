@@ -23,6 +23,7 @@ import { crearClienteOptimizador } from "./optimizador/cliente";
 import { crearRutaClimaReactivo } from "./routes/climaReactivo";
 import { crearServicioClima } from "./clima/servicio";
 import { crearRutaPronosticoClima } from "./routes/pronosticoClima";
+import { crearRutaClimaActual } from "./routes/climaActual";
 import { crearRecomendadorHoteles } from "./hoteles/recomendaciones";
 import { crearBuscadorHoteles } from "./hoteles/serpapi";
 import { crearObtenedorTipoCambio } from "./hoteles/tipoCambio";
@@ -160,15 +161,18 @@ export function crearApp({
 
   app.register(crearRutaPronosticoClima(consultarClima), { prefix: "/api/clima/pronostico" });
 
+  const obtenerClimaActual = crearClienteClimaActual({
+    apiKey: clima.apiKey === undefined ? process.env.OPENWEATHER_API_KEY : clima.apiKey,
+    fetch: clima.fetch,
+    tiempoEsperaMs: clima.tiempoEsperaMs,
+  });
+  app.register(crearRutaClimaActual(obtenerClimaActual), { prefix: "/api/clima/actual" });
+
   const configClimaReactivo = climaReactivo.configuracion ?? leerConfiguracionClimaReactivo();
   const ahoraClimaReactivo = climaReactivo.ahora ?? clima.ahora ?? (() => new Date());
   const servicioClimaReactivo = crearServicioClimaReactivo({
     obtenerClima: crearObtenedorClima({
-      obtenerClimaActual: crearClienteClimaActual({
-        apiKey: clima.apiKey === undefined ? process.env.OPENWEATHER_API_KEY : clima.apiKey,
-        fetch: clima.fetch,
-        tiempoEsperaMs: clima.tiempoEsperaMs,
-      }),
+      obtenerClimaActual,
       obtenerPronostico,
       vigenciaMs: configClimaReactivo.vigenciaCacheClimaMs,
       ahora: ahoraClimaReactivo,

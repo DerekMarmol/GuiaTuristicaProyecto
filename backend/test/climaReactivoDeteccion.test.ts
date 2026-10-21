@@ -16,7 +16,7 @@ const UBICACION = { lat: 14.5586, lng: -90.7295, fuente: "proxima_parada" as con
 function actual(codigo: number, cambios: Partial<ClimaActual> = {}): Resultado<ClimaActual> {
   return {
     ok: true,
-    valor: { dt: AHORA_S - 300, desplazamientoUtcSegundos: OFFSET, codigosClima: [codigo], descripcion: "prueba", lluvia1hMm: null, ...cambios },
+    valor: { dt: AHORA_S - 300, desplazamientoUtcSegundos: OFFSET, codigosClima: [codigo], descripcion: "prueba", lluvia1hMm: null, temperaturaC: null, ...cambios },
   };
 }
 
@@ -262,8 +262,9 @@ describe("control de frecuencia de consultas", () => {
 
 describe("respuestas de OpenWeather", () => {
   test("interpreta el clima actual con código, zona horaria y lluvia de una hora", () => {
-    const clima = interpretarClimaActual({ dt: 1792387817, timezone: -21600, weather: [{ id: 500, description: "lluvia ligera" }], rain: { "1h": 0.24 } });
-    assert.deepEqual(clima, { dt: 1792387817, desplazamientoUtcSegundos: -21600, codigosClima: [500], descripcion: "lluvia ligera", lluvia1hMm: 0.24 });
+    const clima = interpretarClimaActual({ dt: 1792387817, timezone: -21600, weather: [{ id: 500, description: "lluvia ligera" }], rain: { "1h": 0.24 }, main: { temp: 28.6 } });
+    assert.deepEqual(clima, { dt: 1792387817, desplazamientoUtcSegundos: -21600, codigosClima: [500], descripcion: "lluvia ligera", lluvia1hMm: 0.24, temperaturaC: 28.6 });
+    assert.equal(interpretarClimaActual({ dt: 1, timezone: 0, weather: [] }).temperaturaC, null);
     assert.equal(interpretarClimaActual({ dt: 1, timezone: 0, weather: [] }).lluvia1hMm, null);
   });
 

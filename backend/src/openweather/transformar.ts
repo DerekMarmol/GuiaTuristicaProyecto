@@ -22,6 +22,8 @@ export interface ClimaActual {
   codigosClima: number[];
   descripcion: string | null;
   lluvia1hMm: number | null;
+  // Informativa (se muestra como «ahora» en el frontend); no interviene en la detección de lluvia.
+  temperaturaC: number | null;
 }
 
 export interface Pronostico {
@@ -133,7 +135,14 @@ export function interpretarClimaActual(datos: unknown): ClimaActual {
     }
     lluvia1hMm = esNumeroFinito(volumen) ? volumen : null;
   }
-  return { dt: datos.dt, desplazamientoUtcSegundos: desplazamiento, ...leerCondiciones(datos.weather), lluvia1hMm };
+  const temperatura = esObjeto(datos.main) ? datos.main.temp : undefined;
+  return {
+    dt: datos.dt,
+    desplazamientoUtcSegundos: desplazamiento,
+    ...leerCondiciones(datos.weather),
+    lluvia1hMm,
+    temperaturaC: esNumeroFinito(temperatura) ? temperatura : null,
+  };
 }
 
 export function interpretarPronostico(datos: unknown): Pronostico {

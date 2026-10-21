@@ -97,3 +97,16 @@ export function validarConsultaClima(query: Consulta): ConsultaClima {
 
   return { lat, lng, fechaInicio: inicio.texto, fechaFin: fin.texto };
 }
+
+export function validarConsultaClimaActual(query: Consulta): { lat: number; lng: number } {
+  const errores: ErrorParametro[] = [];
+
+  const lat = validarDecimal(query, "lat", -90, 90, errores);
+  const lng = validarDecimal(query, "lng", -180, 180, errores);
+
+  if (errores.length > 0 || lat === null || lng === null) {
+    throw new ErrorApi(400, "PARAMETRO_INVALIDO", "Los parámetros de la consulta no son válidos.", errores);
+  }
+
+  return { lat, lng };
+}
