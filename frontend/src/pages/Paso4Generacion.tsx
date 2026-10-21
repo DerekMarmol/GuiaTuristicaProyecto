@@ -30,7 +30,6 @@ import {
 } from "../services/itinerario";
 import type { ParadaConHorario } from "../services/itinerario";
 
-import { construirRecomendaciones } from "../services/recomendaciones";
 import { calcularHorarios } from "../utils/horarios";
 import { diasDeViaje, fechaCorta } from "../utils/fechas";
 
@@ -420,14 +419,6 @@ async function manejarExportarPlan() {
     : null;
   const trasladoDisponible = tiempoTrasladoActual !== null;
   const trasladoEstimado = tiempoTrasladoActual?.estimado ?? false;
-
-  const lugares = useMemo(
-    () =>
-      itinerarios
-        ? construirRecomendaciones(viaje, itinerarios)
-        : [],
-    [itinerarios]
-  );
 
   const idsParadasCompletadas = useMemo(
     () => dia
@@ -1164,10 +1155,10 @@ async function manejarExportarPlan() {
 
           {/* Recomendaciones */}
           <Recomendaciones
-            lugares={lugares}
-            presupuestoDiario={viaje.presupuestoDiario}
+            viaje={viaje}
+            itinerarios={itinerarios}
+            dia={dia}
             mostrarHoteles={mostrarHoteles}
-            dia={dia.numeroDia}
           />
 
           {/* Votación grupal */}
