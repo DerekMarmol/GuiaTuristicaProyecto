@@ -39,7 +39,8 @@ export default function Paso1Destino() {
     const e = validar();
     setErrores(e);
     if (Object.keys(e).length > 0) return;
-    actualizarViaje({ destino: destino.trim(), fechaInicio, fechaFin });
+    // Las coordenadas del destino anterior ya no sirven; el backend las resuelve de nuevo al generar.
+    actualizarViaje({ destino: destino.trim(), fechaInicio, fechaFin, lat: undefined, lng: undefined });
     irAPaso(2);
   }
 

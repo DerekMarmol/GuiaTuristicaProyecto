@@ -489,6 +489,79 @@ Se evalúan **todas** las categorías del lugar, no solo la primera:
 
 Si ninguna regla cubre las categorías del lugar (por ejemplo, solo `building`, `tourism.sights` o `commercial.supermarket`), se asigna `outdoor` con sensibilidad `alta` y `regla_clima: null`. Es una **política conservadora del proyecto**: con lluvia, un lugar desconocido no se adelanta a los lugares bajo techo. No afirma que el lugar sea exterior. Las paradas de `priorizar-clima` cuyo lugar no pudo resolverse reciben la misma clasificación por defecto antes de ser descartadas por la validación existente.
 
+## Endpoint `POST /api/itinerarios/generar`
+
+Genera el itinerario completo a partir de lo que el usuario llena en los pasos 1 a 3: geocodifica el destino, busca lugares reales cerca para cada interés, consulta sus horarios y arma los días. Las paradas traen las coordenadas, el `placeId` y la clasificación climática reales del lugar.
+
+### Solicitud
+
+```json
+{
+  "destino": "Puerto Barrios, Izabal",
+  "fechaInicio": "2026-11-10",
+  "fechaFin": "2026-11-12",
+  "intereses": ["Playa", "Naturaleza", "Gastronomía"],
+  "tipoViaje": "pareja",
+  "transporte": "Automovil",
+  "presupuesto": 2400,
+  "presupuestoDiario": 800,
+  "hospedaje": false,
+  "horaInicio": "09:00"
+}
+```
+
+Obligatorios: `destino`, `fechaInicio`, `fechaFin` (máximo 14 días) e `intereses` (valores de [Intereses admitidos](#intereses-admitidos)). Los demás tienen valores por defecto (`tipoViaje: "solo"`, `transporte: "Automovil"`, `presupuesto: 0`, `hospedaje: false`, `horaInicio: "09:00"`).
+
+### Proceso
+
+1. **Destino.** Se geocodifica con [Geoapify Geocoding API](https://apidocs.geoapify.com/docs/geocoding/forward-geocoding/), limitado a Guatemala (`filter=countrycode:gt`), que también da la zona horaria. Si no hay un resultado con confianza de al menos 0.5, responde `422 DESTINO_NO_ENCONTRADO`.
+2. **Candidatos.** Una búsqueda de Places por cada categoría del interés (de 3 en 3, por el límite de 5 solicitudes por segundo del plan gratuito), en un radio de 15 km (3 km si el transporte es «A pie»). Si una categoría trae pocos lugares, se repite con 30 km (6 km a pie). Se busca por categoría y no por interés porque Geoapify ordena por cercanía: con `natural,national_park,leisure.park` juntas, las plazas del centro llenan el cupo y desplazan a los parques nacionales. Los resultados se intercalan en el orden de `CATEGORIAS_POR_INTERES` (el primero de cada interés es el más representativo), se descartan los registros duplicados de OpenStreetMap (mismo nombre a menos de 200 m) y se conservan unos 2 lugares por parada del viaje, entre 15 y 40.
+3. **Horarios.** Se consultan con Place Details. En Guatemala la mayoría de lugares no publica horario, así que a esos se les asigna uno típico de su tipo (restaurante 11:00–21:00, café 07:00–19:00, museo 09:00–17:00, playa o parque 06:00–18:00…) y la parada sale con `horarioEstimado: true`.
+4. **Plan.** Con `GEMINI_API_KEY`, el plan lo arma Gemini y lo revisa `validarSalida` (`generadoCon: "ia"`). Sin clave, o si Gemini no logra un plan válido en 3 intentos, lo arma un planificador sin IA (`generadoCon: "respaldo"`). Ese planificador empieza cada día por el lugar más representativo de un interés distinto, sigue con los lugares más cercanos y pone como máximo una comida por día (dos si se eligió Gastronomía). Como el validador no espera a que un lugar abra, si a la hora pedida no hay nada abierto prueba empezar a las 10:00, 11:00 o 12:00 y lo avisa en `advertencias`.
+
+### Respuesta (200)
+
+```json
+{
+  "destino": { "nombre": "Puerto Barrios, IZ, Guatemala", "lat": 15.7275154, "lng": -88.5952506, "zonaHoraria": "America/Guatemala" },
+  "zonaHoraria": "America/Guatemala",
+  "horaInicio": "09:00",
+  "generadoCon": "respaldo",
+  "viable": true,
+  "itinerarios": [
+    {
+      "id": "it-1", "viajeId": "borrador", "numeroDia": 1, "fecha": "2026-11-10",
+      "paradas": [
+        {
+          "id": "p1-1", "placeId": "51f0…", "nombre": "Playa Publico", "lat": 15.6944, "lng": -88.6243,
+          "horaApertura": "06:00", "horaCierre": "18:00", "tiempoEstanciaMinutos": 120,
+          "llegada": "2026-11-10T09:00-06:00", "salida": "2026-11-10T11:00-06:00", "estadoEstancia": "completa", "traslado": null,
+          "categorias": ["beach"], "tipo_entorno": "outdoor", "sensibilidad_clima": "alta", "horarioEstimado": true
+        }
+      ]
+    }
+  ],
+  "descartes": [],
+  "diasSinParadas": [],
+  "advertencias": ["1 parada(s) no publican horario; se usó uno típico de su tipo. Confírmalo antes de ir."]
+}
+```
+
+`viable` es `false` si algún día quedó sin paradas (aparece en `diasSinParadas`). `viajeId` es `"borrador"`: el id definitivo lo asigna `POST /api/itinerarios/guardar`.
+
+### Errores
+
+| Estado | Código | Cuándo |
+| --- | --- | --- |
+| 400 | `PARAMETRO_INVALIDO` | Datos del viaje inválidos (fechas, intereses no admitidos, más de 14 días…). |
+| 422 | `DESTINO_NO_ENCONTRADO` | El destino no se encontró en Guatemala. |
+| 422 | `SIN_LUGARES` | No hay lugares cerca para esos intereses, o ninguno abre en las fechas del viaje. |
+| 5xx | `PROVEEDOR_*`, `SERVICIO_NO_CONFIGURADO` | Los mismos de `GET /api/lugares`. |
+
+### Consumo
+
+Una consulta de geocodificación, una o dos de Places por categoría de cada interés y una de Place Details por candidato (de 15 a 40). Gemini solo se llama si hay `GEMINI_API_KEY`.
+
 ## Endpoint `POST /api/itinerarios/validar`
 
 Recibe una propuesta de itinerario (los lugares de cada día, en orden, con su estancia), obtiene los datos reales de cada lugar en Geoapify, calcula la llegada estimada a cada parada y devuelve el plan validado: solo las visitas que pueden hacerse con el lugar abierto. Las paradas excluidas se informan aparte, con su motivo.
@@ -1055,7 +1128,7 @@ El resultado depende del pronóstico real. Si OpenWeather indica lluvia para la 
 
 ## Endpoint `POST /api/hoteles/recomendaciones`
 
-Recomienda hoteles cercanos a la zona del itinerario de **un día** cuyo precio referencial, convertido a quetzales, no supera el 40 % del presupuesto diario. Los hoteles y sus precios provienen de [SerpApi Google Hotels API](https://serpapi.com/google-hotels-api) (motor `google_hotels`) y la tasa USD → GTQ, del [endpoint estándar de ExchangeRate-API](https://www.exchangerate-api.com/docs/standard-requests) (plan gratuito con clave). No reserva, no cobra, no comprueba disponibilidad, no guarda nada y el frontend todavía no lo consume.
+Recomienda hoteles cercanos a la zona del itinerario de **un día** cuyo precio referencial, convertido a quetzales, no supera el 40 % del presupuesto diario. Los hoteles y sus precios provienen de [SerpApi Google Hotels API](https://serpapi.com/google-hotels-api) (motor `google_hotels`) y la tasa USD → GTQ, del [endpoint estándar de ExchangeRate-API](https://www.exchangerate-api.com/docs/standard-requests) (plan gratuito con clave). No reserva, no cobra, no comprueba disponibilidad ni guarda nada. Lo consume la pestaña «Hoteles» del paso 4 del frontend, para la primera noche y con todas las paradas del viaje.
 
 > **El precio es referencial.** Es el importe estructurado que publica Google Hotels a través de SerpApi en el momento de la consulta: puede estar redondeado, cambiar después de la consulta o diferir del importe final de una reserva. El filtro del 40 % garantiza que el **importe referencial convertido** no supera el presupuesto de hospedaje; no garantiza el cargo final.
 
@@ -1490,7 +1563,7 @@ Las pruebas automáticas simulan ambos proveedores y no usan claves reales ni co
 
 ## Endpoint `POST /api/restaurantes/recomendaciones`
 
-Recomienda restaurantes cercanos a **cada parada** del itinerario de un día cuyo costo referencial de **una comida principal** para el grupo no supera el 30 % del presupuesto diario. Los establecimientos provienen de [Geoapify Places API](https://apidocs.geoapify.com/docs/places/) y los precios, de un catálogo propio de rangos estadísticos en quetzales construido con fuentes públicas (Numbeo y Preciosmundi). No reserva, no cobra, no hace pedidos, no guarda nada y el frontend todavía no lo consume.
+Recomienda restaurantes cercanos a **cada parada** del itinerario de un día cuyo costo referencial de **una comida principal** para el grupo no supera el 30 % del presupuesto diario. Los establecimientos provienen de [Geoapify Places API](https://apidocs.geoapify.com/docs/places/) y los precios, de un catálogo propio de rangos estadísticos en quetzales construido con fuentes públicas (Numbeo y Preciosmundi). No reserva, no cobra, no hace pedidos ni guarda nada. Lo consume la pestaña «Restaurantes» del paso 4 del frontend, una vez por día del itinerario.
 
 > **Los precios son referenciales.** Ningún restaurante publica su precio a través de Geoapify. Cada establecimiento recibe un **rango de mercado** según su categoría, no su menú. El filtro garantiza que el **costo referencial máximo** del grupo no supera el presupuesto de alimentación; no garantiza el importe real de la cuenta.
 

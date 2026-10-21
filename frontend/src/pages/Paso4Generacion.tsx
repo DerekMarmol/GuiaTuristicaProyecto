@@ -11,12 +11,12 @@ import PanelPresupuesto from "../components/PanelPresupuesto";
 import { generarGastosSimulados } from "../services/gastos";
 import CalificacionParada, { ResumenCalificacion } from "../components/CalificacionParada";
 import type { RespuestaClima } from "../../../shared/types";
-import { consultarPronostico, coordenadasDelViaje, hayLluviaSignificativa } from "../services/clima";
+import { consultarClimaActual, consultarPronostico, coordenadasDelViaje, hayLluviaSignificativa, type ClimaAhora } from "../services/clima";
 import { modoTransporteRuta, reoptimizarRuta, type TipoEventoRuta } from "../services/reoptimizacion";
 import type { RespuestaEta } from "../services/eta";
 import PropuestaClima from "../components/PropuestaClima";
 import { useMonitoreoClima } from "../hooks/useMonitoreoClima";
-import { aplicarParadasPropuestas, construirItinerarioActivo, firmaItinerario } from "../services/climaReactivoEstado";
+import { aplicarParadasPropuestas, construirItinerarioActivo, fechaLocal, firmaItinerario } from "../services/climaReactivoEstado";
 import { BarraAbiertosAhora, ResultadosAbiertosAhora, describirReferencia, type FiltroAbiertos } from "../components/AbiertosAhora";
 import type { CapaAbiertosAhora } from "../components/Mapa";
 import { useAbiertosAhora } from "../hooks/useAbiertosAhora";
@@ -24,11 +24,12 @@ import { coordenadasValidas, lugaresParaMapa } from "../services/abiertosAhora";
 
 import {
   generarItinerario,
+  guardarPlanViaje,
+  exportarPlanViaje,
   PASOS_GENERACION,
 } from "../services/itinerario";
 import type { ParadaConHorario } from "../services/itinerario";
 
-import { construirRecomendaciones } from "../services/recomendaciones";
 import { calcularHorarios } from "../utils/horarios";
 import { diasDeViaje, fechaCorta } from "../utils/fechas";
 
@@ -115,6 +116,7 @@ export default function Paso4Generacion() {
     viaje,
     itinerarios,
     setItinerarios,
+    fijarUbicacionDestino,
     irAPaso,
     reiniciar,
     calificaciones,
@@ -131,6 +133,7 @@ export default function Paso4Generacion() {
   );
   const [progreso, setProgreso] = useState(0);
   const [error, setError] = useState("");
+  const [advertencias, setAdvertencias] = useState<string[]>([]);
   const [intento, setIntento] = useState(0);
   const [diaActivo, setDiaActivo] = useState(0);
   const [votos, setVotos] = useState<Record<string, Voto>>({});
@@ -141,6 +144,68 @@ export default function Paso4Generacion() {
   const [inicioSeguimiento, setInicioSeguimiento] = useState<number | null>(null);
   const [tiempoActual, setTiempoActual] = useState(() => Date.now());
   const [etaMapa, setEtaMapa] = useState<RespuestaEta | null>(null);
+  // Estados para el guardado del plan
+  const [guardando, setGuardando] = useState(false);
+  const [idGuardado, setIdGuardado] = useState<string | null>(null);
+  const [notificacionGuardado, setNotificacionGuardado] = useState<{
+    tipo: "exito" | "local" | "error";
+    texto: string;
+  } | null>(null);
+
+  async function manejarGuardarPlan() {
+    if (!itinerarios || guardando) return;
+    setGuardando(true);
+    setNotificacionGuardado(null);
+
+    try {
+      const resultado = await guardarPlanViaje(viaje, itinerarios);
+      if (resultado.guardadoEn === "servidor") {
+        setIdGuardado(resultado.id || null);
+        setNotificacionGuardado({
+          tipo: "exito",
+          texto: `${resultado.mensaje} (ID: ${resultado.id})`,
+        });
+      } else {
+        setNotificacionGuardado({
+          tipo: "local",
+          texto: resultado.mensaje,
+        });
+      }
+    } catch (err) {
+      setNotificacionGuardado({
+        tipo: "error",
+        texto: err instanceof Error ? err.message : "Error al guardar el plan",
+      });
+    } finally {
+      setGuardando(false);
+    }
+  }
+  const [exportando, setExportando] = useState(false);
+
+async function manejarExportarPlan() {
+  // Si ya fue guardado en el servidor usamos su id, si no usamos el último id persistido
+  const idParaExportar = idGuardado || localStorage.getItem("ultimo_viaje_id");
+
+  if (!idParaExportar) {
+    setNotificacionGuardado({
+      tipo: "local",
+      texto: "Debes guardar el plan en tu cuenta antes de poder exportarlo.",
+    });
+    return;
+  }
+
+  setExportando(true);
+  try {
+    await exportarPlanViaje(idParaExportar);
+  } catch (err) {
+    setNotificacionGuardado({
+      tipo: "error",
+      texto: err instanceof Error ? err.message : "No se pudo exportar el archivo.",
+    });
+  } finally {
+    setExportando(false);
+  }
+}
 
   useEffect(() => {
     const intervalo = window.setInterval(() => setTiempoActual(Date.now()), 60_000);
@@ -218,29 +283,34 @@ export default function Paso4Generacion() {
       return;
     }
 
-    let cancelado = false;
+    // Abortar la solicitud si el paso se desmonta o se regenera evita pagar dos veces la generación.
+    const controlador = new AbortController();
+    const cancelado = () => controlador.signal.aborted;
 
     setFase("generando");
     setProgreso(0);
     setError("");
+    setAdvertencias([]);
 
     generarItinerario(viaje, (n) => {
-      if (!cancelado) {
+      if (!cancelado()) {
         setProgreso(n);
       }
-    })
+    }, controlador.signal)
       .then((resultado) => {
-        if (cancelado) return;
+        if (cancelado()) return;
 
-        setItinerarios(resultado);
+        setItinerarios(resultado.itinerarios);
+        fijarUbicacionDestino(resultado.destino.lat, resultado.destino.lng);
+        setAdvertencias(resultado.advertencias);
         // TODO(backend): cargar los gastos reales (Lucía) en lugar de simularlos.
-        setGastos(generarGastosSimulados(resultado, presupuestoDiario));
+        setGastos(generarGastosSimulados(resultado.itinerarios, presupuestoDiario));
         setDiaActivo(0);
         setVotos({});
         setFase("listo");
       })
       .catch((err) => {
-        if (cancelado) return;
+        if (cancelado()) return;
 
         setError(
           err instanceof Error
@@ -250,12 +320,10 @@ export default function Paso4Generacion() {
         setFase("error");
       });
 
-    return () => {
-      cancelado = true;
-    };
+    return () => controlador.abort();
   }, [intento]);
 
-  // Pronóstico de OpenWeather: una sola consulta para todas las fechas del itinerario
+  // Pronóstico del clima: una sola consulta para todas las fechas del itinerario
   useEffect(() => {
     if (!itinerarios || itinerarios.length === 0) {
       return;
@@ -333,6 +401,23 @@ export default function Paso4Generacion() {
   // Datos del día activo
   const dia = itinerarios?.[diaActivo];
 
+  // Clima de este momento, solo si el día que se está viendo es hoy. Se refresca cada 15 minutos.
+  const [climaAhora, setClimaAhora] = useState<ClimaAhora | null>(null);
+  const esHoy = dia?.fecha === fechaLocal(new Date(tiempoActual));
+  const tramoDe15Minutos = Math.floor(tiempoActual / (15 * 60_000));
+  useEffect(() => {
+    const coordenadas = esHoy && itinerarios ? coordenadasDelViaje(viaje, itinerarios) : null;
+    if (!coordenadas) {
+      setClimaAhora(null);
+      return;
+    }
+    const controlador = new AbortController();
+    consultarClimaActual(coordenadas, controlador.signal).then((resultado) => {
+      if (!controlador.signal.aborted) setClimaAhora(resultado);
+    });
+    return () => controlador.abort();
+  }, [esHoy, itinerarios, viaje.lat, viaje.lng, tramoDe15Minutos]);
+
   useEffect(() => {
     if (!dia || reoptimizando || estadoPronostico !== "listo") return;
     const climaDia = pronostico?.dias.find((d) => d.fecha === dia.fecha);
@@ -345,19 +430,12 @@ export default function Paso4Generacion() {
 
   // GUI-89: tomar el tiempo real del itinerario cuando existe.
   // Si no viene informado, reutilizar la misma estimación visual de GUI-34.
+  // Cada parada guarda el traslado desde la anterior: el primer tramo es el de la segunda parada.
   const tiempoTrasladoActual = dia?.paradas.length && dia.paradas.length > 1
-    ? obtenerTiempoTraslado(dia.paradas[0], 0, viaje.transporte)
+    ? obtenerTiempoTraslado(dia.paradas[1], 1, viaje.transporte)
     : null;
   const trasladoDisponible = tiempoTrasladoActual !== null;
   const trasladoEstimado = tiempoTrasladoActual?.estimado ?? false;
-
-  const lugares = useMemo(
-    () =>
-      itinerarios
-        ? construirRecomendaciones(viaje, itinerarios)
-        : [],
-    [itinerarios]
-  );
 
   const idsParadasCompletadas = useMemo(
     () => dia
@@ -473,7 +551,6 @@ export default function Paso4Generacion() {
         obtenerAlertaHorario(parada as ParadaConHorario)
       )
     : [];
-
   return (
     <div className="card">
       <Stepper actual={4} />
@@ -559,6 +636,10 @@ export default function Paso4Generacion() {
         <>
           <h2>Tu itinerario para {viaje.destino}</h2>
 
+          {advertencias.map((texto) => (
+            <p key={texto} className="nota">{texto}</p>
+          ))}
+
           {avisoReoptimizacion && (
             <p className={reoptimizando || avisoReoptimizacion.startsWith("El plan") ? "aviso-plan-actualizado" : "aviso-error"} role="status" aria-live="polite">
               {reoptimizando ? "Actualizando el plan…" : avisoReoptimizacion}
@@ -627,6 +708,7 @@ export default function Paso4Generacion() {
             <IndicadorClima
               estado={estadoPronostico}
               dia={pronostico?.dias.find((d) => d.fecha === dia.fecha)}
+              ahora={esHoy ? climaAhora : null}
             />
           </section>
           {monitoreo.activo || monitoreo.propuesta ? (
@@ -752,9 +834,8 @@ export default function Paso4Generacion() {
                     // La primera ETA corresponde a la segunda parada.
                     // Los siguientes tramos incluyen traslado desde la parada anterior.
                     tramos: dia.paradas.slice(1).map((parada, indice) => {
-                      const origen = indice > 0 ? dia.paradas[indice] : null;
-                      const traslado = origen
-                        ? obtenerTiempoTraslado(origen, indice, viaje.transporte)
+                      const traslado = indice > 0
+                        ? obtenerTiempoTraslado(parada, indice + 1, viaje.transporte)
                         : null;
                       return {
                         paradaId: parada.id,
@@ -812,10 +893,13 @@ export default function Paso4Generacion() {
 
                       <p>
                         Abre {p.horaApertura} ·
-                        Cierra {p.horaCierre} ·
+                        Cierra {p.horaCierre}
+                        {paradaHorario.horarioEstimado && " (horario estimado)"} ·
                         Estancia{" "}
                         {p.tiempoEstanciaMinutos} min
                       </p>
+
+                      {paradaHorario.motivo && <p className="nota">{paradaHorario.motivo}</p>}
 
                       {!descartada && !visitada && (
                         <button type="button" className="accion-parada" onClick={() => marcarVisitada(dia.id, p.id)}>
@@ -907,16 +991,18 @@ export default function Paso4Generacion() {
                   {i < dia.paradas.length - 1 &&
                     !descartada &&
                     (() => {
+                      // El tramo hacia la siguiente parada está guardado en esa parada.
+                      const siguiente = dia.paradas[i + 1];
                       const h =
-                        (p as any).holgura ||
-                        (p as any).desgloseHolgura ||
-                        (p as any).traslado?.holgura;
+                        (siguiente as any).holgura ||
+                        (siguiente as any).desgloseHolgura ||
+                        (siguiente as any).traslado?.holgura;
 
                       const desglose = h?.desgloseHolgura;
 
                       const tipoDetectado = String(
                         h?.tipoTraslado ||
-                          (p as any).tipoTraslado ||
+                          (siguiente as any).tipoTraslado ||
                           viaje.transporte ||
                           ""
                       ).toLowerCase();
@@ -949,8 +1035,8 @@ export default function Paso4Generacion() {
                         TRANSPORTE_CONFIG[modoKey] ||
                         TRANSPORTE_CONFIG.auto;
 
-                      const semillaId = p.id
-                        ? p.id
+                      const semillaId = siguiente.id
+                        ? siguiente.id
                             .split("")
                             .reduce(
                               (
@@ -985,8 +1071,8 @@ export default function Paso4Generacion() {
 
                       const tiempoBase =
                         h?.tiempoBaseMinutos ??
-                        (p as any).tiempoTrasladoMinutos ??
-                        obtenerTiempoTraslado(p, i, viaje.transporte)?.minutos ??
+                        (siguiente as any).tiempoTrasladoMinutos ??
+                        obtenerTiempoTraslado(siguiente, i + 1, viaje.transporte)?.minutos ??
                         baseSugerida;
 
                       const tiempoAdicionalDefault =
@@ -1087,10 +1173,10 @@ export default function Paso4Generacion() {
 
           {/* Recomendaciones */}
           <Recomendaciones
-            lugares={lugares}
-            presupuestoDiario={viaje.presupuestoDiario}
+            viaje={viaje}
+            itinerarios={itinerarios}
+            dia={dia}
             mostrarHoteles={mostrarHoteles}
-            dia={dia.numeroDia}
           />
 
           {/* Votación grupal */}
@@ -1145,6 +1231,24 @@ export default function Paso4Generacion() {
           )}
 
           {/* Acciones finales */}
+   {/* Notificación de guardado */}
+          {notificacionGuardado && (
+            <p
+              className={
+                notificacionGuardado.tipo === "exito"
+                  ? "aviso-plan-actualizado"
+                  : notificacionGuardado.tipo === "local"
+                  ? "nota"
+                  : "aviso-error"
+              }
+              role="status"
+              aria-live="polite"
+            >
+              {notificacionGuardado.texto}
+            </p>
+          )}
+
+          {/* Acciones finales */}
           <div className="acciones">
             <button
               type="button"
@@ -1156,10 +1260,32 @@ export default function Paso4Generacion() {
 
             <button
               type="button"
-              className="btn-primario"
+              className="btn-secundario"
               onClick={regenerar}
             >
               Regenerar
+            </button>
+
+            <button
+           type="button"
+           className="btn-secundario"
+           disabled={exportando}
+           onClick={manejarExportarPlan}
+         >
+           {exportando ? "Exportando..." : "⬇ Exportar"}
+         </button>
+
+            <button
+              type="button"
+              className="btn-primario"
+              disabled={guardando}
+              onClick={manejarGuardarPlan}
+            >
+              {guardando
+                ? "Guardando..."
+                : idGuardado
+                ? "✓ Plan guardado"
+                : "Guardar plan"}
             </button>
           </div>
 
