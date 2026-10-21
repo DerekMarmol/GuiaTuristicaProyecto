@@ -69,6 +69,7 @@ El backend expone:
 - `POST /api/hoteles/recomendaciones`: hoteles cercanos al centro del itinerario de un día obtenidos de SerpApi (Google Hotels) para una noche, con su precio referencial en USD convertido a quetzales con la tasa de ExchangeRate-API, cuyo importe convertido no supera el 40 % del presupuesto diario. El precio es referencial y puede diferir del cargo final. No devuelve recomendaciones ni consulta proveedores si el usuario ya tiene hospedaje o no necesita hotel. Requiere `SERPAPI_API_KEY` y `EXCHANGERATE_API_KEY`. Lo consume el paso 4 del frontend.
 - `POST /api/itinerarios/clima-reactivo/evaluar`, `/propuesta` y `/aceptar`: durante el día del itinerario, el paso 4 revisa el clima actual y el pronóstico de OpenWeather cada 12 minutos. Si detecta lluvia significativa o tormenta respecto a la revisión anterior, propone alternativas techadas cercanas de Geoapify con horario confirmado y un nuevo recorrido calculado con Valhalla y OR-Tools. Los cambios solo se aplican si el usuario los acepta.
 - `GET /api/clima/pronostico`: resumen diario del clima para las fechas del viaje mediante OpenWeather; lo consume el paso 4 del frontend. Requiere `OPENWEATHER_API_KEY`.
+- `GET /api/clima/actual`: temperatura y condición observadas en este momento en unas coordenadas (OpenWeather). El paso 4 la muestra como «Ahora en tu destino», separada del pronóstico, cuando el día que se ve es hoy. Requiere `OPENWEATHER_API_KEY`.
 
 ```powershell
 cd backend

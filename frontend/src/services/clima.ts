@@ -41,6 +41,33 @@ export async function consultarPronostico(
   }
 }
 
+export interface ClimaAhora {
+  observadoEn: string;
+  temperaturaC: number | null;
+  descripcion: string | null;
+}
+
+// Clima observado en este momento. Es complementario: si falla, el pronóstico se muestra igual.
+export async function consultarClimaActual(
+  { lat, lng }: { lat: number; lng: number },
+  signal?: AbortSignal
+): Promise<ClimaAhora | null> {
+  const parametros = new URLSearchParams({ lat: lat.toFixed(6), lng: lng.toFixed(6) });
+  try {
+    const respuesta = await fetch(`/api/clima/actual?${parametros.toString()}`, { signal });
+    if (!respuesta.ok) {
+      return null;
+    }
+    const datos = (await respuesta.json()) as ClimaAhora;
+    return datos.temperaturaC === null ? null : datos;
+  } catch (error) {
+    if (!signal?.aborted) {
+      console.warn("No se pudo consultar el clima actual:", error);
+    }
+    return null;
+  }
+}
+
 // Usa las coordenadas del destino si existen; si no, el centro de las paradas del itinerario.
 export function coordenadasDelViaje(
   viaje: ViajeBorrador,

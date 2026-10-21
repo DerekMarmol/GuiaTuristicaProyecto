@@ -11,12 +11,12 @@ import PanelPresupuesto from "../components/PanelPresupuesto";
 import { generarGastosSimulados } from "../services/gastos";
 import CalificacionParada, { ResumenCalificacion } from "../components/CalificacionParada";
 import type { RespuestaClima } from "../../../shared/types";
-import { consultarPronostico, coordenadasDelViaje, hayLluviaSignificativa } from "../services/clima";
+import { consultarClimaActual, consultarPronostico, coordenadasDelViaje, hayLluviaSignificativa, type ClimaAhora } from "../services/clima";
 import { modoTransporteRuta, reoptimizarRuta, type TipoEventoRuta } from "../services/reoptimizacion";
 import type { RespuestaEta } from "../services/eta";
 import PropuestaClima from "../components/PropuestaClima";
 import { useMonitoreoClima } from "../hooks/useMonitoreoClima";
-import { aplicarParadasPropuestas, construirItinerarioActivo, firmaItinerario } from "../services/climaReactivoEstado";
+import { aplicarParadasPropuestas, construirItinerarioActivo, fechaLocal, firmaItinerario } from "../services/climaReactivoEstado";
 import { BarraAbiertosAhora, ResultadosAbiertosAhora, describirReferencia, type FiltroAbiertos } from "../components/AbiertosAhora";
 import type { CapaAbiertosAhora } from "../components/Mapa";
 import { useAbiertosAhora } from "../hooks/useAbiertosAhora";
@@ -323,7 +323,7 @@ async function manejarExportarPlan() {
     return () => controlador.abort();
   }, [intento]);
 
-  // Pronóstico de OpenWeather: una sola consulta para todas las fechas del itinerario
+  // Pronóstico del clima: una sola consulta para todas las fechas del itinerario
   useEffect(() => {
     if (!itinerarios || itinerarios.length === 0) {
       return;
@@ -400,6 +400,23 @@ async function manejarExportarPlan() {
 
   // Datos del día activo
   const dia = itinerarios?.[diaActivo];
+
+  // Clima de este momento, solo si el día que se está viendo es hoy. Se refresca cada 15 minutos.
+  const [climaAhora, setClimaAhora] = useState<ClimaAhora | null>(null);
+  const esHoy = dia?.fecha === fechaLocal(new Date(tiempoActual));
+  const tramoDe15Minutos = Math.floor(tiempoActual / (15 * 60_000));
+  useEffect(() => {
+    const coordenadas = esHoy && itinerarios ? coordenadasDelViaje(viaje, itinerarios) : null;
+    if (!coordenadas) {
+      setClimaAhora(null);
+      return;
+    }
+    const controlador = new AbortController();
+    consultarClimaActual(coordenadas, controlador.signal).then((resultado) => {
+      if (!controlador.signal.aborted) setClimaAhora(resultado);
+    });
+    return () => controlador.abort();
+  }, [esHoy, itinerarios, viaje.lat, viaje.lng, tramoDe15Minutos]);
 
   useEffect(() => {
     if (!dia || reoptimizando || estadoPronostico !== "listo") return;
@@ -691,6 +708,7 @@ async function manejarExportarPlan() {
             <IndicadorClima
               estado={estadoPronostico}
               dia={pronostico?.dias.find((d) => d.fecha === dia.fecha)}
+              ahora={esHoy ? climaAhora : null}
             />
           </section>
           {monitoreo.activo || monitoreo.propuesta ? (

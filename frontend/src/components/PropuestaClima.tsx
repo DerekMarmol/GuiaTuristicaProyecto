@@ -93,7 +93,7 @@ export default function PropuestaClima({
   return (
     <section className="propuesta-clima" aria-label="Monitoreo del clima durante el recorrido">
       <p className="nota" role="status" aria-live="polite">
-        Monitoreo del clima (OpenWeather):{" "}
+        Clima en tu ruta:{" "}
         {estado === "evaluando" ? "revisando…" : nivel ? NIVEL[nivel] : "sin datos"}
         {consultadoEn && ` · consultado a las ${hora(consultadoEn)}`}
         {proximaRevision && estado !== "evaluando" && ` · próxima revisión ${hora(proximaRevision.toISOString())}`}
@@ -119,7 +119,7 @@ export default function PropuestaClima({
           <h3>{propuesta.evento.nivel ? NIVEL[propuesta.evento.nivel] : "Cambio de clima"} en la zona del recorrido</h3>
           <p>{describirSenal(propuesta.evento.senalPrincipal)}</p>
           <p className="nota">
-            Fuente: OpenWeather · consultado a las {hora(propuesta.evento.consultadoEn)}
+            Consultado a las {hora(propuesta.evento.consultadoEn)}
             {propuesta.evento.observacion.observadaEn && ` · observación de las ${hora(propuesta.evento.observacion.observadaEn)}`}
           </p>
           <p>{propuesta.mensaje}</p>
