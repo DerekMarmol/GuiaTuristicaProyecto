@@ -497,3 +497,8 @@ body:has(.nav-inferior) .chat { bottom: calc(var(--alto-nav-inferior) + .8rem); 
   .card { padding: 1.5rem 1rem 1rem; }
   .paso4-cabecera { margin: 0 -1rem; padding-inline: 1rem; }
 }
+
+/* GUI-114: planes guardados en la cuenta */
+.mis-planes { margin-top: 1rem; }
+.mis-planes h3 { margin: 0 0 .4rem; font: 700 1rem var(--font-ui); text-transform: uppercase; letter-spacing: .1em; }
+.mis-planes-abrir { width: auto; margin: 0; padding: .45rem .9rem; font-size: .8rem; }
