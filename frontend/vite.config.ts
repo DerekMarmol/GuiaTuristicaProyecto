@@ -22,6 +22,9 @@ export default defineConfig({
 
   // Redirigir las consultas a la API del backend
   server: {
+    // Permite abrir el servidor de desarrollo por un túnel HTTPS (Cloudflare o ngrok) para probar en el
+    // teléfono: el navegador solo entrega la ubicación en páginas seguras.
+    allowedHosts: [".trycloudflare.com", ".ngrok-free.app"],
     proxy: {
       "/api": {
         target: "http://localhost:3000",

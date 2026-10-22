@@ -35,6 +35,11 @@ export function horaDeSalida(llegada: string, minutosTraslado: number): string {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
+// "13:50" + 25 min -> "14:15"
+export function sumarMinutos(hora: string, minutos: number): string {
+  return horaDeSalida(hora, -minutos);
+}
+
 export async function calcularTrasladoInicio(
   origen: Coordenada,
   destino: Coordenada,

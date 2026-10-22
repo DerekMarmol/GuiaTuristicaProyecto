@@ -1,7 +1,7 @@
 import { ErrorApi } from "../errores";
 import type { FuncionFetch } from "../tipos";
 import { transformarLugares, type Lugar } from "./transformar";
-import { cacheService } from "../lib/redis";
+import { cacheService, type CacheJson } from "../lib/redis";
 
 export const URL_PLACES = "https://api.geoapify.com/v2/places";
 const TIEMPO_ESPERA_MS = 10000;
@@ -23,6 +23,8 @@ interface OpcionesCliente {
   apiKey?: string;
   fetch?: FuncionFetch;
   tiempoEsperaMs?: number;
+  // Caché de respuestas (Redis por defecto); null la desactiva.
+  cache?: CacheJson | null;
 }
 
 function formatearCoordenada(valor: number): string {
@@ -55,6 +57,7 @@ export function crearConsultaPlaces({
   apiKey,
   fetch: fetchImpl = globalThis.fetch,
   tiempoEsperaMs = TIEMPO_ESPERA_MS,
+  cache = cacheService,
 }: OpcionesCliente = {}): ConsultarPlaces {
   const clave = typeof apiKey === "string" ? apiKey.trim() : "";
 
@@ -67,7 +70,7 @@ export function crearConsultaPlaces({
     const claveCache = `cache:geoapify:places:${lat.toFixed(3)}:${lng.toFixed(3)}:${radio}:${limite}:${categoriasOrdenadas}`;
 
     try {
-      const datosEnCache = await cacheService.get(claveCache);
+      const datosEnCache = await cache?.get(claveCache);
       if (datosEnCache) {
         return datosEnCache;
       }
@@ -120,7 +123,7 @@ export function crearConsultaPlaces({
         throw new ErrorApi(502, "PROVEEDOR_RESPUESTA_INVALIDA", "El proveedor de lugares devolvió una respuesta que no es JSON válido.");
       }
       try {
-        await cacheService.set(claveCache, datos, TTL_PLACES_SEGUNDOS);
+        await cache?.set(claveCache, datos, TTL_PLACES_SEGUNDOS);
       } catch {
         // Si la caché no está disponible, no se interrumpe la operación
       }

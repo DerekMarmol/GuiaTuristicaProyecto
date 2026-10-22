@@ -1,6 +1,7 @@
 import path from "node:path";
 import dotenv from "dotenv";
 import { crearApp } from "./app";
+import { cacheService } from "./lib/redis";
 
 // Carga directa del archivo .env desde la raíz de backend
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
@@ -29,7 +30,7 @@ const puerto = Number(process.env.PORT) || 3000;
 // "::" escucha en todas las interfaces (IPv6 e IPv4), como hacía Express; Fastify por defecto solo usa localhost.
 const host = process.env.HOST?.trim() || "::";
 
-crearApp({ apiKey })
+crearApp({ apiKey, cache: cacheService })
   .listen({ port: puerto, host })
   .then(() => {
     console.log(`Backend escuchando en http://localhost:${puerto}`);

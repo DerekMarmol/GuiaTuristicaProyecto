@@ -1,6 +1,6 @@
 import type { ClienteLLM } from "./cliente";
 import { construirPrompt, SYSTEM_INSTRUCTION } from "./prompts";
-import { validarSalida, verificarZonaHoraria, type ResultadoValidacion } from "./validator";
+import { validarSalida, verificarZonaHoraria, type OpcionesValidacion, type ResultadoValidacion } from "./validator";
 import type { LugarReal, ResultadoGeneracion, ViajeIA } from "./tipos";
 
 export class ErrorGeneracionIA extends Error {
@@ -17,11 +17,12 @@ interface Params {
   maxIntentos?: number;
   /** Espera base (ms) antes de reintentar si falló la llamada al modelo (ej. 503). Crece con cada intento. */
   esperaReintentoMs?: number;
+  opcionesValidacion?: OpcionesValidacion;
 }
 
 const esperar = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-export async function generarItinerarios({ viaje, candidatos, cliente, maxIntentos = 3, esperaReintentoMs = 2000 }: Params): Promise<ResultadoGeneracion> {
+export async function generarItinerarios({ viaje, candidatos, cliente, maxIntentos = 3, esperaReintentoMs = 2000, opcionesValidacion }: Params): Promise<ResultadoGeneracion> {
   if (candidatos.length === 0) {
     throw new ErrorGeneracionIA("No hay lugares reales para armar el itinerario.", []);
   }
@@ -39,7 +40,7 @@ export async function generarItinerarios({ viaje, candidatos, cliente, maxIntent
     const prompt = construirPrompt(viaje, candidatos, errores);
     try {
       const raw = await cliente.generarPlan({ systemInstruction: SYSTEM_INSTRUCTION, prompt });
-      ultimo = validarSalida(raw, candidatos, viaje);
+      ultimo = validarSalida(raw, candidatos, viaje, opcionesValidacion);
       
       if (ultimo.errores.length === 0) {
         return { 

@@ -24,6 +24,7 @@ import { usePuntoPartida } from "../hooks/usePuntoPartida";
 import { BarraPuntoPartida, TrasladoDesdePartida } from "../components/PuntoPartida";
 import NavegacionPaso4, { type SeccionPaso4 } from "../components/NavegacionPaso4";
 import { etiquetaPartida } from "../services/puntoPartida";
+import { obtenerUbicacionActual } from "../services/ubicacionActual";
 import { coordenadasValidas, lugaresParaMapa } from "../services/abiertosAhora";
 
 import {
@@ -40,6 +41,7 @@ import { diasDeViaje, fechaCorta } from "../utils/fechas";
 import "./pasos.css";
 
 const MONEDA = "Q";
+const ESPERA_UBICACION_AL_GENERAR_MS = 6000;
 
 const TIPOS = {
   solo: "Solo",
@@ -308,11 +310,17 @@ async function manejarExportarPlan() {
     setError("");
     setAdvertencias([]);
 
-    generarItinerario(viaje, (n) => {
-      if (!cancelado()) {
-        setProgreso(n);
-      }
-    }, controlador.signal)
+    // GUI-112: se pide la ubicación al iniciar el viaje para armar el día desde donde está el viajero.
+    // Si no la da (o tarda), el itinerario se genera igual, desde el centro del destino.
+    obtenerUbicacionActual({ tiempoEsperaMs: ESPERA_UBICACION_AL_GENERAR_MS })
+      .catch(() => null)
+      .then((ubicacion) =>
+        generarItinerario(viaje, (n) => {
+          if (!cancelado()) {
+            setProgreso(n);
+          }
+        }, controlador.signal, ubicacion ?? undefined)
+      )
       .then((resultado) => {
         if (cancelado()) return;
 
@@ -748,6 +756,7 @@ async function manejarExportarPlan() {
                   traslado={trasladoInicio}
                   nombreParada={dia.paradas[0].nombre}
                   llegada={(dia.paradas[0] as ParadaConHorario).horaInicioProgramada}
+                  esHoy={esHoy}
                 />
               )}
 

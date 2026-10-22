@@ -38,3 +38,12 @@ describe("punto de partida", () => {
     await assert.rejects(calcularTrasladoInicio({ lat: 0, lng: 0 }, { lat: 0, lng: 0 }), /no son válidos/);
   });
 });
+
+describe("hora de salida en un viaje de hoy (GUI-112)", () => {
+  test("si la hora sugerida ya pasó, dice a qué hora llega saliendo ahora", async () => {
+    const { textoSalida } = await import("../src/components/PuntoPartida.tsx");
+    assert.equal(textoSalida("09:00", 20, true, "14:05"), "Si sales ahora, llegas a las 14:25.");
+    assert.equal(textoSalida("14:30", 20, true, "14:05"), "Sal a las 14:10 para llegar a las 14:30.");
+    assert.equal(textoSalida("09:00", 20, false, "14:05"), "Sal a las 08:40 para llegar a las 09:00.");
+  });
+});
