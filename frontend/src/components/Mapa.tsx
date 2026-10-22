@@ -11,6 +11,9 @@ const SOURCE_RUTA = "ruta-itinerario";
 const LAYER_BORDE_RUTA = "ruta-itinerario-borde";
 const LAYER_GRADIENTE_RUTA = "ruta-itinerario-gradiente";
 const SOURCE_PARTIDA = "tramo-partida";
+const SOURCE_NAVEGACION = "ruta-navegacion";
+const LAYER_NAVEGACION_BORDE = "ruta-navegacion-borde";
+const LAYER_NAVEGACION = "ruta-navegacion-linea";
 const LAYER_PARTIDA = "tramo-partida-linea";
 
 export interface ReferenciaMapa {
@@ -42,6 +45,8 @@ interface MapaProps {
   partida?: PartidaMapa | null;
   // GUI-115: posición del usuario en tiempo real («Tú estás aquí»).
   posicionActual?: { lat: number; lng: number; precisionMetros: number | null } | null;
+  // GUI-116: ruta por calles de la navegación en curso ([lng, lat]); null si no se está navegando.
+  rutaNavegacion?: [number, number][] | null;
   // Mientras es true, tocar el mapa elige el punto de partida.
   eligiendoPartida?: boolean;
   onElegirPartida?: (punto: { lat: number; lng: number }) => void;
@@ -269,6 +274,7 @@ export function Mapa({
   abiertos = null,
   partida = null,
   posicionActual = null,
+  rutaNavegacion = null,
   eligiendoPartida = false,
   onElegirPartida,
 }: MapaProps) {
@@ -440,7 +446,8 @@ export function Mapa({
     const actualizarEnVivo = () => {
       const completadas = new Set(completadasRef.current);
       const proxima = paradasRef.current.find((p) => !completadas.has(p.id));
-      const datos = crearGeoJsonPartida(posicionActual ?? partida, proxima);
+      // Mientras se navega, la ruta por calles reemplaza al tramo punteado en línea recta.
+      const datos = crearGeoJsonPartida(rutaNavegacion ? null : posicionActual ?? partida, proxima);
       const fuente = mapa.getSource(SOURCE_PARTIDA) as mapboxgl.GeoJSONSource | undefined;
       if (fuente) {
         fuente.setData(datos);
@@ -487,7 +494,55 @@ export function Mapa({
     }
     mapa.once("load", actualizarEnVivo);
     return () => { mapa.off("load", actualizarEnVivo); };
-  }, [posicionActual?.lat, posicionActual?.lng, partida?.lat, partida?.lng, paradas, paradasCompletadas, seguir]);
+  }, [posicionActual?.lat, posicionActual?.lng, partida?.lat, partida?.lng, paradas, paradasCompletadas, seguir, rutaNavegacion]);
+
+  // GUI-116: al empezar a navegar, el mapa sigue al usuario.
+  const navegando = rutaNavegacion !== null;
+  useEffect(() => {
+    if (navegando) setSeguir(true);
+  }, [navegando]);
+
+  useEffect(() => {
+    const mapa = mapaRef.current;
+    if (!mapa) return;
+
+    const dibujarRuta = () => {
+      const datos = {
+        type: "FeatureCollection" as const,
+        features: rutaNavegacion
+          ? [{ type: "Feature" as const, properties: {}, geometry: { type: "LineString" as const, coordinates: rutaNavegacion } }]
+          : [],
+      };
+      const fuente = mapa.getSource(SOURCE_NAVEGACION) as mapboxgl.GeoJSONSource | undefined;
+      if (fuente) {
+        fuente.setData(datos);
+        return;
+      }
+      mapa.addSource(SOURCE_NAVEGACION, { type: "geojson", data: datos });
+      const primeraCapaDeEtiquetas = mapa.getStyle().layers?.find((capa) => capa.type === "symbol")?.id;
+      mapa.addLayer({
+        id: LAYER_NAVEGACION_BORDE,
+        type: "line",
+        source: SOURCE_NAVEGACION,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#ffffff", "line-width": 10 },
+      }, primeraCapaDeEtiquetas);
+      mapa.addLayer({
+        id: LAYER_NAVEGACION,
+        type: "line",
+        source: SOURCE_NAVEGACION,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#1a73e8", "line-width": 6 },
+      }, primeraCapaDeEtiquetas);
+    };
+
+    if (mapa.isStyleLoaded()) {
+      dibujarRuta();
+      return;
+    }
+    mapa.once("load", dibujarRuta);
+    return () => { mapa.off("load", dibujarRuta); };
+  }, [rutaNavegacion]);
 
   useEffect(() => {
     const mapa = mapaRef.current;

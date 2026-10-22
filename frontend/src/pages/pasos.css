@@ -520,3 +520,20 @@ body:has(.nav-inferior) .chat { bottom: calc(var(--alto-nav-inferior) + .8rem); 
   box-shadow: 0 0 0 7px rgba(26, 115, 232, .25); animation: pulso-vivo 2s ease-in-out infinite;
 }
 @keyframes pulso-vivo { 50% { box-shadow: 0 0 0 12px rgba(26, 115, 232, .1); } }
+
+/* GUI-116: navegación guiada */
+.nav-iniciar { margin: .6rem 0 0; }
+.nav-barra {
+  margin: .6rem 0 0; padding: .8rem .9rem; border-radius: 16px;
+  background: var(--ciruela); color: var(--crema); box-shadow: 0 6px 18px -10px rgba(74, 53, 96, .6);
+}
+.nav-barra p { color: inherit; margin: 0; }
+.nav-indicacion { display: flex; align-items: center; gap: .8rem; }
+.nav-flecha { flex: none; width: 2.6rem; height: 2.6rem; fill: var(--naranja); transition: transform .2s; }
+.nav-distancia { font: 700 1.6rem/1.1 var(--font-ui); letter-spacing: .02em; }
+.nav-texto { font: 600 1rem/1.35 var(--font-body); }
+.nav-resumen { margin-top: .5rem !important; font-size: .85rem; opacity: .85; }
+.nav-estado { font-weight: 600; }
+.nav-barra .aviso-error { background: transparent; color: #ffd2c4; }
+.nav-boton { margin-top: .7rem; background: var(--naranja); color: var(--ciruela); }
+.nav-terminar { display: block; margin: .5rem 0 0 auto; color: var(--crema); }

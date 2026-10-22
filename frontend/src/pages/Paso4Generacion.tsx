@@ -22,6 +22,8 @@ import type { CapaAbiertosAhora } from "../components/Mapa";
 import { useAbiertosAhora } from "../hooks/useAbiertosAhora";
 import { usePuntoPartida } from "../hooks/usePuntoPartida";
 import { useUbicacionEnVivo } from "../hooks/useUbicacionEnVivo";
+import { useNavegacion } from "../hooks/useNavegacion";
+import BarraNavegacion from "../components/BarraNavegacion";
 import { BarraPuntoPartida, TrasladoDesdePartida } from "../components/PuntoPartida";
 import NavegacionPaso4, { type SeccionPaso4 } from "../components/NavegacionPaso4";
 import { DISTANCIA_MAXIMA_PARTIDA_KM, distanciaKm, etiquetaPartida } from "../services/puntoPartida";
@@ -479,6 +481,7 @@ async function manejarExportarPlan() {
       ? enVivo.posicion
       : null;
 
+
   // GUI-89: tomar el tiempo real del itinerario cuando existe.
   // Si no viene informado, reutilizar la misma estimación visual de GUI-34.
   // Cada parada guarda el traslado desde la anterior. Con punto de partida, el primer tramo es el que
@@ -500,6 +503,29 @@ async function manejarExportarPlan() {
       : [],
     [dia?.id, dia?.paradas, visitadas, calificaciones, paradasVisitadas]
   );
+
+  // GUI-116: navegación guiada hacia una parada del día, desde la posición en vivo.
+  const [destinoNavegacionId, setDestinoNavegacionId] = useState<string | null>(null);
+  const paradaNavegacion = dia?.paradas.find((p) => p.id === destinoNavegacionId) ?? null;
+  const destinoNavegacion = paradaNavegacion
+    ? { id: paradaNavegacion.id, nombre: paradaNavegacion.nombre, lat: paradaNavegacion.lat, lng: paradaNavegacion.lng }
+    : null;
+  const navegacion = useNavegacion({ destino: destinoNavegacion, posicion: posicionEnVivo, transporte: viaje.transporte });
+  const pendientesDelDia = (dia?.paradas ?? []).filter(
+    (p) => !idsParadasCompletadas.includes(p.id) && (p as ParadaConHorario).estadoHorario !== "descartada"
+  );
+
+  function navegarA(paradaId: string) {
+    setDestinoNavegacionId(paradaId);
+    cambiarSeccion("mapa");
+  }
+
+  function llegarYSeguir() {
+    if (!dia || !paradaNavegacion) return;
+    marcarVisitada(dia.id, paradaNavegacion.id);
+    const siguiente = pendientesDelDia.find((p) => p.id !== paradaNavegacion.id);
+    setDestinoNavegacionId(siguiente?.id ?? null);
+  }
 
   // GUI-72: estado del día que se envía al monitoreo del clima.
   const itinerarioActivo = useMemo(
@@ -835,6 +861,12 @@ async function manejarExportarPlan() {
                           {!descartada && !visitada && (
                             <button type="button" className="accion-parada" onClick={() => marcarVisitada(dia.id, p.id)}>
                               Marcar como visitada
+                            </button>
+                          )}
+
+                          {!descartada && !visitada && (
+                            <button type="button" className="accion-parada" onClick={() => navegarA(p.id)}>
+                              Cómo llegar
                             </button>
                           )}
 
@@ -1223,6 +1255,28 @@ async function manejarExportarPlan() {
 
           {seccion === "mapa" && (
             <section className="paso4-seccion seccion-mapa" aria-label="Mapa">
+            {/* GUI-116: navegación guiada */}
+            {destinoNavegacion ? (
+              <BarraNavegacion
+                destino={destinoNavegacion}
+                ruta={navegacion.ruta}
+                progreso={navegacion.progreso}
+                error={navegacion.error}
+                cargando={navegacion.cargando}
+                recalculando={navegacion.recalculando}
+                sinUbicacion={!posicionEnVivo}
+                hayOtraParada={pendientesDelDia.length > 1}
+                onTerminar={() => setDestinoNavegacionId(null)}
+                onMarcarVisitada={llegarYSeguir}
+              />
+            ) : (
+              pendientesDelDia[0] && (
+                <button type="button" className="btn-primario nav-iniciar" onClick={() => setDestinoNavegacionId(pendientesDelDia[0].id)}>
+                  Cómo llegar a {pendientesDelDia[0].nombre}
+                </button>
+              )
+            )}
+
             {/* Mapa */}
               <div
                 className="mapa-dia"
@@ -1242,6 +1296,7 @@ async function manejarExportarPlan() {
                       : null
                   }
                   posicionActual={posicionEnVivo}
+                  rutaNavegacion={destinoNavegacion ? navegacion.ruta?.coordenadas ?? null : null}
                   eligiendoPartida={partida.eligiendo}
                   onElegirPartida={partida.elegirEnMapa}
                 />
