@@ -30,6 +30,7 @@ model Viaje {
 
   usuario     Usuario?     @relation(fields: [usuarioId], references: [id])
   itinerarios Itinerario[]
+  gastos      Gasto[]
 
   @@index([usuarioId, creadoEn])
   @@index([codigoCompartido])
@@ -60,6 +61,7 @@ model Parada {
 
   itinerario            Itinerario   @relation(fields: [itinerarioId], references: [id], onDelete: Cascade)
   restriccion           Restriccion?
+  gastos                Gasto[]
 }
 
 model Restriccion {
@@ -79,4 +81,19 @@ model Usuario {
   creadoEn   DateTime @default(now())
 
   viajes     Viaje[]
+}
+model Gasto {
+  id          String   @id @default(uuid())
+  viajeId     String
+  paradaId    String?
+  monto       Float
+  categoria   String   // "comidas" | "entradas" | "transporte" | "hospedaje" | "otros"
+  descripcion String?
+  fecha       DateTime @default(now())
+
+  viaje       Viaje    @relation(fields: [viajeId], references: [id], onDelete: Cascade)
+  parada      Parada?  @relation(fields: [paradaId], references: [id], onDelete: SetNull)
+
+  @@index([viajeId])
+  @@index([paradaId])
 }
