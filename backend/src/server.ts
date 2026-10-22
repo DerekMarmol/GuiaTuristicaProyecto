@@ -26,6 +26,10 @@ for (const variable of ["SERPAPI_API_KEY", "EXCHANGERATE_API_KEY"]) {
   }
 }
 
+if (!process.env.FOURSQUARE_API_KEY?.trim()) {
+  console.warn("Falta FOURSQUARE_API_KEY: los itinerarios usarán solo los lugares de OpenStreetMap (menos comercios y restaurantes).");
+}
+
 const puerto = Number(process.env.PORT) || 3000;
 // "::" escucha en todas las interfaces (IPv6 e IPv4), como hacía Express; Fastify por defecto solo usa localhost.
 const host = process.env.HOST?.trim() || "::";
