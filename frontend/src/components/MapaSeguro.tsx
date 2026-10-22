@@ -54,13 +54,14 @@ function useEnLinea() {
   return enLinea;
 }
 
-export function MapaSeguro({ paradas, paradasCompletadas, pronostico, eta, abiertos, partida, eligiendoPartida, onElegirPartida }: {
+export function MapaSeguro({ paradas, paradasCompletadas, pronostico, eta, abiertos, partida, posicionActual, eligiendoPartida, onElegirPartida }: {
   paradas?: Parada[];
   paradasCompletadas?: string[];
   pronostico?: PronosticoDiario;
   eta?: RespuestaEta | null;
   abiertos?: CapaAbiertosAhora | null;
   partida?: PartidaMapa | null;
+  posicionActual?: { lat: number; lng: number; precisionMetros: number | null } | null;
   eligiendoPartida?: boolean;
   onElegirPartida?: (punto: { lat: number; lng: number }) => void;
 }) {
@@ -76,6 +77,7 @@ export function MapaSeguro({ paradas, paradasCompletadas, pronostico, eta, abier
         eta={eta}
         abiertos={abiertos}
         partida={partida}
+        posicionActual={posicionActual}
         eligiendoPartida={eligiendoPartida}
         onElegirPartida={onElegirPartida}
       />

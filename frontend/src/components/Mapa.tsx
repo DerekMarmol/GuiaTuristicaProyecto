@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import type { LugarAbiertoAhora, Parada, PronosticoDiario } from "../../../shared/types";
@@ -40,6 +40,8 @@ interface MapaProps {
   eta?: RespuestaEta | null;
   abiertos?: CapaAbiertosAhora | null;
   partida?: PartidaMapa | null;
+  // GUI-115: posición del usuario en tiempo real («Tú estás aquí»).
+  posicionActual?: { lat: number; lng: number; precisionMetros: number | null } | null;
   // Mientras es true, tocar el mapa elige el punto de partida.
   eligiendoPartida?: boolean;
   onElegirPartida?: (punto: { lat: number; lng: number }) => void;
@@ -238,7 +240,11 @@ function gradienteRuta(progreso: number) {
   ];
 }
 
-function crearGeoJsonPartida(partida: PartidaMapa | null, primera: Parada | undefined) {
+// Zoom al que se acerca el mapa al seguir al usuario (nivel de calle).
+const ZOOM_SEGUIMIENTO = 16;
+
+// Tramo punteado desde donde está (o sale) el usuario hasta la próxima parada pendiente.
+function crearGeoJsonPartida(partida: { lat: number; lng: number } | null, primera: Parada | undefined) {
   if (!partida || !primera) {
     return { type: "FeatureCollection" as const, features: [] };
   }
@@ -262,9 +268,12 @@ export function Mapa({
   eta = null,
   abiertos = null,
   partida = null,
+  posicionActual = null,
   eligiendoPartida = false,
   onElegirPartida,
 }: MapaProps) {
+  const [seguir, setSeguir] = useState(false);
+  const marcadorVivoRef = useRef<mapboxgl.Marker | null>(null);
   const contenedorRef = useRef<HTMLDivElement>(null);
   const mapaRef = useRef<mapboxgl.Map | null>(null);
   const marcadoresRef = useRef<mapboxgl.Marker[]>([]);
@@ -300,6 +309,8 @@ export function Mapa({
       zoom: 12,
     });
     mapaRef.current = mapa;
+    // Si el usuario mueve el mapa con el dedo, deja de seguirlo (como en las apps de mapas).
+    mapa.on("dragstart", () => setSeguir(false));
 
     return () => {
       marcadoresRef.current.forEach((marcador) => marcador.remove());
@@ -397,22 +408,6 @@ export function Mapa({
     if (!mapa) return;
 
     const actualizarPartida = () => {
-      const primera = paradasRef.current[0];
-      const datos = crearGeoJsonPartida(partida, primera);
-      const fuente = mapa.getSource(SOURCE_PARTIDA) as mapboxgl.GeoJSONSource | undefined;
-      if (fuente) {
-        fuente.setData(datos);
-      } else {
-        mapa.addSource(SOURCE_PARTIDA, { type: "geojson", data: datos });
-        mapa.addLayer({
-          id: LAYER_PARTIDA,
-          type: "line",
-          source: SOURCE_PARTIDA,
-          layout: { "line-cap": "round" },
-          paint: { "line-color": "#2786a8", "line-width": 3, "line-dasharray": [1.5, 1.5], "line-opacity": 0.9 },
-        });
-      }
-
       marcadorPartidaRef.current?.remove();
       marcadorPartidaRef.current = null;
       if (!partida) return;
@@ -435,6 +430,64 @@ export function Mapa({
     mapa.once("load", actualizarPartida);
     return () => { mapa.off("load", actualizarPartida); };
   }, [partida?.lat, partida?.lng, partida?.etiqueta, paradas]);
+
+  // GUI-115: marcador «Tú estás aquí» que se mueve con cada lectura del GPS, tramo punteado hasta la
+  // próxima parada pendiente y, si el usuario lo pidió, el mapa centrado en él.
+  useEffect(() => {
+    const mapa = mapaRef.current;
+    if (!mapa) return;
+
+    const actualizarEnVivo = () => {
+      const completadas = new Set(completadasRef.current);
+      const proxima = paradasRef.current.find((p) => !completadas.has(p.id));
+      const datos = crearGeoJsonPartida(posicionActual ?? partida, proxima);
+      const fuente = mapa.getSource(SOURCE_PARTIDA) as mapboxgl.GeoJSONSource | undefined;
+      if (fuente) {
+        fuente.setData(datos);
+      } else {
+        mapa.addSource(SOURCE_PARTIDA, { type: "geojson", data: datos });
+        mapa.addLayer({
+          id: LAYER_PARTIDA,
+          type: "line",
+          source: SOURCE_PARTIDA,
+          layout: { "line-cap": "round" },
+          paint: { "line-color": "#2786a8", "line-width": 3, "line-dasharray": [1.5, 1.5], "line-opacity": 0.9 },
+        });
+      }
+
+      if (!posicionActual) {
+        marcadorVivoRef.current?.remove();
+        marcadorVivoRef.current = null;
+        return;
+      }
+      if (!marcadorVivoRef.current) {
+        const elemento = document.createElement("div");
+        elemento.className = "marcador-vivo";
+        elemento.setAttribute("role", "img");
+        elemento.setAttribute("aria-label", "Tú estás aquí");
+        marcadorVivoRef.current = new mapboxgl.Marker({ element: elemento, anchor: "center" })
+          .setPopup(new mapboxgl.Popup({ offset: 14 }).setText("Tú estás aquí"))
+          .setLngLat([posicionActual.lng, posicionActual.lat])
+          .addTo(mapa);
+      } else {
+        marcadorVivoRef.current.setLngLat([posicionActual.lng, posicionActual.lat]);
+      }
+      if (seguir) {
+        mapa.easeTo({
+          center: [posicionActual.lng, posicionActual.lat],
+          zoom: Math.max(mapa.getZoom(), ZOOM_SEGUIMIENTO),
+          duration: 600,
+        });
+      }
+    };
+
+    if (mapa.isStyleLoaded()) {
+      actualizarEnVivo();
+      return;
+    }
+    mapa.once("load", actualizarEnVivo);
+    return () => { mapa.off("load", actualizarEnVivo); };
+  }, [posicionActual?.lat, posicionActual?.lng, partida?.lat, partida?.lng, paradas, paradasCompletadas, seguir]);
 
   useEffect(() => {
     const mapa = mapaRef.current;
@@ -529,5 +582,22 @@ export function Mapa({
     if (mapa && marcador) mapa.easeTo({ center: marcador.getLngLat(), duration: 400 });
   }, [seleccionadoId, lugaresAbiertos]);
 
-  return <div ref={contenedorRef} className="mapa" />;
+  return (
+    <div className="mapa-contenedor">
+      <div ref={contenedorRef} className="mapa" />
+      <button
+        type="button"
+        className="mapa-seguir"
+        aria-pressed={seguir}
+        disabled={!posicionActual}
+        onClick={() => setSeguir((actual) => !actual)}
+        title={posicionActual ? undefined : "Esperando tu ubicación"}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 2v3m0 14v3M2 12h3m14 0h3M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" />
+        </svg>
+        {seguir ? "Siguiéndote" : "Seguirme"}
+      </button>
+    </div>
+  );
 }

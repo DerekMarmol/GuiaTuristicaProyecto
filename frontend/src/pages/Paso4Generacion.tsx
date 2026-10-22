@@ -21,9 +21,10 @@ import { BarraAbiertosAhora, ResultadosAbiertosAhora, describirReferencia, type 
 import type { CapaAbiertosAhora } from "../components/Mapa";
 import { useAbiertosAhora } from "../hooks/useAbiertosAhora";
 import { usePuntoPartida } from "../hooks/usePuntoPartida";
+import { useUbicacionEnVivo } from "../hooks/useUbicacionEnVivo";
 import { BarraPuntoPartida, TrasladoDesdePartida } from "../components/PuntoPartida";
 import NavegacionPaso4, { type SeccionPaso4 } from "../components/NavegacionPaso4";
-import { etiquetaPartida } from "../services/puntoPartida";
+import { DISTANCIA_MAXIMA_PARTIDA_KM, distanciaKm, etiquetaPartida } from "../services/puntoPartida";
 import { obtenerUbicacionActual } from "../services/ubicacionActual";
 import { coordenadasValidas, lugaresParaMapa } from "../services/abiertosAhora";
 
@@ -281,7 +282,11 @@ async function manejarExportarPlan() {
         probabilidadLluvia,
         modoTransporte: modoTransporteRuta(viaje.transporte),
         // Solo la ubicación real sirve de origen a mitad del día; un punto marcado (el hotel) no.
-        ...(partida.puntoUtil?.fuente === "ubicacion" ? { origen: { lat: partida.puntoUtil.lat, lng: partida.puntoUtil.lng } } : {}),
+        ...(posicionEnVivo
+          ? { origen: { lat: posicionEnVivo.lat, lng: posicionEnVivo.lng } }
+          : partida.puntoUtil?.fuente === "ubicacion"
+            ? { origen: { lat: partida.puntoUtil.lat, lng: partida.puntoUtil.lng } }
+            : {}),
       });
       const paradas = [
         ...diaSolicitado.paradas.filter((p) => completadas.has(p.id)),
@@ -464,6 +469,15 @@ async function manejarExportarPlan() {
   // GUI-107: punto de partida del usuario y traslado hasta la primera parada.
   const partida = usePuntoPartida(dia?.paradas[0] ?? null, fase === "listo");
   const trasladoInicio = partida.puntoUtil ? partida.traslado : null;
+
+  // GUI-115: con el mapa abierto, la posición se sigue en tiempo real. Como el punto de partida, solo se
+  // usa si el usuario está cerca del recorrido del día (no si planea desde casa, en otro departamento).
+  const enVivo = useUbicacionEnVivo(fase === "listo" && seccion === "mapa");
+  const primeraDelDia = dia?.paradas[0];
+  const posicionEnVivo =
+    enVivo.posicion && primeraDelDia && distanciaKm(enVivo.posicion, primeraDelDia) <= DISTANCIA_MAXIMA_PARTIDA_KM
+      ? enVivo.posicion
+      : null;
 
   // GUI-89: tomar el tiempo real del itinerario cuando existe.
   // Si no viene informado, reutilizar la misma estimación visual de GUI-34.
@@ -1221,7 +1235,13 @@ async function manejarExportarPlan() {
                   pronostico={pronostico?.dias.find((d) => d.fecha === dia.fecha)}
                   eta={etaMapa}
                   abiertos={capaAbiertos}
-                  partida={partida.puntoUtil ? { ...partida.puntoUtil, etiqueta: etiquetaPartida(partida.puntoUtil) } : null}
+                  // Con la posición en vivo, el marcador de partida solo se muestra si es un punto elegido en el mapa.
+                  partida={
+                    partida.puntoUtil && (partida.puntoUtil.fuente === "mapa" || !posicionEnVivo)
+                      ? { ...partida.puntoUtil, etiqueta: etiquetaPartida(partida.puntoUtil) }
+                      : null
+                  }
+                  posicionActual={posicionEnVivo}
                   eligiendoPartida={partida.eligiendo}
                   onElegirPartida={partida.elegirEnMapa}
                 />
@@ -1231,6 +1251,7 @@ async function manejarExportarPlan() {
                 <span><i className="leyenda-ruta-pendiente" /> Recorrido pendiente</span>
                 {capaAbiertos && capaAbiertos.lugares.length > 0 && <span><i className="leyenda-abierto" /> Abierto ahora</span>}
               </div>
+              {enVivo.error && <p className="nota">{enVivo.error} Tu posición no se mostrará en el mapa.</p>}
 
               {/* GUI-107: punto de partida */}
               <BarraPuntoPartida
