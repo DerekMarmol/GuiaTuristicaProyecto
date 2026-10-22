@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type MouseEvent } from "react";
 import { useViaje } from "../context/ViajeContext";
 import Stepper from "../components/Stepper";
+import MisPlanes from "../components/MisPlanes";
 
 interface Errores {
   destino?: string;
@@ -56,6 +57,7 @@ export default function Paso1Destino() {
   }
 
   return (
+    <>
     <form className="card" onSubmit={onSubmit} noValidate>
       <Stepper actual={1} />
       <h2>¿A dónde quieres ir?</h2>
@@ -106,5 +108,7 @@ export default function Paso1Destino() {
 
       <button type="submit" className="btn-primario">Siguiente</button>
     </form>
+    <MisPlanes />
+    </>
   );
 }

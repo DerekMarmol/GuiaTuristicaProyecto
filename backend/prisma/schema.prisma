@@ -57,6 +57,7 @@ model Parada {
   horaCierre            String
   tiempoEstanciaMinutos Int
   placeId               String?
+  orden                 Int      @default(0) // posición de la parada dentro del día (0, 1, 2…)
 
   itinerario            Itinerario   @relation(fields: [itinerarioId], references: [id], onDelete: Cascade)
   restriccion           Restriccion?

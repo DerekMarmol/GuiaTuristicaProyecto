@@ -7,6 +7,20 @@ import { validarSolicitudGeneracion } from "../validacion/generacion";
 import { PrismaClient } from "../../generated/prisma";
 
 const prisma = new PrismaClient();
+const MAX_PLANES_LISTADOS = 20;
+
+// Un plan con sus días y paradas en orden, solo si pertenece al usuario (otro usuario recibe "no encontrado").
+function buscarPlanDelUsuario(id: string, usuarioId: string) {
+  return prisma.viaje.findFirst({
+    where: { id, usuarioId },
+    include: {
+      itinerarios: {
+        orderBy: { numeroDia: "asc" },
+        include: { paradas: { orderBy: { orden: "asc" }, include: { restriccion: true } } },
+      },
+    },
+  });
+}
 const LIMITE_CUERPO_BYTES = 100 * 1024;
 
 // Errores del analizador de cuerpo de Fastify que se informan como parámetros inválidos.
@@ -114,7 +128,8 @@ export function crearRutaItinerarios(
                 numeroDia: dia.numeroDia ?? index + 1,
                 fecha: dia.fecha ? new Date(dia.fecha) : fechaInicio,
                 paradas: {
-                  create: (dia.paradas || []).map((p: any) => ({
+                  create: (dia.paradas || []).map((p: any, orden: number) => ({
+                    orden,
                     nombre: p.nombre,
                     lat: p.lat,
                     lng: p.lng,
@@ -158,6 +173,38 @@ export function crearRutaItinerarios(
         });
       }
     );
+    // GUI-114: planes guardados del usuario, para recuperarlos en otro dispositivo o tras borrar el teléfono.
+    app.get("/mis-planes", { preHandler: [app.verificarToken] }, async (req) => {
+      const { id: usuarioId } = req.user as { id: string };
+      const viajes = await prisma.viaje.findMany({
+        where: { usuarioId },
+        orderBy: { creadoEn: "desc" },
+        take: MAX_PLANES_LISTADOS,
+        include: { itinerarios: { include: { _count: { select: { paradas: true } } } } },
+      });
+      return {
+        planes: viajes.map((v) => ({
+          id: v.id,
+          destino: v.destino,
+          fechaInicio: v.fechaInicio,
+          fechaFin: v.fechaFin,
+          creadoEn: v.creadoEn,
+          totalDias: v.itinerarios.length,
+          totalParadas: v.itinerarios.reduce((suma, it) => suma + it._count.paradas, 0),
+        })),
+      };
+    });
+
+    app.get("/:id", { preHandler: [app.verificarToken] }, async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const { id: usuarioId } = req.user as { id: string };
+      const plan = await buscarPlanDelUsuario(id, usuarioId);
+      if (!plan) {
+        return reply.status(404).send({ statusCode: 404, mensaje: "No se encontró ningún plan de viaje con ese ID" });
+      }
+      return { plan };
+    });
+
     // GET /:id/exportar
     app.get(
       "/:id/exportar",
@@ -172,22 +219,9 @@ export function crearRutaItinerarios(
           });
         }
 
-        // Consultar el plan con todos sus días, paradas y restricciones
-        const viaje = await prisma.viaje.findUnique({
-          where: { id },
-          include: {
-            itinerarios: {
-              orderBy: { numeroDia: "asc" },
-              include: {
-                paradas: {
-                  include: {
-                    restriccion: true,
-                  },
-                },
-              },
-            },
-          },
-        });
+        // Consultar el plan con todos sus días, paradas y restricciones. Solo su dueño puede exportarlo.
+        const { id: usuarioId } = req.user as { id: string };
+        const viaje = await buscarPlanDelUsuario(id, usuarioId);
 
         if (!viaje) {
           return reply.status(404).send({

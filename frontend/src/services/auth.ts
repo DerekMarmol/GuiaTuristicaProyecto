@@ -2,7 +2,21 @@ import type { RespuestaAuth } from "../types/auth";
 const RUTA_REGISTRO = "/api/auth/registro";
 const RUTA_LOGIN = "/api/auth/login";
 
-const SIMULADO = import.meta.env.VITE_AUTH_SIMULADO === "true";
+// import.meta.env solo existe dentro de Vite; en las pruebas (node) no.
+const SIMULADO = import.meta.env?.VITE_AUTH_SIMULADO === "true";
+
+// Dónde guarda AuthContext la sesión ({ usuario, token }) en el teléfono.
+export const CLAVE_SESION = "guia.sesion";
+
+// Token de la sesión iniciada, para las llamadas que requieren cuenta (guardar, exportar, mis planes).
+export function tokenGuardado(): string | null {
+  try {
+    const sesion = JSON.parse(localStorage.getItem(CLAVE_SESION) ?? "null");
+    return typeof sesion?.token === "string" ? sesion.token : null;
+  } catch {
+    return null;
+  }
+}
 
 export class ErrorAuth extends Error {
   constructor(message: string, readonly estado?: number) {

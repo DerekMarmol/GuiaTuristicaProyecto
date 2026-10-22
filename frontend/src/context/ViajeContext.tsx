@@ -1,13 +1,43 @@
-import { createContext, useContext, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { createContext, useContext, useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import type { Itinerario, Viaje } from "../../../shared/types";
 import type { Calificacion } from "../types/calificacion";
 import type { Gasto } from "../types/gasto";
+import { borrarConPrefijo, guardarEnTelefono, leerGuardado } from "../utils/almacenLocal";
 
 export type ViajeBorrador = Partial<Viaje> & {
   presupuestoDiario?: number;
   modulos?: string[];
   sinHotel?: boolean;
+  // Id del plan en el servidor cuando se abrió desde «Tus planes guardados» (permite exportarlo).
+  idPlanGuardado?: string;
 };
+
+// GUI-114: el viaje en curso se guarda en el teléfono. Si cambia la forma de lo guardado, subir la versión
+// para no intentar leer datos viejos con otro formato.
+const CLAVE_VIAJE = "guia.viaje";
+const VERSION_GUARDADO = 1;
+// Estado de la pantalla del paso 4 (sección y día abiertos, paradas visitadas…), ver Paso4Generacion.
+export const PREFIJO_ESTADO_PASO4 = "guia.paso4.";
+
+interface ViajeGuardado {
+  version: number;
+  viaje: ViajeBorrador;
+  paso: number;
+  itinerarios: Itinerario[] | null;
+  calificaciones: Record<string, Calificacion>;
+  gastos: Gasto[];
+}
+
+function leerViajeGuardado(): ViajeGuardado | null {
+  const guardado = leerGuardado<ViajeGuardado>(CLAVE_VIAJE);
+  const valido =
+    guardado?.version === VERSION_GUARDADO &&
+    typeof guardado.viaje === "object" &&
+    [1, 2, 3, 4].includes(guardado.paso) &&
+    (guardado.itinerarios === null || Array.isArray(guardado.itinerarios)) &&
+    Array.isArray(guardado.gastos);
+  return valido ? guardado : null;
+}
 
 interface ViajeContextValue {
   viaje: ViajeBorrador;
@@ -24,19 +54,27 @@ interface ViajeContextValue {
   irAPaso: (paso: number) => void;
   setItinerarios: Dispatch<SetStateAction<Itinerario[] | null>>;
   reiniciar: () => void;
+  // Abre un plan recuperado (por ejemplo, de «Tus planes guardados») directamente en el paso 4.
+  cargarPlan: (viaje: ViajeBorrador, itinerarios: Itinerario[]) => void;
 }
 
 const ViajeContext = createContext<ViajeContextValue | null>(null);
 
 export function ViajeProvider({ children }: { children: ReactNode }) {
-  const [viaje, setViaje] = useState<ViajeBorrador>({});
-  const [paso, setPaso] = useState(1);
-  const [itinerarios, setItinerariosState] = useState<Itinerario[] | null>(null);
-  // TODO(backend): persistir calificaciones en el servidor. Por ahora viven en memoria.
-  const [calificaciones, setCalificaciones] = useState<Record<string, Calificacion>>({});
+  const [guardado] = useState(leerViajeGuardado);
+  const [viaje, setViaje] = useState<ViajeBorrador>(guardado?.viaje ?? {});
+  const [paso, setPaso] = useState(guardado?.paso ?? 1);
+  const [itinerarios, setItinerariosState] = useState<Itinerario[] | null>(guardado?.itinerarios ?? null);
+  // TODO(backend): persistir calificaciones en el servidor. Por ahora se guardan en el teléfono.
+  const [calificaciones, setCalificaciones] = useState<Record<string, Calificacion>>(guardado?.calificaciones ?? {});
   // Gastos que registra el usuario en el panel de presupuesto. Empiezan vacíos (GUI-113).
-  // TODO(backend): guardarlos en el servidor. Por ahora viven en memoria.
-  const [gastos, setGastos] = useState<Gasto[]>([]);
+  // TODO(backend): guardarlos en el servidor. Por ahora se guardan en el teléfono.
+  const [gastos, setGastos] = useState<Gasto[]>(guardado?.gastos ?? []);
+
+  useEffect(() => {
+    const aGuardar: ViajeGuardado = { version: VERSION_GUARDADO, viaje, paso, itinerarios, calificaciones, gastos };
+    guardarEnTelefono(CLAVE_VIAJE, aGuardar);
+  }, [viaje, paso, itinerarios, calificaciones, gastos]);
 
   const setItinerarios: Dispatch<SetStateAction<Itinerario[] | null>> = (actualizacion) => {
     setItinerariosState((anterior) => {
@@ -74,6 +112,16 @@ export function ViajeProvider({ children }: { children: ReactNode }) {
     setViaje({});
     setItinerarios(null);
     setPaso(1);
+    borrarConPrefijo(PREFIJO_ESTADO_PASO4);
+  };
+
+  const cargarPlan = (nuevoViaje: ViajeBorrador, nuevosItinerarios: Itinerario[]) => {
+    borrarConPrefijo(PREFIJO_ESTADO_PASO4);
+    setViaje(nuevoViaje);
+    setItinerariosState(nuevosItinerarios);
+    setCalificaciones({});
+    setGastos([]);
+    setPaso(4);
   };
 
   return (
@@ -82,7 +130,7 @@ export function ViajeProvider({ children }: { children: ReactNode }) {
         viaje, paso, itinerarios,
         calificaciones, guardarCalificacion,
         gastos, setGastos, agregarGasto, eliminarGasto,
-        actualizarViaje, fijarUbicacionDestino, irAPaso: setPaso, setItinerarios, reiniciar,
+        actualizarViaje, fijarUbicacionDestino, irAPaso: setPaso, setItinerarios, reiniciar, cargarPlan,
       }}
     >
       {children}

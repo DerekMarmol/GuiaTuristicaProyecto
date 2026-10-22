@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import type { Usuario } from "../types/auth";
-import { iniciarSesionApi, registrarUsuario } from "../services/auth";
+import { CLAVE_SESION, iniciarSesionApi, registrarUsuario } from "../services/auth";
 
 interface Sesion {
   usuario: Usuario;
@@ -15,7 +15,7 @@ interface AuthContextValue {
   cerrarSesion: () => void;
 }
 
-const CLAVE = "guia.sesion";
+const CLAVE = CLAVE_SESION;
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 function leerSesion(): Sesion | null {

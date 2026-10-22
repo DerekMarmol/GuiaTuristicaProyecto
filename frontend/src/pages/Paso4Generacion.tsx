@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useViaje } from "../context/ViajeContext";
+import { PREFIJO_ESTADO_PASO4, useViaje } from "../context/ViajeContext";
+import { useEstadoGuardado } from "../utils/almacenLocal";
 import Stepper from "../components/Stepper";
 import Recomendaciones from "../components/Recomendaciones";
 import { MapaSeguro } from "../components/MapaSeguro";
@@ -137,10 +138,11 @@ export default function Paso4Generacion() {
   );
   const [progreso, setProgreso] = useState(0);
   const [error, setError] = useState("");
-  const [advertencias, setAdvertencias] = useState<string[]>([]);
+  // GUI-114: lo que el usuario ve y marca en esta pantalla se guarda en el teléfono junto con el viaje.
+  const [advertencias, setAdvertencias] = useEstadoGuardado<string[]>(`${PREFIJO_ESTADO_PASO4}advertencias`, []);
   const [intento, setIntento] = useState(0);
-  const [diaActivo, setDiaActivo] = useState(0);
-  const [seccion, setSeccion] = useState<SeccionPaso4>("itinerario");
+  const [diaActivo, setDiaActivo] = useEstadoGuardado(`${PREFIJO_ESTADO_PASO4}dia`, 0);
+  const [seccion, setSeccion] = useEstadoGuardado<SeccionPaso4>(`${PREFIJO_ESTADO_PASO4}seccion`, "itinerario");
   const cabeceraRef = useRef<HTMLDivElement>(null);
 
   // Al cambiar de sección se deja la cabecera de días arriba: el encabezado de la app y el indicador de
@@ -153,14 +155,16 @@ export default function Paso4Generacion() {
   const [votos, setVotos] = useState<Record<string, Voto>>({});
   const [copiado, setCopiado] = useState("");
   const [calificando, setCalificando] = useState<string | null>(null);
-  const [visitadas, setVisitadas] = useState<Record<string, boolean>>({});
+  const [visitadas, setVisitadas] = useEstadoGuardado<Record<string, boolean>>(`${PREFIJO_ESTADO_PASO4}visitadas`, {});
   // El seguimiento comienza únicamente cuando el usuario inicia el traslado.
   const [inicioSeguimiento, setInicioSeguimiento] = useState<number | null>(null);
   const [tiempoActual, setTiempoActual] = useState(() => Date.now());
   const [etaMapa, setEtaMapa] = useState<RespuestaEta | null>(null);
   // Estados para el guardado del plan
   const [guardando, setGuardando] = useState(false);
-  const [idGuardado, setIdGuardado] = useState<string | null>(null);
+  const [idGuardadoAqui, setIdGuardado] = useEstadoGuardado<string | null>(`${PREFIJO_ESTADO_PASO4}idGuardado`, null);
+  // Un plan abierto desde «Tus planes guardados» ya está en el servidor.
+  const idGuardado = idGuardadoAqui ?? viaje.idPlanGuardado ?? null;
   const [notificacionGuardado, setNotificacionGuardado] = useState<{
     tipo: "exito" | "local" | "error";
     texto: string;
@@ -230,7 +234,10 @@ async function manejarExportarPlan() {
   const [estadoPronostico, setEstadoPronostico] = useState<EstadoPronostico>("cargando");
   const [reoptimizando, setReoptimizando] = useState(false);
   const [avisoReoptimizacion, setAvisoReoptimizacion] = useState("");
-  const [paradasVisitadas, setParadasVisitadas] = useState<Record<string, string[]>>({});
+  const [paradasVisitadas, setParadasVisitadas] = useEstadoGuardado<Record<string, string[]>>(
+    `${PREFIJO_ESTADO_PASO4}paradasVisitadas`,
+    {}
+  );
   const diasClimaAplicados = useRef(new Set<string>());
 
   const [codigo] = useState(() =>
@@ -327,6 +334,10 @@ async function manejarExportarPlan() {
         setAdvertencias(resultado.advertencias);
         setDiaActivo(0);
         setVotos({});
+        // Las paradas nuevas reutilizan ids (p1-1, p1-2…): lo marcado en el itinerario anterior no aplica.
+        setVisitadas({});
+        setParadasVisitadas({});
+        setIdGuardado(null);
         setFase("listo");
       })
       .catch((err) => {
@@ -420,7 +431,8 @@ async function manejarExportarPlan() {
   }
 
   // Datos del día activo
-  const dia = itinerarios?.[diaActivo];
+  // El día guardado puede no existir si el itinerario cambió (por ejemplo, uno nuevo con menos días).
+  const dia = itinerarios?.[Math.min(diaActivo, itinerarios.length - 1)];
 
   // Clima de este momento, solo si el día que se está viendo es hoy. Se refresca cada 15 minutos.
   const [climaAhora, setClimaAhora] = useState<ClimaAhora | null>(null);

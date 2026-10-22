@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Parada" ADD COLUMN     "orden" INTEGER NOT NULL DEFAULT 0;

@@ -1,5 +1,6 @@
 import type { Itinerario, Parada } from "../../../shared/types";
 import type { ViajeBorrador } from "../context/ViajeContext";
+import { tokenGuardado } from "./auth";
 
 export const PASOS_GENERACION = [
   "Ubicando tu destino",
@@ -185,10 +186,8 @@ export async function generarItinerario(
  * la descarga nativa del navegador mediante un blob.
  */
 export async function exportarPlanViaje(viajeId: string): Promise<void> {
-  const token =
-    localStorage.getItem("token") ||
-    sessionStorage.getItem("token") ||
-    localStorage.getItem("jwt");
+  // GUI-114: antes se buscaba en "token"/"jwt", que nadie escribe; la sesión vive en CLAVE_SESION.
+  const token = tokenGuardado();
 
   const respuesta = await fetch(`${API_BASE_URL}/api/itinerarios/${viajeId}/exportar`, {
     method: "GET",
@@ -229,16 +228,16 @@ export interface ResultadoGuardado {
   mensaje: string;
 }
 
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || "http://localhost:3000";
+// Vacío = mismo origen que la página (el proxy de Vite reenvía /api al backend), como el resto de servicios.
+// Con "http://localhost:3000" fijo, desde el teléfono (por un túnel) apuntaba al propio teléfono.
+const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || "";
 
 export async function guardarPlanViaje(
   viaje: ViajeBorrador,
   itinerarios: Itinerario[]
 ): Promise<ResultadoGuardado> {
-  const token =
-    localStorage.getItem("token") ||
-    sessionStorage.getItem("token") ||
-    localStorage.getItem("jwt");
+  // GUI-114: antes se buscaba en "token"/"jwt", que nadie escribe; la sesión vive en CLAVE_SESION.
+  const token = tokenGuardado();
 
   // Construir el payload que espera el backend
   const payload = {
