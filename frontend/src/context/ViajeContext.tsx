@@ -34,7 +34,8 @@ export function ViajeProvider({ children }: { children: ReactNode }) {
   const [itinerarios, setItinerariosState] = useState<Itinerario[] | null>(null);
   // TODO(backend): persistir calificaciones en el servidor. Por ahora viven en memoria.
   const [calificaciones, setCalificaciones] = useState<Record<string, Calificacion>>({});
-  // TODO(backend): gastos reales desde el endpoint de Lucía. Por ahora son simulados y viven en memoria.
+  // Gastos que registra el usuario en el panel de presupuesto. Empiezan vacíos (GUI-113).
+  // TODO(backend): guardarlos en el servidor. Por ahora viven en memoria.
   const [gastos, setGastos] = useState<Gasto[]>([]);
 
   const setItinerarios: Dispatch<SetStateAction<Itinerario[] | null>> = (actualizacion) => {

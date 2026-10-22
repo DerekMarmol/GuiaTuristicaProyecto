@@ -8,7 +8,6 @@ import PanelEta from "../components/PanelEta";
 import IndicadorClima, { type EstadoPronostico } from "../components/IndicadorClima";
 import AlertaHorario from "../components/AlertaHorario";
 import PanelPresupuesto from "../components/PanelPresupuesto";
-import { generarGastosSimulados } from "../services/gastos";
 import CalificacionParada, { ResumenCalificacion } from "../components/CalificacionParada";
 import type { RespuestaClima } from "../../../shared/types";
 import { consultarClimaActual, consultarPronostico, coordenadasDelViaje, hayLluviaSignificativa, type ClimaAhora } from "../services/clima";
@@ -128,7 +127,6 @@ export default function Paso4Generacion() {
     calificaciones,
     guardarCalificacion,
     gastos,
-    setGastos,
     agregarGasto,
     eliminarGasto,
   } = useViaje();
@@ -327,8 +325,6 @@ async function manejarExportarPlan() {
         setItinerarios(resultado.itinerarios);
         fijarUbicacionDestino(resultado.destino.lat, resultado.destino.lng);
         setAdvertencias(resultado.advertencias);
-        // TODO(backend): cargar los gastos reales (Lucía) en lugar de simularlos.
-        setGastos(generarGastosSimulados(resultado.itinerarios, presupuestoDiario));
         setDiaActivo(0);
         setVotos({});
         setFase("listo");

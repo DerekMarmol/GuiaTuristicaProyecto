@@ -111,7 +111,7 @@ export default function PanelPresupuesto({
       )}
 
       {gastosDelDia.length === 0 ? (
-        <p className="aviso-vacio">Aún no registras gastos este día.</p>
+        <p className="aviso-vacio">Aún no registras gastos este día. Anota abajo lo que vayas gastando para compararlo con tu presupuesto.</p>
       ) : (
         <ul className="pres-gastos" aria-label="Gastos del día">
           {gastosDelDia.map((g) => (
@@ -165,8 +165,7 @@ export default function PanelPresupuesto({
 
       <p className="nota">
         Total del viaje: <b>{fmt(totalGastadoViaje)}</b>
-        {presupuestoTotal !== undefined && <> de {fmt(presupuestoTotal)}</>}.{" "}
-        Datos de ejemplo: se conectarán con tus gastos reales más adelante.
+        {presupuestoTotal !== undefined && <> de {fmt(presupuestoTotal)}</>}.
       </p>
     </section>
   );
