@@ -57,6 +57,52 @@ describe("velocidad calculada sin coords.speed", () => {
   });
 });
 
+describe("velocidad real en carro (GUI-119)", () => {
+  const kmh = (v: number) => v / 3.6;
+
+  for (const velocidad of [20, 40, 60]) {
+    test(`a ${velocidad} km/h con margen de error de teléfono (30 m) marca ${velocidad} km/h`, () => {
+      const { velocidadKmh } = ultimaEstimacion(recorrido(kmh(velocidad), 20, 30));
+      assert.ok(Math.abs(velocidadKmh! - velocidad) <= 1, `marcó ${velocidadKmh?.toFixed(1)} km/h`);
+    });
+  }
+
+  test("con ruido en las posiciones se mantiene cerca de la velocidad real", () => {
+    // Desvío determinista de hasta ±8 m, como el que da un GPS con 15 m de margen.
+    const desvio = (i: number) => (((i * 37) % 17) - 8);
+    const { velocidadKmh } = ultimaEstimacion(recorrido(kmh(40), 20, 15, desvio));
+    assert.ok(Math.abs(velocidadKmh! - 40) <= 4, `marcó ${velocidadKmh?.toFixed(1)} km/h`);
+  });
+
+  test("al acelerar de 20 a 60 km/h lo refleja en pocos segundos", () => {
+    const estimador = crearEstimadorVelocidad();
+    let metros = 0;
+    let ultima: number | null = null;
+    for (let s = 0; s <= 26; s++) {
+      metros += s <= 20 ? kmh(20) : kmh(60);
+      ultima = estimador.agregar({
+        lat: INICIO.lat + metros / METROS_POR_GRADO,
+        lng: INICIO.lng,
+        precisionMetros: 10,
+        tiempoMs: 1_000_000 + s * 1000,
+        velocidadMs: null,
+      }).velocidadKmh;
+    }
+    assert.ok(ultima! >= 52, `a los 6 s de acelerar marcaba ${ultima?.toFixed(1)} km/h`);
+  });
+
+  test("al detenerse marca detenido", () => {
+    const estimador = crearEstimadorVelocidad();
+    recorrido(kmh(40), 10, 10).forEach((l) => estimador.agregar(l));
+    const ultimaPosicion = recorrido(kmh(40), 10, 10).at(-1)!;
+    let resultado = null;
+    for (let s = 1; s <= 25; s++) {
+      resultado = estimador.agregar({ ...ultimaPosicion, tiempoMs: ultimaPosicion.tiempoMs + s * 1000 });
+    }
+    assert.equal(detectarTransporte(resultado!.velocidadKmh), "detenido");
+  });
+});
+
 describe("velocidad informada por el GPS", () => {
   test("usa coords.speed promediando las últimas lecturas", () => {
     const estimador = crearEstimadorVelocidad();
