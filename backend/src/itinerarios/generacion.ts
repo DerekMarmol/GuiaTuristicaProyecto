@@ -12,6 +12,8 @@ import { minutosDesdeHora } from "../ai/validacionEstancia";
 import type { SolicitudGeneracion } from "../validacion/generacion";
 import { buscarCandidatos, type Candidato } from "./candidatos";
 import { planificarSinIA } from "./planRespaldo";
+import type { ConsultarClima } from "../clima/servicio";
+import { diasConLluvia, horaDeArranqueHoy, origenCercano } from "./contexto";
 
 // El itinerario se arma antes de guardarse: el id definitivo lo asigna /api/itinerarios/guardar.
 const ID_VIAJE_BORRADOR = "borrador";
@@ -92,11 +94,15 @@ export function crearGeneradorItinerario({
   buscarLugares,
   enriquecerHorarios,
   cliente,
+  consultarClima,
+  ahora = () => new Date(),
 }: {
   geocodificar: Geocodificar;
   buscarLugares: BuscarLugares;
   enriquecerHorarios: EnriquecerHorarios;
   cliente?: ClienteLLM;
+  consultarClima?: ConsultarClima;
+  ahora?: () => Date;
 }): GenerarItinerario {
   return async function generarItinerario(solicitud) {
     const destino = await geocodificar(solicitud.destino);
@@ -109,14 +115,17 @@ export function crearGeneradorItinerario({
     }
 
     const totalDias = diasEntre(solicitud.fechaInicio, solicitud.fechaFin);
-    const candidatos = await buscarCandidatos({
-      destino,
-      intereses: solicitud.intereses,
-      dias: totalDias,
-      transporte: solicitud.transporte,
-      buscarLugares,
-      enriquecerHorarios,
-    });
+    const [candidatos, lluvia] = await Promise.all([
+      buscarCandidatos({
+        destino,
+        intereses: solicitud.intereses,
+        dias: totalDias,
+        transporte: solicitud.transporte,
+        buscarLugares,
+        enriquecerHorarios,
+      }),
+      diasConLluvia(consultarClima, destino, solicitud.fechaInicio, solicitud.fechaFin),
+    ]);
     if (candidatos.length === 0) {
       throw new ErrorApi(422, "SIN_LUGARES", "No encontramos lugares cerca del destino para tus intereses. Prueba con otros intereses.");
     }
@@ -127,7 +136,19 @@ export function crearGeneradorItinerario({
       advertencias.push(`No encontramos lugares de ${interesesSinLugares.join(", ")} cerca de ${destino.nombre}.`);
     }
 
+    // Contexto de este momento: si el viaje es hoy, el primer día empieza ya (no a las 09:00); los días se
+    // arman desde donde está el viajero si está en el destino; y con lluvia se prefieren lugares bajo techo.
     let horaInicio = solicitud.horaInicio ?? HORA_INICIO_PREDETERMINADA;
+    const arranqueHoy = horaDeArranqueHoy(solicitud.fechaInicio, destino.zonaHoraria, ahora());
+    const horaPrimerDia = arranqueHoy && arranqueHoy > horaInicio ? arranqueHoy : undefined;
+    const horaInicioDelDia = (numeroDia: number) => (numeroDia === 1 ? horaPrimerDia : undefined);
+    const origen = origenCercano(solicitud.origen, destino);
+    if (horaPrimerDia) {
+      advertencias.push(`Tu viaje empieza hoy: el recorrido arranca a las ${horaPrimerDia}.`);
+    }
+    for (const { numeroDia, lluviaMm } of lluvia) {
+      advertencias.push(`Se esperan ${lluviaMm} mm de lluvia el día ${numeroDia}: se dio prioridad a lugares bajo techo.`);
+    }
     const viaje: ViajeIA = {
       id: ID_VIAJE_BORRADOR,
       destino: destino.nombre,
@@ -142,6 +163,9 @@ export function crearGeneradorItinerario({
       nombreHotel: solicitud.nombreHotel,
       zonaHoraria: destino.zonaHoraria,
       horaInicio,
+      origen,
+      horaInicioPrimerDia: horaPrimerDia,
+      diasConLluvia: lluvia,
     };
 
     const responder = (
@@ -164,7 +188,7 @@ export function crearGeneradorItinerario({
 
     if (cliente) {
       try {
-        return responder("ia", await generarItinerarios({ viaje, candidatos, cliente }));
+        return responder("ia", await generarItinerarios({ viaje, candidatos, cliente, opcionesValidacion: { horaInicioDelDia } }));
       } catch (error) {
         if (!(error instanceof ErrorGeneracionIA)) {
           throw error;
@@ -177,10 +201,12 @@ export function crearGeneradorItinerario({
       planificarSinIA({
         candidatos,
         intereses: solicitud.intereses,
-        centro: destino,
+        centro: origen ?? destino,
         fechaInicio: solicitud.fechaInicio,
         fechaFin: solicitud.fechaFin,
         horaInicio: hora,
+        horaInicioDelDia,
+        diasConLluvia: new Set(lluvia.map((d) => d.numeroDia)),
         zonaHoraria: destino.zonaHoraria,
       });
     let propuesta = planificar(horaInicio);
@@ -201,6 +227,6 @@ export function crearGeneradorItinerario({
       advertencias.push(`El recorrido empieza a las ${horaInicio} porque los lugares cercanos abren más tarde.`);
       viaje.horaInicio = horaInicio;
     }
-    return responder("respaldo", validarSalida(propuesta, candidatos, viaje));
+    return responder("respaldo", validarSalida(propuesta, candidatos, viaje, { horaInicioDelDia }));
   };
 }

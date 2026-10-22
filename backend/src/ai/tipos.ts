@@ -15,6 +15,8 @@ export interface LugarReal {
 
   intervalosHorario?: IntervaloHorario[];
   horario?: HorarioLugar;
+  // Bajo techo o al aire libre: con lluvia el plan prefiere los lugares bajo techo.
+  tipoEntorno?: "indoor" | "outdoor";
 }
 
 export type ViajeIA = Pick<
@@ -33,6 +35,11 @@ export type ViajeIA = Pick<
   nombreHotel?: string;
   zonaHoraria?: string;
   horaInicio?: string;
+  // Contexto del momento en que se genera: desde dónde sale el viajero, a qué hora puede empezar el
+  // primer día (si el viaje es hoy) y qué días se espera lluvia.
+  origen?: { lat: number; lng: number };
+  horaInicioPrimerDia?: string;
+  diasConLluvia?: { numeroDia: number; lluviaMm: number }[];
 };
 
 export type ViajeValidacion = Pick<ViajeIA, "id" | "fechaInicio" | "fechaFin" | "zonaHoraria" | "horaInicio">;

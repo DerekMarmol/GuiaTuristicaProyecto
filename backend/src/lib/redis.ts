@@ -22,6 +22,13 @@ redis.on("error", (err) => {
   console.error("🔴 Error en el cliente de Redis:", err.message);
 });
 
+// Lo mínimo que necesitan los clientes de APIs externas para guardar y leer respuestas en caché.
+// Se recibe como opción para que las pruebas usen la app sin conectarse a Redis.
+export type CacheJson = {
+  get<T>(clave: string): Promise<T | null>;
+  set<T>(clave: string, valor: T, ttlSegundos?: number): Promise<void>;
+};
+
 /**
  * Utilidades para interactuar con la caché de Redis
  */

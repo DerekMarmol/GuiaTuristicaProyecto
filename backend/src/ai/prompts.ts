@@ -33,7 +33,21 @@ export function construirPrompt(viaje: ViajeIA, candidatos: LugarReal[], errores
       ? c.horario.valorOriginal ?? "sin horario verificable"
       : `${c.horaApertura}-${c.horaCierre}`,
     precioEstimado: c.precioEstimado ?? null,
+    ...(c.tipoEntorno ? { entorno: c.tipoEntorno === "indoor" ? "bajo techo" : "aire libre" } : {}),
   }));
+
+  const contexto: string[] = [];
+  if (viaje.origen) {
+    contexto.push(
+      `- Punto de partida del viajero: lat ${viaje.origen.lat}, lng ${viaje.origen.lng}. Empieza cada día por el lugar más cercano a este punto y avanza hacia los siguientes sin regresar.`
+    );
+  }
+  if (viaje.horaInicioPrimerDia) {
+    contexto.push(`- El día 1 es hoy y empieza a las ${viaje.horaInicioPrimerDia} (hora local): no propongas lugares que cierren antes de esa hora.`);
+  }
+  for (const { numeroDia, lluviaMm } of viaje.diasConLluvia ?? []) {
+    contexto.push(`- Día ${numeroDia}: se esperan ${lluviaMm} mm de lluvia. Prefiere lugares "bajo techo" ese día.`);
+  }
 
   const partes = [
     `VIAJE`,
@@ -44,6 +58,7 @@ export function construirPrompt(viaje: ViajeIA, candidatos: LugarReal[], errores
     `- Intereses: ${viaje.intereses.join(", ")}`,
     viaje.presupuestoDiario ? `- Presupuesto diario: Q${viaje.presupuestoDiario}` : `- Presupuesto total: Q${viaje.presupuesto}`,
     viaje.hospedaje && viaje.nombreHotel ? `- Hospedaje: ${viaje.nombreHotel}` : "",
+    ...contexto,
     ``,
     `CANDIDATOS (única fuente permitida, JSON):`,
     JSON.stringify(lugares),

@@ -1,5 +1,5 @@
 import type { EstadoUbicacionPartida } from "../hooks/usePuntoPartida";
-import { horaDeSalida, type PuntoPartida, type TrasladoInicio } from "../services/puntoPartida";
+import { horaDeSalida, sumarMinutos, type PuntoPartida, type TrasladoInicio } from "../services/puntoPartida";
 
 interface BarraProps {
   punto: PuntoPartida | null;
@@ -81,10 +81,24 @@ interface TrasladoProps {
   traslado: TrasladoInicio;
   nombreParada: string;
   llegada?: string; // hora programada de llegada a la primera parada, "HH:MM"
+  esHoy?: boolean;
+}
+
+function horaActual(): string {
+  const ahora = new Date();
+  return `${String(ahora.getHours()).padStart(2, "0")}:${String(ahora.getMinutes()).padStart(2, "0")}`;
+}
+
+// Hoy no se sugiere salir a una hora que ya pasó: se dice a qué hora llega si sale ahora.
+export function textoSalida(llegada: string, minutosTraslado: number, esHoy: boolean, ahora = horaActual()): string {
+  const salida = horaDeSalida(llegada, minutosTraslado);
+  return esHoy && salida < ahora
+    ? `Si sales ahora, llegas a las ${sumarMinutos(ahora, minutosTraslado)}.`
+    : `Sal a las ${salida} para llegar a las ${llegada}.`;
 }
 
 // Mismo desglose que «Traslado y margen de seguridad» entre paradas, para el tramo inicial.
-export function TrasladoDesdePartida({ punto, traslado, nombreParada, llegada }: TrasladoProps) {
+export function TrasladoDesdePartida({ punto, traslado, nombreParada, llegada, esHoy = false }: TrasladoProps) {
   const { tiempoBaseMinutos, desgloseHolgura: d, tiempoTotalConHolgura, distanciaKm } = traslado;
   return (
     <div className="bloque-traslado-holgura">
@@ -92,7 +106,7 @@ export function TrasladoDesdePartida({ punto, traslado, nombreParada, llegada }:
         <div className="encabezado-holgura">Desde {punto.fuente === "ubicacion" ? "tu ubicación" : "tu punto de partida"}</div>
         <p className="nota">
           {distanciaKm} km en línea recta hasta {nombreParada}.
-          {llegada && ` Sal a las ${horaDeSalida(llegada, tiempoTotalConHolgura)} para llegar a las ${llegada}.`}
+          {llegada && ` ${textoSalida(llegada, tiempoTotalConHolgura, esHoy)}`}
         </p>
         <ul className="desglose-lista">
           <li><span>Tiempo base de traslado</span><strong>{tiempoBaseMinutos} min</strong></li>

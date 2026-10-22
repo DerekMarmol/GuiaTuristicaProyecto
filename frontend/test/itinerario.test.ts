@@ -100,6 +100,18 @@ describe("generarItinerario", () => {
     assert.equal(progreso.at(-1), 4);
   });
 
+  test("envía la ubicación del viajero como punto de partida", async () => {
+    let cuerpo: Record<string, unknown> = {};
+    globalThis.fetch = async (_url, opciones) => {
+      cuerpo = JSON.parse(String(opciones?.body));
+      return new Response(JSON.stringify(respuesta()), { status: 200 });
+    };
+
+    await generarItinerario(viaje, undefined, undefined, { lat: 14.6105, lng: -89.995 });
+
+    assert.deepEqual(cuerpo.origen, { lat: 14.6105, lng: -89.995 });
+  });
+
   test("muestra el mensaje del backend cuando falla", async () => {
     globalThis.fetch = async () =>
       new Response(JSON.stringify({ error: { codigo: "DESTINO_NO_ENCONTRADO", mensaje: "No encontramos \"zzz\" en Guatemala." } }), { status: 422 });

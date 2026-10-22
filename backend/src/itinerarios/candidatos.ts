@@ -17,10 +17,19 @@ const MIN_POR_CATEGORIA = 3;
 const CONSULTAS_SIMULTANEAS = 3;
 const DISTANCIA_DUPLICADO_METROS = 200;
 
-// Radio de búsqueda en metros. Si un interés trae pocos lugares se vuelve a buscar con el radio ampliado
-// (por ejemplo, playas o parques que quedan a las afueras del casco urbano).
-const RADIO_A_PIE = { inicial: 3000, ampliado: 6000 };
-const RADIO_CON_VEHICULO = { inicial: 15000, ampliado: 30000 };
+// Radio de búsqueda en metros. Los intereses de naturaleza amplían la búsqueda si traen pocos lugares
+// (playas, parques o miradores a las afueras). Los urbanos (compras, comida, cultura…) se quedan en el
+// pueblo: nadie va de compras al municipio vecino porque en el suyo hay pocas tiendas en el mapa.
+const INTERESES_DE_NATURALEZA = new Set(["Naturaleza", "Playa", "Aventura", "Fotografía"]);
+const RADIOS = {
+  naturaleza: { "A pie": { inicial: 3000, ampliado: 6000 }, vehiculo: { inicial: 15000, ampliado: 30000 } },
+  urbano: { "A pie": { inicial: 2000, ampliado: 2000 }, vehiculo: { inicial: 5000, ampliado: 5000 } },
+};
+
+export function radiosDeBusqueda(interes: string, transporte: Viaje["transporte"]): { inicial: number; ampliado: number } {
+  const grupo = INTERESES_DE_NATURALEZA.has(interes) ? RADIOS.naturaleza : RADIOS.urbano;
+  return transporte === "A pie" ? grupo["A pie"] : grupo.vehiculo;
+}
 
 // En Guatemala la mayoría de lugares de OpenStreetMap no publica horario. Descartarlos dejaría el
 // itinerario casi vacío, así que se usa un horario típico de su tipo y la parada se marca como estimada.
@@ -126,7 +135,6 @@ export async function buscarCandidatos({
   buscarLugares: BuscarLugares;
   enriquecerHorarios: EnriquecerHorarios;
 }): Promise<Candidato[]> {
-  const radios = transporte === "A pie" ? RADIO_A_PIE : RADIO_CON_VEHICULO;
   const limite = limitePorInteres(dias, intereses.length);
 
   // Una consulta por categoría, no una por interés: Geoapify ordena por cercanía, y con todas las categorías
@@ -137,10 +145,13 @@ export async function buscarCandidatos({
     const porCategoria = Math.max(MIN_POR_CATEGORIA, Math.ceil(limite / categorias.length));
     return categorias.map((categoria) => ({ interes, categoria, porCategoria }));
   });
-  const resultados = await enParalelo(consultas, CONSULTAS_SIMULTANEAS, async ({ categoria, porCategoria }) => {
+  const resultados = await enParalelo(consultas, CONSULTAS_SIMULTANEAS, async ({ interes, categoria, porCategoria }) => {
+    const radios = radiosDeBusqueda(interes, transporte);
     const consulta = { lat: destino.lat, lng: destino.lng, categorias: [categoria], limite: porCategoria };
     const lugares = await buscarLugares({ ...consulta, radio: radios.inicial });
-    return lugares.length >= porCategoria / 2 ? lugares : buscarLugares({ ...consulta, radio: radios.ampliado });
+    return lugares.length >= porCategoria / 2 || radios.ampliado === radios.inicial
+      ? lugares
+      : buscarLugares({ ...consulta, radio: radios.ampliado });
   });
   const grupos = intereses.map((interes) =>
     intercalar(resultados.filter((_, i) => consultas[i].interes === interes)).map((lugar) => ({ interes, lugar })),
@@ -175,6 +186,7 @@ export async function buscarCandidatos({
       interes,
       rango,
       lugar,
+      tipoEntorno: lugar.tipo_entorno,
     };
     if (horario.estado === "disponible") {
       return { ...base, horario, horarioEstimado: false };

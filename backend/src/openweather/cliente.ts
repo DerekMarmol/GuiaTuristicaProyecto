@@ -1,7 +1,7 @@
 import { ErrorApi } from "../errores";
 import type { FuncionFetch } from "../tipos";
 import { interpretarClimaActual, interpretarPronostico, type ClimaActual, type Pronostico } from "./transformar";
-import { cacheService } from "../lib/redis";
+import { cacheService, type CacheJson } from "../lib/redis";
 
 export const URL_PRONOSTICO = "https://api.openweathermap.org/data/2.5/forecast";
 export const URL_CLIMA_ACTUAL = "https://api.openweathermap.org/data/2.5/weather";
@@ -18,6 +18,8 @@ interface OpcionesCliente {
   apiKey?: string;
   fetch?: FuncionFetch;
   tiempoEsperaMs?: number;
+  // Caché de respuestas (Redis por defecto); null la desactiva.
+  cache?: CacheJson | null;
 }
 
 function formatearCoordenada(valor: number): string {
@@ -46,7 +48,7 @@ function errorTiempoAgotado(): ErrorApi {
   return new ErrorApi(504, "PROVEEDOR_TIEMPO_AGOTADO", "El proveedor de clima tardó demasiado en responder.");
 }
 
-function crearSolicitud({ apiKey, fetch: fetchImpl = globalThis.fetch, tiempoEsperaMs = TIEMPO_ESPERA_MS }: OpcionesCliente) {
+function crearSolicitud({ apiKey, fetch: fetchImpl = globalThis.fetch, tiempoEsperaMs = TIEMPO_ESPERA_MS, cache = cacheService }: OpcionesCliente) {
   const clave = typeof apiKey === "string" ? apiKey.trim() : "";
 
   return async function solicitar(direccion: string, { lat, lng }: Ubicacion): Promise<unknown> {
@@ -58,7 +60,7 @@ function crearSolicitud({ apiKey, fetch: fetchImpl = globalThis.fetch, tiempoEsp
     const claveCache = `cache:openweather:${tipo}:${lat.toFixed(2)}:${lng.toFixed(2)}`;
 
     try {
-      const datosEnCache = await cacheService.get(claveCache);
+      const datosEnCache = await cache?.get(claveCache);
       if (datosEnCache) {
         return datosEnCache;
       }
@@ -107,7 +109,7 @@ function crearSolicitud({ apiKey, fetch: fetchImpl = globalThis.fetch, tiempoEsp
         throw new ErrorApi(502, "PROVEEDOR_RESPUESTA_INVALIDA", "El proveedor de clima devolvió una respuesta que no es JSON válido.");
       }
       try {
-        await cacheService.set(claveCache, datos, TTL_CLIMA_SEGUNDOS);
+        await cache?.set(claveCache, datos, TTL_CLIMA_SEGUNDOS);
       } catch {
         // Si la caché no está disponible, no se interrumpe la operación
       }   

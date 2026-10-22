@@ -36,6 +36,7 @@ import authRoutes from "./routes/auth.routes";
 import usuariosRoutes from "./routes/usuarios.routes";
 import { manejarErrores } from "./errores";
 import type { FuncionFetch } from "./tipos";
+import type { CacheJson } from "./lib/redis";
 import { rutaEta } from "./eta/rutaEta";
 import { crearRutaTraslado } from "./routes/traslado";
 import { crearAgenteChat } from "./chat/agente";
@@ -44,6 +45,9 @@ import { crearRutaChat } from "./chat/rutaChat";
 import { crearReoptimizadorChat, type ClienteOptimizador } from "./chat/optimizador";
 
 export interface OpcionesApp {
+  // Caché de las respuestas de Geoapify y OpenWeather. Sin ella la app no se conecta a Redis (así corren
+  // las pruebas); server.ts pasa la de Redis.
+  cache?: CacheJson | null;
   apiKey?: string;
   fetch?: FuncionFetch;
   tiempoEsperaMs?: number;
@@ -94,6 +98,7 @@ export interface OpcionesApp {
   generacion?: {
     // null fuerza el planificador sin IA aunque exista GEMINI_API_KEY.
     cliente?: ClienteLLM | null;
+    ahora?: () => Date;
   };
 }
 
@@ -110,6 +115,7 @@ export function crearApp({
   chat = {},
   optimizador = {},
   generacion = {},
+  cache = null,
 }: OpcionesApp = {}): FastifyInstance {
   // Igual que con Express: rutas sin distinguir mayúsculas y con o sin barra final.
   // frameworkErrors da el mismo formato de error a fallos previos al enrutamiento, como una URL mal formada.
@@ -122,7 +128,7 @@ export function crearApp({
   app.register(authRoutes, { prefix: "/api/auth" });
   app.register(usuariosRoutes, { prefix: "/api/usuarios" });
   
-  const buscarLugares = crearClienteGeoapify({ apiKey, fetch, tiempoEsperaMs });
+  const buscarLugares = crearClienteGeoapify({ apiKey, fetch, tiempoEsperaMs, cache });
   const consultarDetalles = crearClienteDetalles({ apiKey, fetch, tiempoEsperaMs: detalles.tiempoEsperaMs });
   const opcionesDetalles = {
     consultarDetalles,
@@ -151,6 +157,7 @@ export function crearApp({
   app.register(crearRutaChat(crearAgenteChat({ cliente: clienteChat, optimizador: reoptimizadorChat })), { prefix: "/api/chat" });
 
   const obtenerPronostico = crearClienteOpenWeather({
+    cache,
     apiKey: clima.apiKey === undefined ? process.env.OPENWEATHER_API_KEY : clima.apiKey,
     fetch: clima.fetch,
     tiempoEsperaMs: clima.tiempoEsperaMs,
@@ -164,6 +171,8 @@ export function crearApp({
     geocodificar: crearGeocodificador({ apiKey, fetch, tiempoEsperaMs }),
     buscarLugares,
     enriquecerHorarios,
+    consultarClima,
+    ahora: generacion.ahora,
     cliente:
       generacion.cliente === undefined
         ? process.env.GEMINI_API_KEY ? crearClienteGemini() : undefined
@@ -177,6 +186,7 @@ export function crearApp({
   app.register(crearRutaPronosticoClima(consultarClima), { prefix: "/api/clima/pronostico" });
 
   const obtenerClimaActual = crearClienteClimaActual({
+    cache,
     apiKey: clima.apiKey === undefined ? process.env.OPENWEATHER_API_KEY : clima.apiKey,
     fetch: clima.fetch,
     tiempoEsperaMs: clima.tiempoEsperaMs,
@@ -224,7 +234,7 @@ export function crearApp({
   app.register(crearRutaHoteles(recomendarHoteles, ahoraHoteles), { prefix: "/api/hoteles" });
 
   const recomendarRestaurantes = crearRecomendadorRestaurantes({
-    buscar: crearBuscadorRestaurantes(crearConsultaPlaces({ apiKey, fetch, tiempoEsperaMs })),
+    buscar: crearBuscadorRestaurantes(crearConsultaPlaces({ apiKey, fetch, tiempoEsperaMs, cache })),
     concurrencia: restaurantes.concurrencia,
     intervaloMs: restaurantes.intervaloMs,
   });

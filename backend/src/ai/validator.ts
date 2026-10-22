@@ -33,6 +33,9 @@ export interface LugarNoResuelto {
 export interface OpcionesValidacion {
   lugaresNoResueltos?: ReadonlyMap<string, LugarNoResuelto>;
   estimarTraslado?: EstimadorTraslado;
+  // Hora de inicio de un día concreto (por ejemplo, el primer día empieza a la hora actual si el viaje
+  // es hoy). Si devuelve undefined, se usa la del viaje.
+  horaInicioDelDia?: (numeroDia: number) => string | undefined;
 }
 
 const MENSAJE_POR_MOTIVO: Record<MotivoDescarte, string> = {
@@ -89,7 +92,7 @@ export function validarSalida(
   }
 
   const zonaHoraria = viaje.zonaHoraria ?? ZONA_REFERENCIA_SIN_HORARIOS_REALES;
-  const horaInicio = viaje.horaInicio ?? HORA_INICIO_PREDETERMINADA;
+  const horaInicioViaje = viaje.horaInicio ?? HORA_INICIO_PREDETERMINADA;
   const porId = new Map(candidatos.map((c) => [c.placeId, c]));
   const totalDias = diasEntre(viaje.fechaInicio, viaje.fechaFin);
 
@@ -113,6 +116,7 @@ export function validarSalida(
     vistos.add(dia.numeroDia);
 
     const fecha = sumarDias(viaje.fechaInicio, dia.numeroDia - 1);
+    const horaInicio = opciones.horaInicioDelDia?.(dia.numeroDia) ?? horaInicioViaje;
     const planificador = crearPlanificadorDia({
       fecha,
       horaInicio,

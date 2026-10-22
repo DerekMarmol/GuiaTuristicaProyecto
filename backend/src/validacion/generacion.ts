@@ -20,6 +20,7 @@ export interface SolicitudGeneracion {
   hospedaje: boolean;
   nombreHotel?: string;
   horaInicio?: string;
+  origen?: { lat: number; lng: number };
 }
 
 const TIPOS_VIAJE = ["solo", "pareja", "familia", "amigos"] as const;
@@ -73,6 +74,16 @@ const SolicitudSchema = z
     hospedaje: z.boolean({ invalid_type_error: "hospedaje debe ser true o false." }).default(false),
     nombreHotel: texto("nombreHotel", 1, MAX_LARGO_DESTINO).optional(),
     horaInicio: z.string({ invalid_type_error: "horaInicio debe ser un texto." }).refine(esHoraValida, "horaInicio debe tener el formato HH:MM.").optional(),
+    // Ubicación del viajero al generar; si está lejos del destino se ignora.
+    origen: z
+      .object(
+        {
+          lat: z.number({ invalid_type_error: "origen.lat debe ser un número." }).min(-90).max(90),
+          lng: z.number({ invalid_type_error: "origen.lng debe ser un número." }).min(-180).max(180),
+        },
+        { invalid_type_error: "origen debe ser un objeto con lat y lng." },
+      )
+      .optional(),
   })
   .superRefine((solicitud, contexto) => {
     if (solicitud.fechaFin < solicitud.fechaInicio) {
