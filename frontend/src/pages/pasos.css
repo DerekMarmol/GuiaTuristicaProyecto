@@ -502,3 +502,21 @@ body:has(.nav-inferior) .chat { bottom: calc(var(--alto-nav-inferior) + .8rem); 
 .mis-planes { margin-top: 1rem; }
 .mis-planes h3 { margin: 0 0 .4rem; font: 700 1rem var(--font-ui); text-transform: uppercase; letter-spacing: .1em; }
 .mis-planes-abrir { width: auto; margin: 0; padding: .45rem .9rem; font-size: .8rem; }
+
+/* GUI-115: posición en tiempo real y botón para que el mapa siga al usuario */
+.mapa-contenedor { position: relative; }
+.mapa-seguir {
+  position: absolute; top: .6rem; right: .6rem; z-index: 2;
+  display: inline-flex; align-items: center; gap: .35rem; min-height: 2.6rem; padding: .45rem .8rem;
+  border: 1.5px solid var(--ciruela); border-radius: 99px; background: var(--papel); color: var(--ciruela);
+  font: 700 .78rem/1 var(--font-ui); letter-spacing: .06em; text-transform: uppercase; cursor: pointer;
+  box-shadow: 0 3px 0 var(--ciruela);
+}
+.mapa-seguir svg { width: 1.1rem; height: 1.1rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.mapa-seguir[aria-pressed="true"] { background: var(--agua-osc); border-color: var(--agua-osc); color: #fff; box-shadow: 0 3px 0 var(--ciruela); }
+.mapa-seguir:disabled { opacity: .55; cursor: default; }
+.marcador-vivo {
+  width: 1.15rem; height: 1.15rem; border: 3px solid #fff; border-radius: 50%; background: #1a73e8;
+  box-shadow: 0 0 0 7px rgba(26, 115, 232, .25); animation: pulso-vivo 2s ease-in-out infinite;
+}
+@keyframes pulso-vivo { 50% { box-shadow: 0 0 0 12px rgba(26, 115, 232, .1); } }
