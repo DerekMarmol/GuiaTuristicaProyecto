@@ -251,7 +251,7 @@ describe("POST /api/itinerarios/generar", () => {
 
     assert.equal(estado, 200);
     assert.equal(cuerpo.generadoCon, "respaldo");
-    assert.ok(cuerpo.advertencias.some((a) => a.includes("No se pudo generar el itinerario con IA")));
+    assert.ok(cuerpo.advertencias.some((a) => a.includes("La IA no logró un plan")));
   });
 
   test("empieza el día más tarde si a la hora pedida no hay nada abierto", async () => {

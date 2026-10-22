@@ -1,6 +1,6 @@
 import type { ClienteLLM } from "../ai/cliente";
 import { diasEntre } from "../ai/fechas";
-import { ErrorGeneracionIA, generarItinerarios } from "../ai/generarItinerario";
+import { ErrorGeneracionIA, generarItinerarios, type MotivoFalloIA } from "../ai/generarItinerario";
 import type { DescarteParada, DiaSinParadas, ItinerarioIA, ViajeIA } from "../ai/tipos";
 import { HORA_INICIO_PREDETERMINADA, validarSalida } from "../ai/validator";
 import { ErrorApi } from "../errores";
@@ -13,7 +13,16 @@ import type { SolicitudGeneracion } from "../validacion/generacion";
 import { buscarCandidatos, type Candidato } from "./candidatos";
 import { planificarSinIA } from "./planRespaldo";
 import type { ConsultarClima } from "../clima/servicio";
+import type { BuscarEnFoursquare } from "../foursquare/cliente";
 import { diasConLluvia, horaDeArranqueHoy, origenCercano } from "./contexto";
+
+// Qué se le dice al usuario cuando la IA no arma el plan y lo hace el planificador automático.
+const AVISO_FALLO_IA: Record<MotivoFalloIA, string> = {
+  cuota_agotada: "La IA alcanzó su límite de uso por hoy; el itinerario se armó con el planificador automático.",
+  modelo_saturado: "La IA está saturada en este momento; el itinerario se armó con el planificador automático. Puedes regenerarlo en unos minutos.",
+  error_modelo: "No se pudo conectar con la IA; el itinerario se armó con el planificador automático.",
+  plan_invalido: "La IA no logró un plan que cumpla los horarios; el itinerario se armó con el planificador automático.",
+};
 
 // El itinerario se arma antes de guardarse: el id definitivo lo asigna /api/itinerarios/guardar.
 const ID_VIAJE_BORRADOR = "borrador";
@@ -95,6 +104,7 @@ export function crearGeneradorItinerario({
   enriquecerHorarios,
   cliente,
   consultarClima,
+  buscarEnFoursquare = null,
   ahora = () => new Date(),
 }: {
   geocodificar: Geocodificar;
@@ -102,6 +112,8 @@ export function crearGeneradorItinerario({
   enriquecerHorarios: EnriquecerHorarios;
   cliente?: ClienteLLM;
   consultarClima?: ConsultarClima;
+  // GUI-117: segunda fuente de lugares (comercios y restaurantes); null si no hay FOURSQUARE_API_KEY.
+  buscarEnFoursquare?: BuscarEnFoursquare | null;
   ahora?: () => Date;
 }): GenerarItinerario {
   return async function generarItinerario(solicitud) {
@@ -123,6 +135,7 @@ export function crearGeneradorItinerario({
         transporte: solicitud.transporte,
         buscarLugares,
         enriquecerHorarios,
+        buscarEnFoursquare,
       }),
       diasConLluvia(consultarClima, destino, solicitud.fechaInicio, solicitud.fechaFin),
     ]);
@@ -193,7 +206,7 @@ export function crearGeneradorItinerario({
         if (!(error instanceof ErrorGeneracionIA)) {
           throw error;
         }
-        advertencias.push("No se pudo generar el itinerario con IA; se armó con el planificador automático.");
+        advertencias.push(AVISO_FALLO_IA[error.motivo]);
       }
     }
 

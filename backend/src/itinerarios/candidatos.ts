@@ -5,6 +5,7 @@ import type { BuscarLugares } from "../geoapify/cliente";
 import type { EnriquecerHorarios } from "../geoapify/enriquecer";
 import type { DestinoGeocodificado } from "../geoapify/geocodificacion";
 import type { Lugar } from "../geoapify/transformar";
+import type { BuscarEnFoursquare, LugarFoursquare } from "../foursquare/cliente";
 import { distanciaMetros } from "../hoteles/geografia";
 
 export const PARADAS_OBJETIVO_POR_DIA = 3;
@@ -51,11 +52,14 @@ const HORARIOS_TIPICOS: [prefijo: string, apertura: string, cierre: string][] = 
 ];
 const HORARIO_TIPICO_PREDETERMINADO = { apertura: "09:00", cierre: "17:00" };
 
+// Un lugar de OpenStreetMap (Geoapify) o de Foursquare (GUI-117).
+export type LugarDeFuente = Lugar | LugarFoursquare;
+
 export interface Candidato extends LugarReal {
   interes: string;
   // Posición dentro de su interés: 0 es el lugar más representativo (ver buscarCandidatos).
   rango: number;
-  lugar: Lugar;
+  lugar: LugarDeFuente;
   horarioEstimado: boolean;
 }
 
@@ -69,7 +73,7 @@ export function horarioTipico(categorias: string[]): { apertura: string; cierre:
 }
 
 // La categoría que se muestra al modelo es la que hizo coincidir el lugar con el interés del viajero.
-function categoriaDelInteres(lugar: Lugar, interes: string): string {
+function categoriaDelInteres(lugar: LugarDeFuente, interes: string): string {
   const delInteres = CATEGORIAS_POR_INTERES[interes] ?? [];
   return lugar.categorias.find((categoria) => delInteres.some((prefijo) => coincide(categoria, prefijo))) ?? lugar.categorias[0];
 }
@@ -79,17 +83,27 @@ function limitePorInteres(dias: number, intereses: number): number {
   return Math.min(MAX_POR_INTERES, Math.max(MIN_POR_INTERES, necesarios));
 }
 
-function nombreNormalizado(nombre: string): string {
-  return nombre.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+const PALABRAS_SIN_PESO = new Set(["de", "del", "la", "las", "el", "los", "y", "en", "san", "santa"]);
+
+// Palabras que identifican un lugar, sin tildes, mayúsculas ni artículos.
+function palabrasDelNombre(nombre: string): string[] {
+  return nombre
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((palabra) => palabra && !PALABRAS_SIN_PESO.has(palabra));
 }
 
-// OpenStreetMap suele tener el mismo lugar dos o más veces (un punto y un edificio, o capturas repetidas)
-// con ids distintos: se tratan como uno si se llaman igual y están a menos de DISTANCIA_DUPLICADO_METROS.
-function esElMismoLugar(a: Lugar, b: Lugar): boolean {
-  return (
-    a.idExterno === b.idExterno ||
-    (nombreNormalizado(a.nombre) === nombreNormalizado(b.nombre) && distanciaMetros(a, b) < DISTANCIA_DUPLICADO_METROS)
-  );
+// El mismo lugar aparece repetido: en OpenStreetMap (un punto y un edificio) y entre fuentes, con nombres más
+// o menos completos («Parque Central Jalapa» y «Parque Central de Jalapa Doctor Silvano Antonio Carías»). Se
+// tratan como uno si están a menos de DISTANCIA_DUPLICADO_METROS y todas las palabras de un nombre están en
+// el otro.
+function esElMismoLugar(a: LugarDeFuente, b: LugarDeFuente): boolean {
+  if (a.idExterno === b.idExterno) return true;
+  if (distanciaMetros(a, b) >= DISTANCIA_DUPLICADO_METROS) return false;
+  const [corto, largo] = [palabrasDelNombre(a.nombre), palabrasDelNombre(b.nombre)].sort((x, y) => x.length - y.length);
+  return corto.length > 0 && corto.every((palabra) => largo.includes(palabra));
 }
 
 // Ejecuta las tareas con a lo más `simultaneas` a la vez y devuelve los resultados en el orden de entrada.
@@ -127,6 +141,7 @@ export async function buscarCandidatos({
   transporte,
   buscarLugares,
   enriquecerHorarios,
+  buscarEnFoursquare = null,
 }: {
   destino: DestinoGeocodificado;
   intereses: string[];
@@ -134,6 +149,7 @@ export async function buscarCandidatos({
   transporte: Viaje["transporte"];
   buscarLugares: BuscarLugares;
   enriquecerHorarios: EnriquecerHorarios;
+  buscarEnFoursquare?: BuscarEnFoursquare | null;
 }): Promise<Candidato[]> {
   const limite = limitePorInteres(dias, intereses.length);
 
@@ -153,13 +169,23 @@ export async function buscarCandidatos({
       ? lugares
       : buscarLugares({ ...consulta, radio: radios.ampliado });
   });
-  const grupos = intereses.map((interes) =>
-    intercalar(resultados.filter((_, i) => consultas[i].interes === interes)).map((lugar) => ({ interes, lugar })),
+  // GUI-117: Foursquare, una consulta por interés, como una lista más que se intercala con las de Geoapify.
+  // OpenStreetMap va primero: sus lugares suelen traer horario publicado; los duplicados se descartan abajo.
+  const deFoursquare: LugarDeFuente[][] = buscarEnFoursquare
+    ? await enParalelo(intereses, CONSULTAS_SIMULTANEAS, (interes) =>
+        buscarEnFoursquare({ lat: destino.lat, lng: destino.lng, radio: radiosDeBusqueda(interes, transporte).ampliado, limite, interes }),
+      )
+    : intereses.map(() => []);
+  const grupos = intereses.map((interes, indice) =>
+    intercalar<LugarDeFuente>([
+      ...resultados.filter((_, i) => consultas[i].interes === interes),
+      deFoursquare[indice],
+    ]).map((lugar) => ({ interes, lugar })),
   );
 
-  // Un lugar que aparece en varias categorías o intereses se queda en la primera aparición.
+  // Un lugar que aparece en varias categorías, intereses o fuentes se queda en la primera aparición.
   const rangos = new Map<string, number>();
-  const encontrados: { interes: string; rango: number; lugar: Lugar }[] = [];
+  const encontrados: { interes: string; rango: number; lugar: LugarDeFuente }[] = [];
   for (const { interes, lugar } of intercalar(grupos)) {
     const rango = rangos.get(interes) ?? 0;
     if (rango >= limite || encontrados.some((e) => esElMismoLugar(e.lugar, lugar))) {
@@ -169,13 +195,17 @@ export async function buscarCandidatos({
     encontrados.push({ interes, rango, lugar });
   }
 
-  // Cada candidato cuesta una consulta de horario (espaciadas 250 ms), así que se piden las que el viaje necesita.
+  // Cada candidato de Geoapify cuesta una consulta de horario (espaciadas 250 ms), así que se piden las que
+  // el viaje necesita. Los de Foursquare no la necesitan: usan el horario típico de su tipo.
   const maxCandidatos = Math.min(MAX_CANDIDATOS, Math.max(MIN_CANDIDATOS, dias * PARADAS_OBJETIVO_POR_DIA * 2));
+  const elegidos = encontrados.slice(0, maxCandidatos);
   const conHorario = await enriquecerHorarios(
-    encontrados.slice(0, maxCandidatos).map(({ interes, rango, lugar }) => ({ ...lugar, interes, rango })),
+    elegidos.flatMap(({ lugar }) => (lugar.proveedor === "geoapify" ? [lugar] : [])),
   );
+  const horarios = new Map(conHorario.map((l) => [l.idExterno, l.horario]));
 
-  return conHorario.map(({ horario, interes, rango, ...lugar }) => {
+  return elegidos.map(({ interes, rango, lugar }) => {
+    const horario = horarios.get(lugar.idExterno);
     const base = {
       placeId: lugar.idExterno,
       nombre: lugar.nombre,
@@ -188,7 +218,7 @@ export async function buscarCandidatos({
       lugar,
       tipoEntorno: lugar.tipo_entorno,
     };
-    if (horario.estado === "disponible") {
+    if (horario?.estado === "disponible") {
       return { ...base, horario, horarioEstimado: false };
     }
     const { apertura, cierre } = horarioTipico(lugar.categorias);

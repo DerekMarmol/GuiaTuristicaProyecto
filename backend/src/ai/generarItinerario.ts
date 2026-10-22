@@ -3,12 +3,32 @@ import { construirPrompt, SYSTEM_INSTRUCTION } from "./prompts";
 import { validarSalida, verificarZonaHoraria, type OpcionesValidacion, type ResultadoValidacion } from "./validator";
 import type { LugarReal, ResultadoGeneracion, ViajeIA } from "./tipos";
 
+// Por qué no se obtuvo el plan con IA: el generador lo usa para explicarle al usuario qué pasó.
+export type MotivoFalloIA = "cuota_agotada" | "modelo_saturado" | "error_modelo" | "plan_invalido";
+
 export class ErrorGeneracionIA extends Error {
-  constructor(mensaje: string, public readonly detalles: string[]) {
+  constructor(
+    mensaje: string,
+    public readonly detalles: string[],
+    public readonly motivo: MotivoFalloIA = "plan_invalido"
+  ) {
     super(mensaje);
     this.name = "ErrorGeneracionIA";
   }
 }
+
+// Código HTTP de un error de Gemini: el SDK lo da en `status` y además viene en el mensaje ("code":429).
+function estadoHttp(error: unknown): number | null {
+  const estado = (error as { status?: unknown } | null)?.status;
+  if (typeof estado === "number") return estado;
+  const texto = error instanceof Error ? error.message : String(error);
+  const encontrado = /"code"\s*:\s*(\d{3})/.exec(texto) ?? /(429|503)/.exec(texto);
+  return encontrado ? Number(encontrado[1]) : null;
+}
+
+// Con la cuota agotada reintentar solo gasta más solicitudes (el plan gratuito permite pocas al día). Con el
+// modelo saturado vale la pena un reintento más, porque suele durar poco.
+const MAX_INTENTOS_SATURADO = 2;
 
 interface Params {
   viaje: ViajeIA;
@@ -34,6 +54,8 @@ export async function generarItinerarios({ viaje, candidatos, cliente, maxIntent
 
   let errores: string[] = [];
   let errorModelo: string | null = null;
+  let estadoModelo: number | null = null;
+  let saturaciones = 0;
   let ultimo: ResultadoValidacion | null = null;
 
   for (let intento = 1; intento <= maxIntentos; intento++) {
@@ -55,6 +77,13 @@ export async function generarItinerarios({ viaje, candidatos, cliente, maxIntent
     } catch (e) {
       // Fallo del servicio (503, red, cuota...): no es culpa del plan, así que no se le pasa al modelo como error.
       errorModelo = `Error al llamar al modelo: ${e instanceof Error ? e.message : String(e)}`;
+      estadoModelo = estadoHttp(e);
+      if (estadoModelo === 429) {
+        throw new ErrorGeneracionIA("Se agotó la cuota de uso de la IA.", [errorModelo], "cuota_agotada");
+      }
+      if (estadoModelo === 503 && ++saturaciones >= MAX_INTENTOS_SATURADO) {
+        break;
+      }
       if (intento < maxIntentos) await esperar(esperaReintentoMs * intento);
     }
   }
@@ -72,8 +101,10 @@ export async function generarItinerarios({ viaje, candidatos, cliente, maxIntent
     };
   }
   
+  const motivo: MotivoFalloIA = !errorModelo ? "plan_invalido" : estadoModelo === 503 ? "modelo_saturado" : "error_modelo";
   throw new ErrorGeneracionIA(
     `No se obtuvo un itinerario válido tras ${maxIntentos} intentos.`,
-    errorModelo ? [errorModelo, ...errores] : errores
+    errorModelo ? [errorModelo, ...errores] : errores,
+    motivo
   );
 }

@@ -15,7 +15,7 @@ const MAX_RONDAS_HERRAMIENTAS = 4;
 
 export function crearClienteChatGemini(
   apiKey = process.env.GEMINI_API_KEY,
-  model = process.env.GEMINI_MODEL ?? "gemini-3.5-flash"
+  model = process.env.GEMINI_MODEL ?? "gemini-3.8-flash"
 ): ClienteChat {
   if (!apiKey) throw new Error("Falta GEMINI_API_KEY en las variables de entorno.");
   const ai = new GoogleGenAI({ apiKey });

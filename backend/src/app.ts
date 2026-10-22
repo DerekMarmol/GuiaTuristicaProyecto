@@ -11,6 +11,7 @@ import { crearValidadorPropuestas } from "./ai/propuesta";
 import { crearClienteGemini, type ClienteLLM } from "./ai/cliente";
 import { crearGeocodificador } from "./geoapify/geocodificacion";
 import { crearGeneradorItinerario } from "./itinerarios/generacion";
+import { crearBuscadorFoursquare } from "./foursquare/cliente";
 import { crearPriorizadorClima } from "./ai/prioridadClima";
 import { crearClienteClimaActual, crearClienteOpenWeather } from "./openweather/cliente";
 import { leerConfiguracionClimaReactivo, type ConfiguracionClimaReactivo } from "./config/climaReactivo";
@@ -95,6 +96,10 @@ export interface OpcionesApp {
     fetchImpl?: typeof fetch;
     tiempoEsperaMs?: number;
   };
+  foursquare?: {
+    apiKey?: string;
+    fetch?: FuncionFetch;
+  };
   generacion?: {
     // null fuerza el planificador sin IA aunque exista GEMINI_API_KEY.
     cliente?: ClienteLLM | null;
@@ -115,6 +120,7 @@ export function crearApp({
   chat = {},
   optimizador = {},
   generacion = {},
+  foursquare = {},
   cache = null,
 }: OpcionesApp = {}): FastifyInstance {
   // Igual que con Express: rutas sin distinguir mayúsculas y con o sin barra final.
@@ -172,6 +178,11 @@ export function crearApp({
     buscarLugares,
     enriquecerHorarios,
     consultarClima,
+    buscarEnFoursquare: crearBuscadorFoursquare({
+      apiKey: foursquare.apiKey === undefined ? process.env.FOURSQUARE_API_KEY : foursquare.apiKey,
+      fetch: foursquare.fetch ?? fetch,
+      cache,
+    }),
     ahora: generacion.ahora,
     cliente:
       generacion.cliente === undefined
