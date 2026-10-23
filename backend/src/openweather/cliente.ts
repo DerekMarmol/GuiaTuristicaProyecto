@@ -18,7 +18,6 @@ interface OpcionesCliente {
   apiKey?: string;
   fetch?: FuncionFetch;
   tiempoEsperaMs?: number;
-  // Caché de respuestas (Redis por defecto); null la desactiva.
   cache?: CacheJson | null;
 }
 
@@ -65,7 +64,6 @@ function crearSolicitud({ apiKey, fetch: fetchImpl = globalThis.fetch, tiempoEsp
         return datosEnCache;
       }
     } catch {
-      // Si la caché no está disponible, continúa a la API sin interrumpir la operación
     }
 
     const url = new URL(direccion);

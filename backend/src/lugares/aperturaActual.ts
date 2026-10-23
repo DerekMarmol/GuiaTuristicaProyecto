@@ -6,8 +6,6 @@ function desconocido(motivo: MotivoAperturaNoVerificable): AperturaActual {
   return { estadoApertura: "desconocido", open_now: null, motivo };
 }
 
-// opening_hours describe la hora local del establecimiento, así que el instante se traduce a su zona IANA
-// antes de evaluarlo; sin zona confiable no se afirma que esté abierto ni cerrado.
 export function evaluarAperturaActual(horario: Horario | null | undefined, zonaHoraria: string | null, instante: number): AperturaActual {
   if (!esZonaHorariaValida(zonaHoraria)) {
     if (horario?.estado !== "disponible") {

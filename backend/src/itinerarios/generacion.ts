@@ -93,6 +93,15 @@ function completarParadas(itinerarios: ItinerarioIA[], candidatos: Candidato[]):
   }));
 }
 
+// Al regenerar, si no hubo suficientes lugares distintos cerca, se dice cuántos se repitieron.
+function avisoRepetidos(itinerarios: ItinerarioGeneradoDia[], evitar: ReadonlySet<string>): string[] {
+  if (evitar.size === 0) return [];
+  const repetidos = itinerarios.flatMap((it) => it.paradas).filter((p) => evitar.has(p.placeId)).length;
+  return repetidos === 0
+    ? []
+    : [`Cerca no hay suficientes lugares distintos para cambiar todo el plan: se repite(n) ${repetidos} del anterior.`];
+}
+
 function avisoHorariosEstimados(itinerarios: ItinerarioGeneradoDia[]): string[] {
   const estimadas = itinerarios.flatMap((it) => it.paradas).filter((p) => p.horarioEstimado).length;
   return estimadas === 0 ? [] : [`${estimadas} parada(s) no publican horario; se usó uno típico de su tipo. Confírmalo antes de ir.`];
@@ -156,6 +165,8 @@ export function crearGeneradorItinerario({
     const horaPrimerDia = arranqueHoy && arranqueHoy > horaInicio ? arranqueHoy : undefined;
     const horaInicioDelDia = (numeroDia: number) => (numeroDia === 1 ? horaPrimerDia : undefined);
     const origen = origenCercano(solicitud.origen, destino);
+    // GUI-118: al regenerar, los lugares del plan anterior solo se usan si no hay otros.
+    const evitar = new Set(solicitud.evitar ?? []);
     if (horaPrimerDia) {
       advertencias.push(`Tu viaje empieza hoy: el recorrido arranca a las ${horaPrimerDia}.`);
     }
@@ -179,6 +190,7 @@ export function crearGeneradorItinerario({
       origen,
       horaInicioPrimerDia: horaPrimerDia,
       diasConLluvia: lluvia,
+      lugaresAEvitar: candidatos.filter((c) => evitar.has(c.placeId)).map((c) => c.nombre),
     };
 
     const responder = (
@@ -195,7 +207,12 @@ export function crearGeneradorItinerario({
         itinerarios,
         descartes: resultado.descartes,
         diasSinParadas: resultado.diasSinParadas,
-        advertencias: [...advertencias, ...avisoHorariosEstimados(itinerarios), ...resultado.advertencias],
+        advertencias: [
+          ...advertencias,
+          ...avisoRepetidos(itinerarios, evitar),
+          ...avisoHorariosEstimados(itinerarios),
+          ...resultado.advertencias,
+        ],
       };
     };
 
@@ -220,6 +237,7 @@ export function crearGeneradorItinerario({
         horaInicio: hora,
         horaInicioDelDia,
         diasConLluvia: new Set(lluvia.map((d) => d.numeroDia)),
+        evitar,
         zonaHoraria: destino.zonaHoraria,
       });
     let propuesta = planificar(horaInicio);

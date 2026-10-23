@@ -66,7 +66,6 @@ def test_matriz_multiple_conserva_orden_e_indices():
     tiempos = [[0, 100, 300], [110, 0, 250], [320, 260, 0]]
     distancias = [[0, 1.0, 3.0], [1.1, 0, 2.5], [3.2, 2.6, 0]]
     cuerpo = respuesta_matriz(tiempos, distancias)
-    # Valhalla ubica cada celda por sus índices, no por su posición en la fila.
     for fila in cuerpo["sources_to_targets"]:
         fila.reverse()
 

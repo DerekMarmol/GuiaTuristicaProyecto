@@ -45,6 +45,11 @@ export function construirPrompt(viaje: ViajeIA, candidatos: LugarReal[], errores
   if (viaje.horaInicioPrimerDia) {
     contexto.push(`- El día 1 es hoy y empieza a las ${viaje.horaInicioPrimerDia} (hora local): no propongas lugares que cierren antes de esa hora.`);
   }
+  if (viaje.lugaresAEvitar?.length) {
+    contexto.push(
+      `- El viajero pidió un plan distinto al anterior. Usa otros lugares siempre que haya alternativas adecuadas; evita repetir: ${viaje.lugaresAEvitar.join(", ")}.`
+    );
+  }
   for (const { numeroDia, lluviaMm } of viaje.diasConLluvia ?? []) {
     contexto.push(`- Día ${numeroDia}: se esperan ${lluviaMm} mm de lluvia. Prefiere lugares "bajo techo" ese día.`);
   }

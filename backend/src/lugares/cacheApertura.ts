@@ -13,8 +13,6 @@ export interface OpcionesCacheApertura {
   ahora?: () => Date;
 }
 
-// Guarda el horario publicado y la zona horaria, nunca el estado de apertura: open_now se recalcula en cada consulta.
-// Los fallos de consulta no se guardan para que el siguiente intento vuelva a preguntar al proveedor.
 export function crearCacheApertura({
   consultar,
   vigenciaMs = VIGENCIA_CACHE_APERTURA_MS,

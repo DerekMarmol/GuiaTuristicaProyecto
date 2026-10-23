@@ -22,7 +22,6 @@ export interface ClimaActual {
   codigosClima: number[];
   descripcion: string | null;
   lluvia1hMm: number | null;
-  // Informativa (se muestra como «ahora» en el frontend); no interviene en la detección de lluvia.
   temperaturaC: number | null;
 }
 
@@ -91,7 +90,7 @@ function leerLluvia(registro: Record<string, unknown>): number {
   return volumen;
 }
 
-// pop y weather son informativos para el resumen diario: un valor ausente o fuera de rango no invalida la respuesta.
+
 function leerProbabilidad(valor: unknown): number | null {
   return esNumeroFinito(valor) && valor >= 0 && valor <= 1 ? valor : null;
 }

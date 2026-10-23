@@ -35,11 +35,7 @@ def parada(id, lat=14.6, lng=-90.5, apertura="08:00", cierre="18:00", estancia=3
 
 ORIGEN = {"lat": 14.55, "lng": -90.73}
 
-
-# --- /reoptimize con origen explícito ---------------------------------------
-
 def test_reoptimize_con_origen_no_fuerza_la_primera_parada_pendiente():
-    # Nodos: origen, a, b. Desde el origen, b está a 2 min y a, a 30 min.
     valhalla = ClienteValhallaFalso(duraciones=[
         [0, 1800, 120],
         [1800, 0, 600],
@@ -109,9 +105,6 @@ def test_reoptimize_rechaza_el_identificador_reservado_del_origen():
 
     assert respuesta.status_code == 422
 
-
-# --- /reoptimize-clima -------------------------------------------------------
-
 def clima(paradas, sustituciones, origen=ORIGEN, hora=600, **extra):
     return {
         "paradas": paradas,
@@ -121,9 +114,7 @@ def clima(paradas, sustituciones, origen=ORIGEN, hora=600, **extra):
         **extra,
     }
 
-
 def test_sustituye_la_parada_afectada_por_el_candidato_mas_cercano():
-    # Nodos: origen, parque, catedral, museo_lejano, museo_cerca.
     valhalla = ClienteValhallaFalso(duraciones=[
         [0, 600, 600, 1500, 300],
         [600, 0, 600, 1500, 300],
@@ -159,7 +150,6 @@ def test_las_visitas_empiezan_en_la_hora_actual_e_incluyen_traslado_y_estancia()
 
     visitas = datos["ruta_propuesta"]["visitas"]
     assert [v["parada_id"] for v in visitas] == ["parque", "catedral"]
-    # 10:00 + 5 min de traslado = 10:05; 60 min de estancia; 5 min hasta la catedral.
     assert (visitas[0]["inicio_minutos"], visitas[0]["fin_minutos"]) == (605, 665)
     assert (visitas[1]["inicio_minutos"], visitas[1]["fin_minutos"]) == (670, 715)
     assert visitas[0]["traslado_segundos"] == 300

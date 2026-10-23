@@ -165,3 +165,52 @@ describe("itinerario según el momento en que se genera (GUI-112)", () => {
     assert.match(prompt, /"entorno":"bajo techo"/);
   });
 });
+
+describe("coherencia de intereses y variedad al regenerar (GUI-118)", () => {
+  const SEIS_TIENDAS = [
+    ...TIENDAS,
+    ...MAS_TIENDAS,
+  ];
+  const paradasDe = (plan: Awaited<ReturnType<ReturnType<typeof crearGenerador>>>) =>
+    plan.itinerarios.flatMap((it) => it.paradas.map((p) => p.placeId));
+
+  test("Compras deja fuera negocios que no son un paseo de compras, aunque el mapa los marque como tienda", async () => {
+    const catalogo = [...TIENDAS, lugar("Perfumería Castro", 14.6345, -89.9897, ["commercial.gift_and_souvenir"]), lugar("Farmacia Batres", 14.6343, -89.9899, ["commercial.department_store"]), lugar("Despensa Familiar", 14.6346, -89.9896, ["commercial.department_store"])];
+    const plan = await crearGenerador({ catalogo })(solicitud({ fechaFin: "2026-11-10" }));
+    const nombres = plan.itinerarios.flatMap((it) => it.paradas.map((p) => p.nombre));
+    assert.ok(!nombres.some((n) => /Perfumer|Farmacia|Despensa/.test(n)), nombres.join(", "));
+  });
+
+  test("al regenerar propone lugares distintos a los del plan anterior", async () => {
+    const generar = crearGenerador({ catalogo: SEIS_TIENDAS });
+    const primero = paradasDe(await generar(solicitud({ fechaFin: "2026-11-10" })));
+    const segundo = await generar(solicitud({ fechaFin: "2026-11-10", evitar: primero }));
+
+    assert.equal(primero.length, 3);
+    assert.equal(paradasDe(segundo).filter((id) => primero.includes(id)).length, 0);
+    assert.ok(!segundo.advertencias.some((a) => a.includes("se repite")));
+  });
+
+  test("si no hay alternativas, repite lugares y lo avisa", async () => {
+    const generar = crearGenerador({ catalogo: TIENDAS });
+    const primero = paradasDe(await generar(solicitud({ fechaFin: "2026-11-10" })));
+    const segundo = await generar(solicitud({ fechaFin: "2026-11-10", evitar: primero }));
+
+    assert.ok(paradasDe(segundo).length > 0);
+    assert.ok(segundo.advertencias.some((a) => a.includes("no hay suficientes lugares distintos")));
+  });
+
+  test("a Gemini se le pide evitar los lugares del plan anterior", async () => {
+    let prompt = "";
+    const cliente: ClienteLLM = {
+      generarPlan: async (args) => {
+        prompt = args.prompt;
+        return { dias: [{ numeroDia: 1, paradas: [{ placeId: "Mercado municipal", tiempoEstanciaMinutos: 60 }] }] };
+      },
+    };
+    await crearGenerador({ catalogo: SEIS_TIENDAS, cliente })(
+      solicitud({ fechaFin: "2026-11-10", evitar: ["Centro comercial del centro", "Mercado de Los Pinos"] })
+    );
+    assert.match(prompt, /pidió un plan distinto.*evita repetir: Centro comercial del centro, Mercado de Los Pinos/);
+  });
+});

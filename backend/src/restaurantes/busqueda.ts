@@ -4,7 +4,6 @@ import type { Coordenada } from "../hoteles/geografia";
 import { esObjeto } from "../tipos";
 
 export const CATEGORIAS_RESTAURANTES: readonly string[] = Object.freeze(["catering.restaurant", "catering.fast_food", "catering.food_court"]);
-// 40 resultados cuestan 2 créditos de Geoapify (1 crédito por cada 20 lugares).
 export const RESULTADOS_PROVEEDOR_POR_PARADA = 40;
 
 const CODIGO_PAIS = /^[a-z]{2}$/i;

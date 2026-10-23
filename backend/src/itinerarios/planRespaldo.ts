@@ -53,6 +53,7 @@ export function planificarSinIA({
   horaInicio,
   horaInicioDelDia,
   diasConLluvia = new Set<number>(),
+  evitar = new Set<string>(),
   zonaHoraria,
 }: {
   candidatos: Candidato[];
@@ -63,6 +64,8 @@ export function planificarSinIA({
   horaInicio: string;
   horaInicioDelDia?: (numeroDia: number) => string | undefined;
   diasConLluvia?: ReadonlySet<number>;
+  // Lugares del plan anterior (al regenerar): solo se usan si no hay otros.
+  evitar?: ReadonlySet<string>;
   zonaHoraria: string;
 }): SalidaIA {
   const usados = new Set<string>();
@@ -88,6 +91,7 @@ export function planificarSinIA({
 
     while (paradas.length < PARADAS_OBJETIVO_POR_DIA) {
       const prioridad = (c: Candidato) =>
+        (evitar.has(c.placeId) ? 5 : 0) +
         (llueve && c.lugar.tipo_entorno === "outdoor" ? 3 : 0) +
         (paradas.length === 0
           ? Number(c.interes !== interesInicial)

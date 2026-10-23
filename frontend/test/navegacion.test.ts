@@ -8,6 +8,7 @@ import {
   formatearDuracion,
   pedirRuta,
   perfilPorTransporte,
+  tramoPendiente,
 } from "../src/services/navegacion.ts";
 
 // Ruta de ejemplo: 500 m al norte y luego 300 m al este (giro a la derecha).
@@ -115,6 +116,16 @@ describe("navegación guiada (GUI-116)", () => {
     assert.match(url, /language=es/);
     assert.match(url, /steps=true/);
     assert.equal(pedida.pasos.length, 3);
+  });
+
+  test("solo deja por dibujar lo que falta: el tramo recorrido se borra", () => {
+    const pendiente = tramoPendiente(ruta, comoPosicion(punto(200, 3)));
+    assert.equal(pendiente.length, 5);
+    assert.ok(Math.abs(pendiente[0][1] - punto(200, 0)[1]) < 1e-7);
+    assert.ok(Math.abs(pendiente[0][0] - punto(200, 0)[0]) < 1e-7);
+    assert.deepEqual(pendiente.at(-1), punto(500, 300));
+    assert.equal(tramoPendiente(ruta, comoPosicion(punto(500, 290))).length, 2);
+    assert.equal(tramoPendiente(ruta, null).length, ruta.coordenadas.length);
   });
 
   test("explica cuando no hay ruta", () => {
