@@ -12,7 +12,6 @@ async function ejecutarPruebas() {
     contrasena: "Password123!",
   };
 
-  // 1. Registro
   console.log("1. Probando POST /api/auth/registro...");
   const resRegistro = await app.inject({
     method: "POST",
@@ -27,7 +26,6 @@ async function ejecutarPruebas() {
     process.exit(1);
   }
 
-  // 2. Login
   console.log("\n2. Probando POST /api/auth/login...");
   const resLogin = await app.inject({
     method: "POST",
@@ -42,7 +40,6 @@ async function ejecutarPruebas() {
   const datosLogin = resLogin.json();
   const token = datosLogin.token;
 
-  // 3. Ruta Protegida SIN Token (Esperado: 401)
   console.log("\n3. Probando GET /api/auth/verificar SIN token...");
   const resSinToken = await app.inject({
     method: "GET",
@@ -50,7 +47,6 @@ async function ejecutarPruebas() {
   });
   console.log(`Estado: ${resSinToken.statusCode} (debe ser 401)`);
 
-  // 4. Ruta Protegida CON Token (Esperado: 200)
   console.log("\n4. Probando GET /api/auth/verificar CON Bearer token...");
   const resConToken = await app.inject({
     method: "GET",

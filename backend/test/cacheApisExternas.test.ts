@@ -9,7 +9,6 @@ async function probarCacheApisExternas() {
     await redis.connect();
   }
 
-  // 1. Simulación con payload completo de OpenWeatherMap
   let llamadasRealesClima = 0;
   const mockFetchClima = async () => {
     llamadasRealesClima++;
@@ -75,7 +74,6 @@ async function probarCacheApisExternas() {
 
   console.log(`-> Llamadas reales a la API de clima: ${llamadasRealesClima} (esperado: 1)`);
 
-  // 2. Simulación con payload completo de Geoapify Places
   let llamadasRealesPlaces = 0;
   const mockFetchPlaces = async () => {
     llamadasRealesPlaces++;
@@ -136,7 +134,6 @@ async function probarCacheApisExternas() {
     console.error("\n❌ Falló la retención en caché de las APIs externas.");
   }
 
-  // Limpiar claves y desconectar Redis
   await cacheService.del(claveClima);
   await cacheService.del(clavePlaces);
   await redis.quit();

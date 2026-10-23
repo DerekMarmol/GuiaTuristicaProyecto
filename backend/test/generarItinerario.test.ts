@@ -102,7 +102,6 @@ describe("POST /api/itinerarios/generar", () => {
     const app = crearApp({
       apiKey: CLAVE,
       detalles: { tiempoEsperaMs: 200, intervaloMs: 0, presupuestoMs: 2000 },
-      // El cliente se decide en cada prueba; la app delega en él a través de este envoltorio.
       generacion: {
         cliente: {
           generarPlan: (args) => {
@@ -163,7 +162,6 @@ describe("POST /api/itinerarios/generar", () => {
     catalogo = CATALOGO_PUERTO_BARRIOS;
     consultasGeocodificacion = [];
     clienteIA = {
-      // Un plan imposible obliga a usar el planificador de respaldo, igual que si no hubiera GEMINI_API_KEY.
       generarPlan: async () => ({ dias: [{ numeroDia: 1, paradas: [{ placeId: "inventado", tiempoEstanciaMinutos: 60 }] }] }),
     };
   });

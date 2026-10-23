@@ -1,6 +1,7 @@
 export const CATEGORIAS_POR_INTERES: Readonly<Record<string, readonly string[]>> = Object.freeze({
   Cultura: Object.freeze(["entertainment.culture", "entertainment.museum"]),
-  Historia: Object.freeze(["tourism.sights", "heritage"]),
+  // Los castillos y fuertes hay que pedirlos aparte: Geoapify no los incluye al pedir tourism.sights.
+  Historia: Object.freeze(["tourism.sights", "heritage", "religion.place_of_worship", "tourism.sights.castle", "tourism.sights.fort"]),
   "Gastronomía": Object.freeze(["catering.restaurant", "catering.cafe"]),
   Naturaleza: Object.freeze(["natural", "national_park", "leisure.park"]),
   Aventura: Object.freeze([

@@ -46,8 +46,6 @@ import { crearRutaChat } from "./chat/rutaChat";
 import { crearReoptimizadorChat, type ClienteOptimizador } from "./chat/optimizador";
 
 export interface OpcionesApp {
-  // Caché de las respuestas de Geoapify y OpenWeather. Sin ella la app no se conecta a Redis (así corren
-  // las pruebas); server.ts pasa la de Redis.
   cache?: CacheJson | null;
   apiKey?: string;
   fetch?: FuncionFetch;
@@ -101,7 +99,6 @@ export interface OpcionesApp {
     fetch?: FuncionFetch;
   };
   generacion?: {
-    // null fuerza el planificador sin IA aunque exista GEMINI_API_KEY.
     cliente?: ClienteLLM | null;
     ahora?: () => Date;
   };
@@ -123,8 +120,6 @@ export function crearApp({
   foursquare = {},
   cache = null,
 }: OpcionesApp = {}): FastifyInstance {
-  // Igual que con Express: rutas sin distinguir mayúsculas y con o sin barra final.
-  // frameworkErrors da el mismo formato de error a fallos previos al enrutamiento, como una URL mal formada.
   const app = Fastify({
     routerOptions: { ignoreTrailingSlash: true, caseSensitive: false },
     frameworkErrors: manejarErrores,

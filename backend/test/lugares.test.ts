@@ -485,7 +485,14 @@ describe("GET /api/lugares - búsqueda por intereses", () => {
   test("elimina categorías compartidas entre intereses", async () => {
     await consultar(rutaIntereses({ intereses: "Historia,Fotografía" }));
 
-    assert.deepEqual(categoriasEnviadas(), ["tourism.sights", "heritage", "tourism.attraction"]);
+    assert.deepEqual(categoriasEnviadas(), [
+      "tourism.sights",
+      "heritage",
+      "religion.place_of_worship",
+      "tourism.sights.castle",
+      "tourism.sights.fort",
+      "tourism.attraction",
+    ]);
   });
 
   test("normaliza mayúsculas, espacios exteriores y tildes", async () => {

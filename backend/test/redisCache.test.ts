@@ -4,14 +4,11 @@ async function probarCapaCaching() {
   console.log("--- Probando Conexión y Capa de Caching con Redis (GUI-69) ---\n");
 
   try {
-    // 1. Conectar explícitamente
     await redis.connect();
 
-    // 2. Probar PING
     const responderPing = await cacheService.ping();
     console.log(`1. Prueba de PING -> Responde: ${responderPing ? "PONG (Éxito)" : "Fallo"}`);
 
-    // 3. Probar SET y GET de datos estructurados
     const clavePrueba = "cache:test:viaje-demo";
     const valorPrueba = {
       destino: "Antigua Guatemala",
@@ -30,7 +27,6 @@ async function probarCapaCaching() {
       valorRecuperado.destino === valorPrueba.destino &&
       valorRecuperado.lugaresVisitados === 5;
 
-    // 4. Probar eliminación de clave
     await cacheService.del(clavePrueba);
     const valorPostEliminar = await cacheService.get(clavePrueba);
     console.log(`3. Clave eliminada -> Valor actual: ${valorPostEliminar} (esperado: null)`);

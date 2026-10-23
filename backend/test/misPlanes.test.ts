@@ -3,8 +3,6 @@ import assert from "node:assert/strict";
 import type { FastifyInstance } from "fastify";
 import { crearApp } from "../src/app";
 
-// Usa la base de datos de desarrollo (docker compose up -d postgres), igual que las pruebas de auth.
-
 async function crearUsuario(app: FastifyInstance, nombre: string): Promise<string> {
   const correo = `${nombre}_${Date.now()}_${Math.round(Math.random() * 1e6)}@prueba.com`;
   const contrasena = "Password123!";

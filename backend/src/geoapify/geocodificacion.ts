@@ -15,7 +15,13 @@ export interface DestinoGeocodificado {
   lat: number;
   lng: number;
   zonaHoraria: string;
+  // Si el destino es un departamento o un municipio (no un pueblo), su id en Geoapify: los lugares se buscan
+  // dentro de todo su límite, porque su centro geográfico puede caer en plena selva, lejos de lo que se visita.
+  areaId?: string;
 }
+
+// Tipos de resultado de Geoapify que son una zona administrativa amplia (en Guatemala, departamento y municipio).
+const TIPOS_DE_AREA = new Set(["state", "county"]);
 
 export type Geocodificar = (texto: string) => Promise<DestinoGeocodificado | null>;
 
@@ -41,11 +47,13 @@ function aDestino(resultado: unknown): DestinoGeocodificado | null {
   if (!esZonaHorariaValida(zona)) {
     return null;
   }
+  const { result_type: tipo, place_id: areaId } = resultado;
   return {
     nombre: typeof formatted === "string" && formatted.trim() !== "" ? formatted : "",
     lat,
     lng: lon,
     zonaHoraria: zona,
+    ...(typeof tipo === "string" && TIPOS_DE_AREA.has(tipo) && typeof areaId === "string" && areaId ? { areaId } : {}),
   };
 }
 

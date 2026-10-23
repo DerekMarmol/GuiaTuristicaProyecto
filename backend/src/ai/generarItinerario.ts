@@ -1,4 +1,5 @@
 import type { ClienteLLM } from "./cliente";
+import { estadoHttp } from "./modelos";
 import { construirPrompt, SYSTEM_INSTRUCTION } from "./prompts";
 import { validarSalida, verificarZonaHoraria, type OpcionesValidacion, type ResultadoValidacion } from "./validator";
 import type { LugarReal, ResultadoGeneracion, ViajeIA } from "./tipos";
@@ -15,15 +16,6 @@ export class ErrorGeneracionIA extends Error {
     super(mensaje);
     this.name = "ErrorGeneracionIA";
   }
-}
-
-// Código HTTP de un error de Gemini: el SDK lo da en `status` y además viene en el mensaje ("code":429).
-function estadoHttp(error: unknown): number | null {
-  const estado = (error as { status?: unknown } | null)?.status;
-  if (typeof estado === "number") return estado;
-  const texto = error instanceof Error ? error.message : String(error);
-  const encontrado = /"code"\s*:\s*(\d{3})/.exec(texto) ?? /(429|503)/.exec(texto);
-  return encontrado ? Number(encontrado[1]) : null;
 }
 
 // Con la cuota agotada reintentar solo gasta más solicitudes (el plan gratuito permite pocas al día). Con el

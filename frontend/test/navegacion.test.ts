@@ -11,7 +11,6 @@ import {
   tramoPendiente,
 } from "../src/services/navegacion.ts";
 
-// Ruta de ejemplo: 500 m al norte y luego 300 m al este (giro a la derecha).
 const LAT0 = 14.6105;
 const LNG0 = -89.995;
 const M_LAT = 1 / 111_320;
@@ -73,12 +72,10 @@ describe("navegación guiada (GUI-116)", () => {
   test("detecta que el usuario se salió de la ruta, con tolerancia al error del GPS", () => {
     assert.equal(calcularProgreso(ruta, comoPosicion(punto(250, 80)), 10).fueraDeRuta, true);
     assert.equal(calcularProgreso(ruta, comoPosicion(punto(250, 30)), 10).fueraDeRuta, false);
-    // Con un GPS impreciso (60 m), 80 m de desvío todavía no cuenta como salirse.
     assert.equal(calcularProgreso(ruta, comoPosicion(punto(250, 80)), 60).fueraDeRuta, false);
   });
 
   test("si salió de un punto lejos de la calle, estar a esa distancia no cuenta como salirse", () => {
-    // Salió de una casa a 80 m de la ruta: a 85 m sigue en ruta; a 130 m ya se salió.
     assert.equal(calcularProgreso(ruta, comoPosicion(punto(100, 85)), 8, 80).fueraDeRuta, false);
     assert.equal(calcularProgreso(ruta, comoPosicion(punto(100, 130)), 8, 80).fueraDeRuta, true);
   });

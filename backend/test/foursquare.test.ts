@@ -79,6 +79,16 @@ describe("Foursquare Places (GUI-117)", () => {
     assert.deepEqual(await buscar({ lat: 14.6, lng: -90, radio: 5000, limite: 10, interes: "Compras" }), []);
   });
 
+  test("un hotel junto al lago no es una playa aunque Foursquare le ponga esa categoría", async () => {
+    const hotel = { ...resultado("h1", "Bahía Paraíso", 15.66, -89.0, "Beach"), categories: [{ name: "Resort" }, { name: "Beach" }] };
+    const buscar = crearBuscadorFoursquare({
+      apiKey: "clave",
+      fetch: async () => respuestaJson({ results: [hotel, resultado("p1", "Playa Blanca", 15.8, -88.7, "Beach")] }),
+    })!;
+    const playas = await buscar({ lat: 15.6, lng: -89, radio: 30000, limite: 10, interes: "Playa" });
+    assert.deepEqual(playas.map((p) => p.nombre), ["Playa Blanca"]);
+  });
+
   test("si Foursquare falla, no rompe la búsqueda", async () => {
     const buscar = crearBuscadorFoursquare({ apiKey: "clave", fetch: async () => respuestaJson({ message: "no" }, 401) })!;
     assert.deepEqual(await buscar({ lat: 14.6, lng: -90, radio: 5000, limite: 10, interes: "Compras" }), []);
@@ -108,7 +118,6 @@ describe("Foursquare Places (GUI-117)", () => {
       },
       buscarEnFoursquare: async () => [
         { ...plazaOsm, idExterno: "fsq:dup", proveedor: "foursquare", nombre: "PLAZA San Francisco", lat: 14.6317 },
-        // Mismo lugar con nombre más corto en la otra fuente.
         { ...plazaOsm, idExterno: "fsq:dup2", proveedor: "foursquare", nombre: "Plaza Francisco", lat: 14.6318 },
         { ...plazaOsm, idExterno: "fsq:paca", proveedor: "foursquare", nombre: "Paca La Económica", lat: 14.633, categorias: ["commercial"] },
         { ...plazaOsm, idExterno: "fsq:zapateria", proveedor: "foursquare", nombre: "Zapatería El Paso", lat: 14.634, categorias: ["commercial"] },

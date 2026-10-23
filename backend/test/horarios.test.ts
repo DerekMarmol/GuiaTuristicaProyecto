@@ -62,7 +62,6 @@ interface ConsultaDetalles {
 
 type RespuestaSimulada = Response | Promise<Response>;
 
-// Entradas deliberadamente inválidas: se convierten al tipo del parámetro real.
 type EntradaHorario = Parameters<typeof interpretarHorario>[0];
 type EntradaDetalles = Parameters<typeof extraerRegistroDetalles>[0];
 

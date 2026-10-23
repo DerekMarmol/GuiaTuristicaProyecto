@@ -126,8 +126,8 @@ export function crearGeneradorItinerario({
   ahora?: () => Date;
 }): GenerarItinerario {
   return async function generarItinerario(solicitud) {
-    const destino = await geocodificar(solicitud.destino);
-    if (!destino) {
+    const geocodificado = await geocodificar(solicitud.destino);
+    if (!geocodificado) {
       throw new ErrorApi(
         422,
         "DESTINO_NO_ENCONTRADO",
@@ -136,9 +136,9 @@ export function crearGeneradorItinerario({
     }
 
     const totalDias = diasEntre(solicitud.fechaInicio, solicitud.fechaFin);
-    const [candidatos, lluvia] = await Promise.all([
+    const [{ candidatos, centro }, lluvia] = await Promise.all([
       buscarCandidatos({
-        destino,
+        destino: geocodificado,
         intereses: solicitud.intereses,
         dias: totalDias,
         transporte: solicitud.transporte,
@@ -146,8 +146,11 @@ export function crearGeneradorItinerario({
         enriquecerHorarios,
         buscarEnFoursquare,
       }),
-      diasConLluvia(consultarClima, destino, solicitud.fechaInicio, solicitud.fechaFin),
+      diasConLluvia(consultarClima, geocodificado, solicitud.fechaInicio, solicitud.fechaFin),
     ]);
+    // En un departamento o municipio el viaje (mapa, punto de partida, orden de las paradas) se centra en su
+    // lugar principal, no en el centro geográfico.
+    const destino = { ...geocodificado, ...centro };
     if (candidatos.length === 0) {
       throw new ErrorApi(422, "SIN_LUGARES", "No encontramos lugares cerca del destino para tus intereses. Prueba con otros intereses.");
     }

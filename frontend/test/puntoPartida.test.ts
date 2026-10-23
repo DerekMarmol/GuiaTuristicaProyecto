@@ -14,7 +14,7 @@ describe("punto de partida", () => {
   });
 
   test("mide la distancia en línea recta", () => {
-    // Jalapa → Cobán, unos 100 km en línea recta.
+    // De Jalapa pa cobán
     assert.equal(Math.round(distanciaKm({ lat: 14.6344, lng: -89.9898 }, { lat: 15.4702, lng: -90.3735 })), 102);
     assert.equal(distanciaKm({ lat: 15.47, lng: -90.37 }, { lat: 15.47, lng: -90.37 }), 0);
   });
