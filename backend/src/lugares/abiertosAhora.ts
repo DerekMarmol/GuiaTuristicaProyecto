@@ -63,7 +63,6 @@ export function crearBuscadorAbiertosAhora({ buscarLugares, consultarApertura, a
     const apertura = await consultarApertura(candidatos.map(({ lugar }) => lugar.idExterno));
     const datosDe = (idExterno: string) => apertura.get(idExterno) ?? datosNoConsultados();
 
-    // Si no se obtuvo ningún horario, una lista vacía se confundiría con «no hay lugares abiertos».
     if (candidatos.length > 0 && candidatos.every(({ lugar }) => datosDe(lugar.idExterno).horario.estado === "error_consulta")) {
       throw new ErrorApi(
         502,

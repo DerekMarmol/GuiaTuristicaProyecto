@@ -4,6 +4,7 @@ import {
   calcularProgreso,
   pedirRuta,
   perfilPorTransporte,
+  tramoPendiente,
   type Progreso,
   type Punto,
   type RutaNavegacion,
@@ -12,7 +13,9 @@ import {
 // Un salto suelto del GPS no recalcula: hacen falta varias lecturas seguidas fuera de la ruta, y entre un
 // recálculo y otro pasa un mínimo de tiempo (cada uno es una consulta a Mapbox).
 const LECTURAS_FUERA_PARA_RECALCULAR = 2;
-const ESPERA_ENTRE_RECALCULOS_MS = 15_000;
+const ESPERA_ENTRE_RECALCULOS_MS = 8_000;
+// A esta distancia de la línea el usuario ya está sobre la ruta: desde ahí deja de contar el margen de salida.
+const SOBRE_LA_RUTA_METROS = 20;
 
 export interface DestinoNavegacion extends Punto {
   id: string;
@@ -70,6 +73,13 @@ export function useNavegacion({
     return () => controlador.abort();
   }, [destino?.id, destino?.lat, destino?.lng, hayPosicion, transporte, recalculos]);
 
+  // El margen por haber salido lejos de la calle solo vale hasta que el usuario se sube a la ruta; si no,
+  // tras salir de una casa a 80 m podría irse por una paralela sin que la app lo notara.
+  useEffect(() => {
+    if (!ruta || !posicion || desvioInicial === 0) return;
+    if (calcularProgreso(ruta, posicion, null).distanciaALaRuta <= SOBRE_LA_RUTA_METROS) setDesvioInicial(0);
+  }, [ruta, posicion, desvioInicial]);
+
   const progreso: Progreso | null = useMemo(
     () => (ruta && posicion ? calcularProgreso(ruta, posicion, posicion.precisionMetros, desvioInicial) : null),
     [ruta, posicion, desvioInicial]
@@ -86,5 +96,8 @@ export function useNavegacion({
     }
   }, [progreso]);
 
-  return { ruta, progreso, error, cargando, recalculando: cargando && recalculos > 0 };
+  // Solo se dibuja lo que falta por recorrer.
+  const pendiente = useMemo(() => (ruta ? tramoPendiente(ruta, posicion) : null), [ruta, posicion]);
+
+  return { ruta, pendiente, progreso, error, cargando, recalculando: cargando && recalculos > 0 };
 }

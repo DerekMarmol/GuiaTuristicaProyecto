@@ -3,7 +3,6 @@ import fp from "fastify-plugin";
 import fastifyJwt from "@fastify/jwt";
 
 const authPluginAsync: FastifyPluginAsync = async (fastify: FastifyInstance) => {
-  // Registrar el manejador de JWT de Fastify
   await fastify.register(fastifyJwt, {
     secret: process.env.JWT_SECRET || "guia_turistica_super_secret_key_2026",
     sign: {
@@ -11,7 +10,6 @@ const authPluginAsync: FastifyPluginAsync = async (fastify: FastifyInstance) => 
     },
   });
 
-  // Decorador para proteger rutas (devuelve 401 si falla)
   fastify.decorate(
     "verificarToken",
     async (request: FastifyRequest, reply: FastifyReply) => {

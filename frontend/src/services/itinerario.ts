@@ -115,8 +115,10 @@ export function convertirRespuesta(respuesta: RespuestaGeneracion): ItinerarioGe
   };
 }
 
-function solicitudDesdeViaje(viaje: ViajeBorrador, origen?: { lat: number; lng: number }) {
+function solicitudDesdeViaje(viaje: ViajeBorrador, origen?: { lat: number; lng: number }, evitar: string[] = []) {
   return {
+    // GUI-118: al regenerar, los lugares del plan anterior, para que el nuevo proponga otros.
+    ...(evitar.length > 0 ? { evitar } : {}),
     // Dónde está el viajero al generar: el backend arma el día empezando por lo más cercano a este punto.
     ...(origen ? { origen: { lat: origen.lat, lng: origen.lng } } : {}),
     destino: viaje.destino,
@@ -136,7 +138,8 @@ export async function generarItinerario(
   viaje: ViajeBorrador,
   onProgreso?: (pasosListos: number) => void,
   signal?: AbortSignal,
-  origen?: { lat: number; lng: number }
+  origen?: { lat: number; lng: number },
+  evitar: string[] = []
 ): Promise<ItinerarioGenerado> {
   if (!navigator.onLine) {
     throw new Error(
@@ -158,7 +161,7 @@ export async function generarItinerario(
       respuesta = await fetch("/api/itinerarios/generar", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(solicitudDesdeViaje(viaje, origen)),
+        body: JSON.stringify(solicitudDesdeViaje(viaje, origen, evitar)),
         signal,
       });
     } catch (err) {

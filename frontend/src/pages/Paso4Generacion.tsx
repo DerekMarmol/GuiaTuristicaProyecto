@@ -144,6 +144,7 @@ export default function Paso4Generacion() {
   // GUI-114: lo que el usuario ve y marca en esta pantalla se guarda en el teléfono junto con el viaje.
   const [advertencias, setAdvertencias] = useEstadoGuardado<string[]>(`${PREFIJO_ESTADO_PASO4}advertencias`, []);
   const [intento, setIntento] = useState(0);
+  const lugaresAEvitar = useRef<string[]>([]);
   const [diaActivo, setDiaActivo] = useEstadoGuardado(`${PREFIJO_ESTADO_PASO4}dia`, 0);
   const [seccion, setSeccion] = useEstadoGuardado<SeccionPaso4>(`${PREFIJO_ESTADO_PASO4}seccion`, "itinerario");
   const cabeceraRef = useRef<HTMLDivElement>(null);
@@ -331,7 +332,7 @@ async function manejarExportarPlan() {
           if (!cancelado()) {
             setProgreso(n);
           }
-        }, controlador.signal, ubicacion ?? undefined)
+        }, controlador.signal, ubicacion ?? undefined, lugaresAEvitar.current)
       )
       .then((resultado) => {
         if (cancelado()) return;
@@ -396,6 +397,8 @@ async function manejarExportarPlan() {
   }, [itinerarios]);
 
   function regenerar() {
+    // GUI-118: el plan nuevo prefiere lugares distintos a los del actual.
+    lugaresAEvitar.current = (itinerarios ?? []).flatMap((it) => it.paradas.flatMap((p) => (p.placeId ? [p.placeId] : [])));
     setSeccion("itinerario");
     setInicioSeguimiento(null);
     setItinerarios(null);
@@ -1296,7 +1299,7 @@ async function manejarExportarPlan() {
                       : null
                   }
                   posicionActual={posicionEnVivo}
-                  rutaNavegacion={destinoNavegacion ? navegacion.ruta?.coordenadas ?? null : null}
+                  rutaNavegacion={destinoNavegacion ? navegacion.pendiente : null}
                   eligiendoPartida={partida.eligiendo}
                   onElegirPartida={partida.elegirEnMapa}
                 />

@@ -179,7 +179,7 @@ const authRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     }
   );
 
-  // 4. RUTA PROTEGIDA DE VERIFICACIÓN (401 si no hay token o es inválido)
+  // 4. RUTA PROTEGIDA DE VERIFICACIÓN 
   fastify.get(
     "/verificar",
     { preHandler: [fastify.verificarToken] },

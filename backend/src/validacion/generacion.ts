@@ -21,8 +21,10 @@ export interface SolicitudGeneracion {
   nombreHotel?: string;
   horaInicio?: string;
   origen?: { lat: number; lng: number };
+  evitar?: string[];
 }
 
+const MAX_LUGARES_A_EVITAR = 60;
 const TIPOS_VIAJE = ["solo", "pareja", "familia", "amigos"] as const;
 const TRANSPORTES = ["A pie", "Transporte Publico", "Automovil", "Moto", "Transporte Aereo"] as const;
 
@@ -74,6 +76,8 @@ const SolicitudSchema = z
     hospedaje: z.boolean({ invalid_type_error: "hospedaje debe ser true o false." }).default(false),
     nombreHotel: texto("nombreHotel", 1, MAX_LARGO_DESTINO).optional(),
     horaInicio: z.string({ invalid_type_error: "horaInicio debe ser un texto." }).refine(esHoraValida, "horaInicio debe tener el formato HH:MM.").optional(),
+    // GUI-118: placeId de los lugares del plan anterior, al pedir «Regenerar»: se prefieren otros.
+    evitar: z.array(z.string().max(200), { invalid_type_error: "evitar debe ser una lista." }).max(MAX_LUGARES_A_EVITAR).optional(),
     // Ubicación del viajero al generar; si está lejos del destino se ignora.
     origen: z
       .object(

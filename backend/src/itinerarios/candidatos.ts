@@ -52,6 +52,16 @@ const HORARIOS_TIPICOS: [prefijo: string, apertura: string, cierre: string][] = 
 ];
 const HORARIO_TIPICO_PREDETERMINADO = { apertura: "09:00", cierre: "17:00" };
 
+// GUI-118: OpenStreetMap etiqueta a veces como «recuerdos» o «tienda» negocios que no son un paseo de compras
+// (una perfumería, una farmacia, una ferretería). Para Compras se descartan por el nombre, en las dos fuentes.
+const NOMBRES_QUE_NO_SON_COMPRAS =
+  /perfum|farmac|ferreter|celular|telefon|repuesto|agroservicio|agropecuari|pintura|materiales de construcci|llanter|gasolin|banco|cooperativa|funeraria|optica|clinica|supermercad|despensa|abarrot|tienda de conveniencia|pulper|walmart/i;
+
+function encajaConElInteres(lugar: { nombre: string }, interes: string): boolean {
+  const nombre = lugar.nombre.normalize("NFD").replace(/[̀-ͯ]/g, "");
+  return interes !== "Compras" || !NOMBRES_QUE_NO_SON_COMPRAS.test(nombre);
+}
+
 // Un lugar de OpenStreetMap (Geoapify) o de Foursquare (GUI-117).
 export type LugarDeFuente = Lugar | LugarFoursquare;
 
@@ -188,7 +198,7 @@ export async function buscarCandidatos({
   const encontrados: { interes: string; rango: number; lugar: LugarDeFuente }[] = [];
   for (const { interes, lugar } of intercalar(grupos)) {
     const rango = rangos.get(interes) ?? 0;
-    if (rango >= limite || encontrados.some((e) => esElMismoLugar(e.lugar, lugar))) {
+    if (rango >= limite || !encajaConElInteres(lugar, interes) || encontrados.some((e) => esElMismoLugar(e.lugar, lugar))) {
       continue;
     }
     rangos.set(interes, rango + 1);

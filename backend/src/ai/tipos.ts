@@ -40,6 +40,8 @@ export type ViajeIA = Pick<
   origen?: { lat: number; lng: number };
   horaInicioPrimerDia?: string;
   diasConLluvia?: { numeroDia: number; lluviaMm: number }[];
+  // Nombres de los lugares del plan anterior, cuando el viajero pidió otro (Regenerar).
+  lugaresAEvitar?: string[];
 };
 
 export type ViajeValidacion = Pick<ViajeIA, "id" | "fechaInicio" | "fechaFin" | "zonaHoraria" | "horaInicio">;

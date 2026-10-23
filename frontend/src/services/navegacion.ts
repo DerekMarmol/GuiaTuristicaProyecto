@@ -64,9 +64,10 @@ function distancia(a: Punto, b: Punto): number {
 
 const comoPunto = ([lng, lat]: [number, number]): Punto => ({ lat, lng });
 
-// Punto de la ruta más cercano a `posicion`: a qué distancia está y cuánto se lleva recorrido hasta él.
+// Punto de la ruta más cercano a `posicion`: a qué distancia está, cuánto se lleva recorrido hasta él, en
+// qué tramo cae (`segmento`) y dónde (`punto`, [lng, lat]).
 function proyectar(coordenadas: [number, number][], acumulada: number[], posicion: Punto) {
-  let mejor = { distancia: Infinity, recorrido: 0 };
+  let mejor = { distancia: Infinity, recorrido: 0, segmento: 0, punto: coordenadas[0] };
   for (let i = 0; i < coordenadas.length - 1; i++) {
     const a = comoPunto(coordenadas[i]);
     const b = aMetros(a, comoPunto(coordenadas[i + 1]));
@@ -75,7 +76,14 @@ function proyectar(coordenadas: [number, number][], acumulada: number[], posicio
     const t = largo2 === 0 ? 0 : Math.max(0, Math.min(1, (p.x * b.x + p.y * b.y) / largo2));
     const d = Math.hypot(p.x - t * b.x, p.y - t * b.y);
     if (d < mejor.distancia) {
-      mejor = { distancia: d, recorrido: acumulada[i] + t * (acumulada[i + 1] - acumulada[i]) };
+      const [lngA, latA] = coordenadas[i];
+      const [lngB, latB] = coordenadas[i + 1];
+      mejor = {
+        distancia: d,
+        recorrido: acumulada[i] + t * (acumulada[i + 1] - acumulada[i]),
+        segmento: i,
+        punto: [lngA + t * (lngB - lngA), latA + t * (latB - latA)],
+      };
     }
   }
   return mejor;
@@ -161,6 +169,14 @@ export function calcularProgreso(ruta: RutaNavegacion, posicion: Punto, precisio
     fueraDeRuta: !llego && distanciaALaRuta > umbralDesvio,
     llego,
   };
+}
+
+// Lo que queda de la ruta desde la posición del usuario: el tramo ya recorrido deja de dibujarse en el mapa.
+export function tramoPendiente(ruta: RutaNavegacion, posicion: Punto | null): [number, number][] {
+  if (!posicion) return ruta.coordenadas;
+  const { segmento, punto } = proyectar(ruta.coordenadas, ruta.acumulada, posicion);
+  const resto = ruta.coordenadas.slice(segmento + 1);
+  return resto.length > 0 ? [punto, ...resto] : [punto, ruta.coordenadas[ruta.coordenadas.length - 1]];
 }
 
 export function formatearDistancia(metros: number): string {

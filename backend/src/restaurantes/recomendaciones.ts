@@ -33,7 +33,6 @@ import {
   calcularPresupuestoPorPersonaCentavos,
 } from "./tarifas";
 
-// Con 250 ms entre inicios se envían como máximo 4 búsquedas por segundo, bajo el límite de 5 del plan gratuito de Geoapify.
 export const CONCURRENCIA_BUSQUEDAS = 2;
 export const INTERVALO_BUSQUEDAS_MS = 250;
 

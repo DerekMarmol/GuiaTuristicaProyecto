@@ -23,9 +23,6 @@ def parada(id, lat, lng, apertura="08:00", cierre="18:00", estancia=0, **extra):
         **extra,
     }
 
-
-# "cerca" está a ~150 m de "inicio" en línea recta y "lejos" a ~15 km;
-# Haversine y una velocidad fija visitarían primero "cerca".
 INICIO = parada("inicio", 14.6000, -90.5000)
 CERCA = parada("cerca", 14.6010, -90.5010)
 LEJOS = parada("lejos", 14.7000, -90.6000)
@@ -58,7 +55,6 @@ def test_matriz_de_or_tools_suma_estancia_del_origen_en_segundos():
 
     tiempos = calcular_matriz_tiempos(paradas, matriz)
 
-    # Un traslado de 0.4 s no se convierte en cero.
     assert tiempos == [[0, 30 * 60 + 1], [45 * 60 + 126, 0]]
 
 
@@ -68,7 +64,6 @@ def test_conserva_estancia_y_traslado_sin_duplicarlos():
         parada("museo", 14.7, -90.6, apertura="09:00", cierre="11:00", estancia=30),
     ]
 
-    # 09:00 + 60 min de estancia + 30 min de traslado = 10:30, último inicio posible.
     justo = optimizar(ClienteValhallaFalso(duraciones=[[0, 1800], [1800, 0]]), paradas)
     tarde = optimizar(ClienteValhallaFalso(duraciones=[[0, 1801], [1801, 0]]), paradas)
 
@@ -91,7 +86,6 @@ def test_horarios_consideran_el_traslado_de_valhalla():
 
     respuesta = optimizar(valhalla, paradas)
 
-    # Visitar "abierto" primero haría llegar a "cierra_pronto" a las 10:20.
     assert respuesta.status_code == 200, respuesta.text
     assert respuesta.json()["orden_optimo"] == ["inicio", "cierra_pronto", "abierto"]
 
@@ -110,7 +104,6 @@ def test_no_selecciona_conexiones_inexistentes():
 
 
 def test_no_selecciona_conexiones_inexistentes_al_priorizar_clima():
-    # El clima preferiría visitar el parque primero, pero parque -> museo no existe.
     lluvia_tarde = {
         "tipo_entorno": "exterior",
         "sensibilidad_clima": 1.0,
@@ -166,7 +159,6 @@ def test_distancia_total_usa_los_tramos_seleccionados():
     respuesta = optimizar(valhalla, [INICIO, CERCA, LEJOS])
 
     assert respuesta.json()["orden_optimo"] == ["inicio", "lejos", "cerca"]
-    # inicio -> lejos (4250 m) + lejos -> cerca (1500 m), no el regreso de 1330 m.
     assert respuesta.json()["distancia_total_km"] == 5.75
 
 

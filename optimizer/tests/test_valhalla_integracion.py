@@ -46,7 +46,6 @@ def cliente():
 def test_ruta_real(cliente, modo):
     traslado = cliente.ruta(PLAZA_CONSTITUCION, MUSEO_POPOL_VUH, modo)
 
-    # En línea recta hay unos 4 km; la red vial nunca es más corta.
     assert traslado.distancia_metros > 4000
     assert traslado.duracion_segundos > 0
 
@@ -103,7 +102,6 @@ def test_optimize_de_extremo_a_extremo(cliente, modo):
 
     assert respuesta.status_code == 200, respuesta.text
     resultado = respuesta.json()
-    # El mercado está junto a la plaza; conviene visitarlo antes de ir a la zona 10.
     assert resultado["orden_optimo"] == ["plaza", "mercado", "popol_vuh"]
     assert resultado["distancia_total_km"] > 4
 
