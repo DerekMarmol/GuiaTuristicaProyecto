@@ -14,7 +14,47 @@ export interface Lugar extends ClasificacionClima {
   lat: number;
   lng: number;
   categorias: string[];
+  // Qué tan conocido es el lugar (ver calcularImportancia); 0 si no destaca.
+  importancia?: number;
 }
+
+// Categorías de los lugares que justifican un viaje: patrimonio, parques nacionales, sitios arqueológicos…
+const CATEGORIAS_DESTACADAS: [prefijo: string, puntos: number][] = [
+  ["heritage.unesco", 4],
+  ["national_park", 2],
+  ["natural.protected_area", 2],
+  ["leisure.park.nature_reserve", 2],
+  ["tourism.sights.archaeological_site", 2],
+  ["tourism.sights.castle", 2],
+  ["tourism.sights.fort", 2],
+  ["natural.water", 1],
+  ["natural.mountain.volcano", 1],
+  ["tourism.attraction", 1],
+  ["beach", 1],
+];
+
+// La importancia de un lugar ordena los candidatos antes que la cercanía: sin ella, el sitio más cercano al
+// centro del destino (una plaza, una banca) desplaza a Tikal. OpenStreetMap enlaza los lugares conocidos con
+// su ficha de Wikipedia o Wikidata, la mejor señal disponible de que un turista los buscaría.
+export function calcularImportancia(categorias: string[], propiedades: Record<string, unknown> = {}): number {
+  const crudo = esObjeto(propiedades.datasource) && esObjeto(propiedades.datasource.raw) ? propiedades.datasource.raw : {};
+  const conFicha = textoNoVacio(crudo.wikidata) || textoNoVacio(crudo.wikipedia) || esObjeto(propiedades.wiki_and_media);
+  const porCategoria = Math.max(
+    0,
+    ...CATEGORIAS_DESTACADAS.filter(([prefijo]) => categorias.some((c) => c === prefijo || c.startsWith(`${prefijo}.`))).map(([, puntos]) => puntos),
+  );
+  // Lo que abunda en el mapa y casi nunca es un destino: un parque de colonia, la estatua de un prócer, el
+  // templo del barrio (las iglesias coloniales conocidas tienen ficha y suman por ella) o una cadena de
+  // comida rápida (OpenStreetMap les pone la marca).
+  const esMenor =
+    !conFicha &&
+    (categorias.some((c) => c.startsWith("religion")) ||
+      (textoNoVacio(crudo.brand) && categorias.some((c) => c.startsWith("catering"))) ||
+      (categorias.every((c) => CATEGORIAS_MENORES.has(c)) && categorias.some((c) => c === "leisure.park" || c === "tourism.sights.memorial")));
+  return (conFicha ? 3 : 0) + (porCategoria > 0 ? porCategoria : esMenor ? -1 : 0);
+}
+
+const CATEGORIAS_MENORES = new Set(["leisure", "leisure.park", "tourism", "tourism.sights", "tourism.sights.memorial"]);
 
 function textoNoVacio(valor: unknown): valor is string {
   return typeof valor === "string" && valor.trim() !== "";
@@ -33,7 +73,7 @@ function categoriasValidas(valor: unknown): string[] {
   ];
 }
 
-function transformarLugar(feature: unknown): Lugar | null {
+function transformarLugar(feature: unknown, conImportancia = false): Lugar | null {
   const propiedades = feature && typeof feature === "object" ? (feature as { properties?: unknown }).properties : null;
   if (!propiedades || typeof propiedades !== "object") {
     return null;
@@ -61,11 +101,14 @@ function transformarLugar(feature: unknown): Lugar | null {
     lat,
     lng: lon,
     categorias,
+    ...(conImportancia ? { importancia: calcularImportancia(categorias, propiedades as Record<string, unknown>) } : {}),
     ...clasificarEntorno(categorias),
   };
 }
 
-export function transformarLugares(datos: unknown): Lugar[] {
+// `conImportancia` agrega la importancia de cada lugar; solo la usa la generación de itinerarios, así que
+// no aparece en las respuestas de /api/lugares ni en las demás que devuelven lugares.
+export function transformarLugares(datos: unknown, conImportancia = false): Lugar[] {
   if (!esObjeto(datos) || !Array.isArray(datos.features)) {
     throw new ErrorApi(502, "PROVEEDOR_RESPUESTA_INVALIDA", "El proveedor de lugares devolvió una respuesta con formato inesperado.");
   }
@@ -74,7 +117,7 @@ export function transformarLugares(datos: unknown): Lugar[] {
   const lugares: Lugar[] = [];
 
   for (const feature of datos.features) {
-    const lugar = transformarLugar(feature);
+    const lugar = transformarLugar(feature, conImportancia);
     if (!lugar || vistos.has(lugar.idExterno)) {
       continue;
     }

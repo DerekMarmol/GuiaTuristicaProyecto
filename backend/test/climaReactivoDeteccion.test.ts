@@ -9,7 +9,7 @@ import { interpretarClimaActual, interpretarPronostico, type ClimaActual, type P
 
 const CONFIG = CONFIGURACION_CLIMA_REACTIVO;
 const OFFSET = -21600;
-const AHORA = new Date("2026-11-20T16:00:00Z"); // 10:00 en Guatemala
+const AHORA = new Date("2026-11-20T16:00:00Z"); 
 const AHORA_S = AHORA.getTime() / 1000;
 const UBICACION = { lat: 14.5586, lng: -90.7295, fuente: "proxima_parada" as const };
 
@@ -95,7 +95,6 @@ describe("evaluación meteorológica", () => {
     const fuera = evaluar(actual(800), pronostico(registro(-4, 0.95, 202), registro(7, 0.95, 202)));
     assert.equal(fuera.nivel, "favorable");
     assert.equal(fuera.pronostico.estado, "sin_cobertura");
-    // El intervalo que empezó hace dos horas sigue vigente durante una hora más.
     assert.equal(evaluar(actual(800), pronostico(registro(-2, 0.9))).nivel, "riesgo_elevado");
   });
 

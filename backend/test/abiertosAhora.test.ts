@@ -17,7 +17,6 @@ import { crearCacheApertura } from "../src/lugares/cacheApertura";
 
 const GUATEMALA = "America/Guatemala";
 const CLAVE = "clave-de-prueba-no-real-abiertos";
-// Martes 13 de octubre de 2026, 10:00 en Guatemala (UTC-6).
 const MARTES_10_GT = Date.parse("2026-10-13T16:00:00Z");
 const ORIGEN = { lat: 14.6349, lng: -90.5069 };
 
@@ -80,7 +79,6 @@ describe("evaluarAperturaActual", () => {
   });
 
   test("un turno que cruza la medianoche sigue abierto de madrugada", () => {
-    // Sábado 17 a la 01:00 en Guatemala, dentro del turno que empezó el viernes a las 22:00.
     assert.deepEqual(evaluarAperturaActual(disponible("Fr 22:00-03:00"), GUATEMALA, Date.parse("2026-10-17T07:00:00Z")), {
       estadoApertura: "abierto",
       open_now: true,
@@ -90,14 +88,12 @@ describe("evaluarAperturaActual", () => {
   });
 
   test("usa el día local del lugar y no el día UTC", () => {
-    // 05:00 UTC del domingo es sábado 23:00 en Guatemala.
     const instante = Date.parse("2026-10-18T05:00:00Z");
     assert.equal(evaluarAperturaActual(disponible("Sa 18:00-23:30; Su off"), GUATEMALA, instante).open_now, true);
     assert.equal(evaluarAperturaActual(disponible("Sa off; Su 00:00-23:59"), GUATEMALA, instante).open_now, false);
   });
 
   test("un día sin atención está cerrado", () => {
-    // Domingo 18, 10:00 en Guatemala.
     assert.equal(evaluarAperturaActual(disponible("Mo-Sa 09:00-18:00; Su off"), GUATEMALA, Date.parse("2026-10-18T16:00:00Z")).estadoApertura, "cerrado");
   });
 
@@ -140,7 +136,6 @@ describe("evaluarAperturaActual", () => {
           open_now: true,
           cierreEstimado: "2026-10-13T17:00-06:00",
         });
-        // El mismo instante es miércoles 01:00 en Tokio.
         assert.equal(evaluarAperturaActual(horario, "Asia/Tokyo", MARTES_10_GT).open_now, false);
       });
     }
@@ -149,7 +144,6 @@ describe("evaluarAperturaActual", () => {
   test("aplica el horario de verano de la zona del lugar", () => {
     const horario = disponible("Mo-Su 09:00-17:00");
     conZonaDelServidor("UTC", () => {
-      // 13:30 UTC es 08:30 en Nueva York antes del cambio (UTC-5) y 09:30 después (UTC-4).
       assert.equal(evaluarAperturaActual(horario, "America/New_York", Date.parse("2026-03-06T13:30:00Z")).open_now, false);
       assert.deepEqual(evaluarAperturaActual(horario, "America/New_York", Date.parse("2026-03-09T13:30:00Z")), {
         estadoApertura: "abierto",
@@ -322,7 +316,6 @@ async function simularFetch(url: string | URL, opciones?: RequestInit): Promise<
   return respuestaJson({ type: "FeatureCollection", features: lugaresSimulados.map(featurePlaces) });
 }
 
-// Desplazamientos en latitud: 0.001° son unos 111 m.
 const CERCA_ABIERTO: DatosLugarSimulado = { id: "abierto-cerca", nombre: "Museo Abierto", lat: 14.6359, lng: -90.5069, horario: "Mo-Su 08:00-18:00" };
 const LEJOS_ABIERTO: DatosLugarSimulado = { id: "abierto-lejos", nombre: "Mirador 24 horas", lat: 14.6449, lng: -90.5069, horario: "24/7" };
 const CERRADO: DatosLugarSimulado = { id: "cerrado", nombre: "Teatro Nocturno", lat: 14.6369, lng: -90.5069, horario: "Mo-Su 18:00-22:00" };
@@ -512,10 +505,8 @@ describe("GET /api/lugares/abiertos-ahora - filtro", () => {
     const base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
     const pedir = async () => (await (await fetch(`${base}${ruta()}`)).json()) as RespuestaLugaresAbiertosAhora;
     try {
-      // 17:50 en Guatemala, diez minutos antes del cierre.
       reloj = Date.parse("2026-10-13T23:50:00Z");
       const abierto = await pedir();
-      // 18:05: el museo ya cerró y la caché de 30 minutos sigue vigente.
       reloj = Date.parse("2026-10-14T00:05:00Z");
       const cerrado = await pedir();
 
@@ -526,7 +517,6 @@ describe("GET /api/lugares/abiertos-ahora - filtro", () => {
       assert.deepEqual(llamadasDetalles, ["abierto-cerca"]);
       assert.equal(llamadasPlaces.length, 2);
 
-      // Pasada la vigencia se vuelve a consultar el horario.
       reloj = Date.parse("2026-10-14T00:40:00Z");
       await pedir();
       assert.deepEqual(llamadasDetalles, ["abierto-cerca", "abierto-cerca"]);

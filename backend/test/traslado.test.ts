@@ -16,7 +16,7 @@ describe("POST /api/itinerarios/traslado", () => {
   const enviar = (payload: unknown) => app.inject({ method: "POST", url: "/api/itinerarios/traslado", payload: payload as object });
 
   test("estima el traslado del punto de partida a la primera parada con su margen", async () => {
-    // Unos 2.2 km en línea recta dentro de Cobán.
+    //cobán 
     const respuesta = await enviar({ origen: { lat: 15.4702, lng: -90.3735 }, destino: { lat: 15.4900, lng: -90.3735 } });
 
     assert.equal(respuesta.statusCode, 200);

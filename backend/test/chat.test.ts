@@ -69,7 +69,6 @@ describe("crearReoptimizadorChat", () => {
   });
 });
 
-/** Cliente de chat falso: llama a la herramienta indicada y responde con un texto fijo. */
 function clienteQueLlama(nombre: string, args: Record<string, unknown> = {}) {
   const resultados: unknown[] = [];
   const cliente: ClienteChat = {

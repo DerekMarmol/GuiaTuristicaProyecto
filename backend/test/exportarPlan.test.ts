@@ -6,7 +6,6 @@ async function probarExportacion() {
   const app = crearApp();
   await app.ready();
 
-  // 1. Registro e inicio de sesión para obtener un usuario real y su token
   const timestamp = Date.now();
   const usuario = {
     nombre: "Viajero Exportador",
@@ -28,7 +27,6 @@ async function probarExportacion() {
 
   const token = loginRes.json()?.token;
 
-  // 2. Probando exportar sin token (esperado: 401)
   console.log("1. Probando exportar sin token...");
   const resSinAuth = await app.inject({
     method: "GET",
@@ -36,7 +34,6 @@ async function probarExportacion() {
   });
   console.log(`-> Status: ${resSinAuth.statusCode} (esperado: 401)`);
 
-  // 3. Guardar un plan previo para tener un ID real en la base de datos
   console.log("\n2. Guardando plan base en la base de datos...");
   const planPayload = {
     destino: "Lago de Atitlán",
@@ -94,7 +91,6 @@ async function probarExportacion() {
   const planId = resGuardar.json()?.id;
   console.log(`-> Plan creado con ID: ${planId}`);
 
-  // 4. Probando exportar con token y validando criterios
   console.log("\n3. Probando exportar plan con usuario autenticado...");
   const resExportar = await app.inject({
     method: "GET",

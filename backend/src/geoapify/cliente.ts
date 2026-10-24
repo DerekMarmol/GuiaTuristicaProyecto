@@ -13,6 +13,10 @@ export interface ConsultaBusqueda {
   categorias: string[];
   radio: number;
   limite: number;
+  // Id de Geoapify de un departamento o municipio: se busca dentro de su límite en vez del círculo.
+  area?: string;
+  // Agrega a cada lugar su importancia (ver calcularImportancia); la pide la generación de itinerarios.
+  conImportancia?: boolean;
 }
 
 export type BuscarLugares = (consulta: ConsultaBusqueda) => Promise<Lugar[]>;
@@ -61,13 +65,14 @@ export function crearConsultaPlaces({
 }: OpcionesCliente = {}): ConsultarPlaces {
   const clave = typeof apiKey === "string" ? apiKey.trim() : "";
 
-  return async function consultarPlaces({ lat, lng, categorias, radio, limite }) {
+  return async function consultarPlaces({ lat, lng, categorias, radio, limite, area }) {
     if (!clave) {
       throw new ErrorApi(500, "SERVICIO_NO_CONFIGURADO", "El servicio de lugares no está configurado.");
     }
     //Clave determinista en Redis basada en coordenadas
     const categoriasOrdenadas = [...categorias].sort().join(",");
-    const claveCache = `cache:geoapify:places:${lat.toFixed(3)}:${lng.toFixed(3)}:${radio}:${limite}:${categoriasOrdenadas}`;
+    const zona = area ? `area:${area}` : `${lat.toFixed(3)}:${lng.toFixed(3)}:${radio}`;
+    const claveCache = `cache:geoapify:places:${zona}:${limite}:${categoriasOrdenadas}`;
 
     try {
       const datosEnCache = await cache?.get(claveCache);
@@ -83,7 +88,7 @@ export function crearConsultaPlaces({
     const url = new URL(URL_PLACES);
     url.search = new URLSearchParams({
       categories: categorias.join(","),
-      filter: `circle:${longitud},${latitud},${radio}`,
+      filter: area ? `place:${area}` : `circle:${longitud},${latitud},${radio}`,
       bias: `proximity:${longitud},${latitud}`,
       limit: String(limite),
       lang: "es",
@@ -138,6 +143,6 @@ export function crearClienteGeoapify(opciones: OpcionesCliente = {}): BuscarLuga
   const consultarPlaces = crearConsultaPlaces(opciones);
 
   return async function buscarLugares(consulta) {
-    return transformarLugares(await consultarPlaces(consulta)).slice(0, consulta.limite);
+    return transformarLugares(await consultarPlaces(consulta), consulta.conImportancia).slice(0, consulta.limite);
   };
 }

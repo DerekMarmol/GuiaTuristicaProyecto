@@ -6,7 +6,6 @@ import { detectarTransporte } from "../src/utils/detectarTransporte.ts";
 const INICIO = { lat: 15.4702, lng: -90.3735 };
 const METROS_POR_GRADO = 111_320;
 
-// Lecturas cada segundo avanzando hacia el norte a la velocidad indicada, sin coords.speed.
 function recorrido(metrosPorSegundo: number, segundos: number, precisionMetros = 10, desvio = (_i: number) => 0): LecturaGps[] {
   return Array.from({ length: segundos + 1 }, (_, i) => ({
     lat: INICIO.lat + (metrosPorSegundo * i + desvio(i)) / METROS_POR_GRADO,
@@ -68,7 +67,6 @@ describe("velocidad real en carro (GUI-119)", () => {
   }
 
   test("con ruido en las posiciones se mantiene cerca de la velocidad real", () => {
-    // Desvío determinista de hasta ±8 m, como el que da un GPS con 15 m de margen.
     const desvio = (i: number) => (((i * 37) % 17) - 8);
     const { velocidadKmh } = ultimaEstimacion(recorrido(kmh(40), 20, 15, desvio));
     assert.ok(Math.abs(velocidadKmh! - 40) <= 4, `marcó ${velocidadKmh?.toFixed(1)} km/h`);

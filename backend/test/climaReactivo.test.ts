@@ -12,7 +12,7 @@ import { crearApp, type OpcionesApp } from "../src/app";
 const CLAVE_CLIMA = "clave-clima-de-prueba-no-real";
 const CLAVE_LUGARES = "clave-lugares-de-prueba-no-real";
 const RUTA = "/api/itinerarios/clima-reactivo";
-const INICIO = Date.parse("2026-11-20T16:00:00Z"); // 10:00 en Guatemala (UTC-6)
+const INICIO = Date.parse("2026-11-20T16:00:00Z"); 
 const FECHA = "2026-11-20";
 
 interface Llamada {
@@ -76,7 +76,6 @@ function ruta(paradas: ParadaOpt[], hora: number) {
   return { orden: paradas.map((p) => p.id), viable: true, distancia_total_km: paradas.length, duracion_traslado_minutos: paradas.length * 10, visitas };
 }
 
-// Imita /reoptimize-clima: conserva el orden y usa el primer candidato de cada grupo.
 function optimizadorSimulado(cuerpo: Record<string, unknown>) {
   const paradas = cuerpo.paradas as ParadaOpt[];
   const grupos = cuerpo.sustituciones as { parada_id: string; candidatos: ParadaOpt[] }[];

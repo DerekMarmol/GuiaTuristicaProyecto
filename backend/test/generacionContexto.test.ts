@@ -8,7 +8,6 @@ import type { ClienteLLM } from "../src/ai/cliente";
 import type { ConsultarClima } from "../src/clima/servicio";
 import type { SolicitudGeneracion } from "../src/validacion/generacion";
 
-// Jalapa: centro del destino y un punto de partida a las afueras (Los Pinos).
 const JALAPA = { nombre: "Jalapa, JA, Guatemala", lat: 14.6344, lng: -89.9898, zonaHoraria: "America/Guatemala" };
 const LOS_PINOS = { lat: 14.6105, lng: -89.995 };
 
@@ -28,9 +27,7 @@ function lugar(id: string, lat: number, lng: number, categorias: string[], entor
 }
 
 const TIENDAS = [
-  // La más representativa de Compras (primera categoría) queda en el centro…
   lugar("Centro comercial del centro", 14.6344, -89.9898, ["commercial.shopping_mall"]),
-  // …y un mercado queda junto al punto de partida.
   lugar("Mercado de Los Pinos", 14.611, -89.9945, ["commercial.marketplace"]),
   lugar("Tienda de recuerdos", 14.636, -89.988, ["commercial.gift_and_souvenir"]),
 ];
@@ -88,7 +85,6 @@ const solicitud = (cambios: Partial<SolicitudGeneracion> = {}): SolicitudGenerac
 
 describe("itinerario según el momento en que se genera (GUI-112)", () => {
   test("si el viaje es hoy, el primer día empieza a la hora actual y los siguientes a las 09:00", async () => {
-    // 20:00 UTC = 14:00 en Guatemala.
     const generar = crearGenerador({ catalogo: [...TIENDAS, ...MAS_TIENDAS], ahora: () => new Date("2026-11-10T20:00:00Z") });
 
     const plan = await generar(solicitud());

@@ -886,7 +886,6 @@ describe("GET /api/clima/pronostico - errores del proveedor", () => {
     simular((_url, opciones) => {
       const actual = senalDe(opciones);
       senal = actual;
-      // Respuesta parcial: solo implementa lo que el cliente necesita leer.
       return {
         ok: true,
         status: 200,

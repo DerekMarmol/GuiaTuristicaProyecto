@@ -4,7 +4,6 @@ import { ErrorGeneracionIA, generarItinerarios } from "../src/ai/generarItinerar
 import type { ClienteLLM } from "../src/ai/cliente";
 import { LUGARES_PRUEBA, VIAJE_PRUEBA } from "../src/ai/scripts/lugaresPrueba";
 
-// Errores como los que devuelve el SDK de Gemini (el código viene en el mensaje JSON).
 const errorGemini = (codigo: number, estado: string) =>
   new Error(JSON.stringify({ error: { code: codigo, message: "…", status: estado } }));
 

@@ -13,7 +13,6 @@ async function probarGuardarPlan() {
     contrasena: "Password123!",
   };
 
-  // Es el proceso de Registro e inicio de sesión para obtener el JWT
   await app.inject({ method: "POST", url: "/api/auth/registro", payload: usuario });
   const loginRes = await app.inject({
     method: "POST",

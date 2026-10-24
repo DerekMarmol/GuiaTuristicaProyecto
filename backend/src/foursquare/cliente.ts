@@ -54,6 +54,10 @@ const CATEGORIAS_POR_INTERES: Record<string, string[]> = {
 // Categorías de uso diario que no son un paseo de compras aunque estén en Retail (super, farmacia…).
 const CATEGORIAS_DE_USO_DIARIO = /supermarket|grocery|convenience|pharmac|drugstore|hardware|automotive|auto parts|mobile phone|electronics|furniture|discount|gas station|bank|hospital|office/i;
 
+// Hoteles y resorts junto a un lago o una playa traen también la categoría «Beach» o «Lake»: no son una
+// parada del recorrido (el hospedaje se recomienda aparte), así que se descartan aunque otra categoría encaje.
+const CATEGORIAS_DE_HOSPEDAJE = /hotel|resort|motel|hostel|lodg|\binn\b|bed (and|&) breakfast|vacation rental|guest ?house/i;
+
 // Nombres de categoría de Foursquare que sí le interesan a un viajero con ese interés.
 const CATEGORIAS_ACEPTADAS: Record<string, RegExp> = {
   Compras: /mall|shopping|market|mercado|souvenir|gift|craft|artesan|clothing|apparel|boutique|shoe|jewelry|bookstore|department|antique|textile|candy|chocolate|coffee roaster/i,
@@ -125,6 +129,7 @@ function aLugar(resultado: unknown, interes: string): LugarFoursquare | null {
   const nombresCategorias = Array.isArray(resultado.categories)
     ? resultado.categories.flatMap((c) => (esObjeto(c) && texto(c.name) ? [texto(c.name) as string] : []))
     : [];
+  if (nombresCategorias.some((nombre) => CATEGORIAS_DE_HOSPEDAJE.test(nombre))) return null;
   const aceptadas = CATEGORIAS_ACEPTADAS[interes];
   if (aceptadas && !nombresCategorias.some((nombre) => aceptadas.test(nombre) && !CATEGORIAS_DE_USO_DIARIO.test(nombre))) {
     return null;

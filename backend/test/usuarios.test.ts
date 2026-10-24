@@ -19,11 +19,9 @@ async function probarUsuarios() {
     contrasena: "Password123!",
   };
 
-  // 1. Registrar ambos usuarios
   await app.inject({ method: "POST", url: "/api/auth/registro", payload: usuarioPrincipal });
   await app.inject({ method: "POST", url: "/api/auth/registro", payload: usuarioSecundario });
 
-  // 2. Iniciar sesión con el usuario principal
   const resLogin = await app.inject({
     method: "POST",
     url: "/api/auth/login",
@@ -31,7 +29,6 @@ async function probarUsuarios() {
   });
   const token = resLogin.json().token;
 
-  // 3. Probar GET /api/usuarios/perfil SIN token (Debe dar 401)
   console.log("1. Probando GET /api/usuarios/perfil sin token...");
   const resSinAuth = await app.inject({
     method: "GET",
@@ -39,7 +36,6 @@ async function probarUsuarios() {
   });
   console.log(`-> Status: ${resSinAuth.statusCode} (esperado: 401)`);
 
-  // 4. Probar GET /api/usuarios/perfil CON token (Debe dar 200 y NO exponer contraseña)
   console.log("\n2. Probando GET /api/usuarios/perfil con token...");
   const resPerfil = await app.inject({
     method: "GET",
@@ -51,7 +47,6 @@ async function probarUsuarios() {
   console.log("-> Datos recibidos:", datosUsuario);
   console.log("-> ¿Expone contraseña?:", "contrasena" in datosUsuario ? "❌ SÍ (Error)" : "✅ NO (Correcto)");
 
-  // 5. Probar PUT con un correo ya en uso por otro usuario (Debe dar 400)
   console.log("\n3. Probando PUT /api/usuarios/perfil con correo duplicado...");
   const resDuplicado = await app.inject({
     method: "PUT",
@@ -62,7 +57,6 @@ async function probarUsuarios() {
   console.log(`-> Status: ${resDuplicado.statusCode} (esperado: 400)`);
   console.log("-> Mensaje:", resDuplicado.json().mensaje);
 
-  // 6. Probar PUT actualizando nombre y correo válidos (Debe dar 200)
   console.log("\n4. Probando PUT /api/usuarios/perfil con datos válidos...");
   const resActualizar = await app.inject({
     method: "PUT",
